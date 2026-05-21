@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from workflow_core import create_intake, promote_to_task
+from workflow_core import cleanup_completed_task, create_intake, list_unfinished_tasks, promote_to_task
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,6 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("goal")
     promote.add_argument("--type", default="design")
     promote.add_argument("--acceptance", action="append", default=[])
+
+    sub.add_parser("list-active", help="List all unfinished formal tasks")
+
+    cleanup = sub.add_parser("cleanup-task", help="Clean up a completed task and remove its runtime references")
+    cleanup.add_argument("task_id", help="Task ID to clean up (must be status 'done')")
+
     return parser
 
 
@@ -37,6 +43,10 @@ def main() -> int:
     elif args.command == "promote":
         criteria = args.acceptance or ["The formal task package exists and can be executed."]
         result = promote_to_task(root, args.intake_id, args.title, args.goal, args.type, criteria)
+    elif args.command == "list-active":
+        result = {"tasks": list_unfinished_tasks(root)}
+    elif args.command == "cleanup-task":
+        result = cleanup_completed_task(root, args.task_id)
     else:
         raise RuntimeError(f"Unsupported command: {args.command}")
     print(json.dumps(result, ensure_ascii=False))

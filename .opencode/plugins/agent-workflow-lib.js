@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 export const workflowRoot = (directory) => join(directory, ".agent-workflow")
@@ -24,6 +24,31 @@ export const getActiveTask = (directory) => {
 export const readTaskJson = (directory, taskId) => {
   const path = join(workflowRoot(directory), "tasks", "active", taskId, "task.json")
   return existsSync(path) ? readJson(path) : null
+}
+
+export const listUnfinishedTasks = (directory) => {
+  const activeDir = join(workflowRoot(directory), "tasks", "active")
+  if (!existsSync(activeDir)) return []
+  try {
+    const entries = readdirSync(activeDir, { withFileTypes: true })
+    const tasks = []
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const taskPath = join(activeDir, entry.name, "task.json")
+      const task = readJson(taskPath)
+      if (!task || task.status === "done") continue
+      tasks.push({
+        id: task.id || entry.name,
+        title: task.title || "",
+        status: task.status || "unknown",
+        current_step: task.current_step || null,
+        path: join(activeDir, entry.name),
+      })
+    }
+    return tasks
+  } catch {
+    return []
+  }
 }
 
 export const buildWorkflowBreadcrumb = ({ taskId, status }) => {
@@ -72,4 +97,24 @@ export const readTaskContext = (directory, taskId, agentName) => {
   }
 
   return parts.join("\n\n---\n\n")
+}
+
+export const getRequiredContextFiles = (agentName) => {
+  switch (agentName) {
+    case "workflow-implement":
+      return ["context.md", "implement.md"]
+    case "workflow-check":
+      return ["context.md", "verify.md"]
+    case "workflow-docs":
+      return ["context.md", "decisions.md"]
+    case "workflow-research":
+      return ["context.md"]
+    default:
+      return []
+  }
+}
+
+export const getMissingRequiredContextFiles = (directory, taskId, agentName) => {
+  const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
+  return getRequiredContextFiles(agentName).filter((file) => !existsSync(join(taskDir, file)))
 }

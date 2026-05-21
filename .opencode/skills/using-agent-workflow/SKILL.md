@@ -28,6 +28,7 @@ Do not expose internal workflow mechanics to the user unless they are explicitly
 - Scripts are the write path for `.agent-workflow/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
 - Long-context-consumption work belongs to subagents. The main agent should not perform broad code reading, large multi-file edits, or extended verification inline when a `workflow-*` subagent can do it from a formal task package.
+- Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
 
 ## Skill Routing
 
@@ -43,6 +44,7 @@ Do not expose internal workflow mechanics to the user unless they are explicitly
 - Main-session plugins should not inject workflow text when there is no active unfinished formal task.
 - Active unfinished tasks get only a short `<workflow-state>` breadcrumb.
 - Task context is injected only for supported `workflow-*` subagents.
+- Execution must not start until the current task context files exist. Use `python3 .agent-workflow/scripts/task.py --root . list-active` to inspect unfinished tasks before dispatch.
 - Restart OpenCode after changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`.
 
 ## Commands
@@ -50,3 +52,4 @@ Do not expose internal workflow mechanics to the user unless they are explicitly
 - Python tests: `python3 -m unittest tests.agent_workflow.test_workflow_core -v`
 - OpenCode plugin tests: `node --test tests/agent_workflow/test_opencode_plugins.mjs`
 - Package config check: `python3 -m json.tool .opencode/package.json`
+- List unfinished tasks: `python3 .agent-workflow/scripts/task.py --root . list-active`

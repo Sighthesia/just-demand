@@ -10,15 +10,18 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 - Inject as little as possible into the main session: no active unfinished formal task means no workflow prompt injection.
 - Inject rich context only for the subagent actively executing a formal task.
 - Long-context-consumption work must be delegated to subagents. If a task needs broad code reading, multi-file implementation, extended verification, or any context that would bloat the main session, the main agent should shape and dispatch it instead of doing it inline.
+- Before modifying code, or before dispatching any subagent that may modify or verify code, there must be a current formal task and its required task context files must already exist.
 
 ## Ideal Workflow
 
 1. User proposes a goal or problem.
 2. Main agent clarifies the need in user language and records durable decisions or deferred options when needed.
 3. Once direction is confirmed, promote intake to a formal task package under `.agent-workflow/tasks/active/`.
-4. Main agent dispatches focused `workflow-*` subagents with injected task context. Long-context implementation, research, and verification should happen here, not inline in the main session.
-5. `workflow-check` verifies against the task brief and active validation revision before completion is claimed.
-6. Main agent summarizes outcomes, remaining risks, and any durable memory updates.
+4. Before execution, inspect all unfinished formal tasks to avoid cross-task conflicts.
+5. Ensure the current task package has the required context files for the intended subagent.
+6. Main agent dispatches focused `workflow-*` subagents with injected task context. Long-context implementation, research, and verification should happen here, not inline in the main session.
+7. `workflow-check` verifies against the task brief and active validation revision before completion is claimed.
+8. Main agent summarizes outcomes, remaining risks, and any durable memory updates.
 
 ## Commands
 
@@ -28,6 +31,8 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 - CLI smoke test: `tmpdir=$(mktemp -d) && python3 .agent-workflow/scripts/task.py --root "$tmpdir" create-intake "Agent workflow" "Build workflow" --session session-main`
 - Create intake manually: `python3 .agent-workflow/scripts/task.py --root . create-intake "<title>" "<raw request>" --session <session-id>`
 - Promote intake manually: `python3 .agent-workflow/scripts/task.py --root . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
+- List unfinished tasks: `python3 .agent-workflow/scripts/task.py --root . list-active`
+- Clean up completed task: `python3 .agent-workflow/scripts/task.py --root . cleanup-task <task-id>`
 
 Run Python and Node tests after changing `.agent-workflow/scripts/`, `.opencode/plugins/`, `.opencode/agent/`, or `.opencode/skills/`.
 
@@ -48,6 +53,9 @@ Run Python and Node tests after changing `.agent-workflow/scripts/`, `.opencode/
 - Main-session plugins should not inject anything when there is no active unfinished formal task.
 - `agent-workflow-state.js` injects only a short `<workflow-state>` for active tasks whose status is not `done`.
 - `agent-workflow-subagent-context.js` injects task context only when dispatching supported `workflow-*` subagents.
+- `workflow-implement` requires `context.md` and `implement.md`; `workflow-check` requires `context.md` and `verify.md`; `workflow-docs` requires `context.md` and `decisions.md`; `workflow-research` requires `context.md`.
+- If required task context files are missing, implementation or verification must not proceed. The plugin intentionally injects a blocking notice instead of silent fallback.
+- Before implementation or subagent dispatch, use `python3 .agent-workflow/scripts/task.py --root . list-active` to inspect all unfinished tasks and avoid cross-task conflicts.
 - `agent-workflow-session-start.js` intentionally does not inject long bootstrap/rules text.
 - Restart OpenCode after changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`.
 

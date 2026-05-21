@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -406,6 +407,33 @@ def task_path(root: Path, task_id: str) -> Path:
     return tasks_dir(root) / "active" / task_id
 
 
+def list_unfinished_tasks(root: Path) -> list[dict[str, Any]]:
+    active_dir = tasks_dir(root) / "active"
+    if not active_dir.exists():
+        return []
+
+    tasks = []
+    for task_dir in sorted(active_dir.iterdir(), key=lambda path: path.name):
+        if not task_dir.is_dir():
+            continue
+        task_json = task_dir / "task.json"
+        if not task_json.is_file():
+            continue
+        task = read_json(task_json)
+        if task.get("status") == "done":
+            continue
+        tasks.append(
+            {
+                "id": task.get("id", task_dir.name),
+                "title": task.get("title", ""),
+                "status": task.get("status", "unknown"),
+                "current_step": task.get("current_step", ""),
+                "path": str(task_dir),
+            }
+        )
+    return tasks
+
+
 def update_task(root: Path, task_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     tpath = task_path(root, task_id) / "task.json"
     task = read_json(tpath)
@@ -413,6 +441,67 @@ def update_task(root: Path, task_id: str, updates: dict[str, Any]) -> dict[str, 
     task["updated_at"] = utc_now()
     write_json_atomic(tpath, task)
     return task
+
+
+def cleanup_completed_task(root: Path, task_id: str) -> dict[str, Any]:
+    """Remove a completed task and clean up all runtime references."""
+    ensure_workspace(root)
+
+    active_dir = tasks_dir(root) / "active"
+    task_dir = active_dir / task_id
+    task_json_path = task_dir / "task.json"
+
+    if not task_json_path.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task_data = read_json(task_json_path)
+    if task_data.get("status") != "done":
+        raise RuntimeError(
+            f"Cannot cleanup task {task_id}: status is '{task_data.get('status')}', expected 'done'"
+        )
+
+    # 1. Delete the entire task directory
+    shutil.rmtree(task_dir)
+
+    # 2. Remove from workspace state
+    state_path = workspace_dir(root) / "state.json"
+    state = read_json(state_path)
+
+    active_ids = state.get("active_task_ids", [])
+    if task_id in active_ids:
+        active_ids.remove(task_id)
+    state["active_task_ids"] = active_ids
+
+    if state.get("current_task_id") == task_id:
+        state["current_task_id"] = None
+
+    # 3. Clear current_task_id in active_sessions
+    for session in state.get("active_sessions", {}).values():
+        if session.get("current_task_id") == task_id:
+            session["current_task_id"] = None
+
+    state["updated_at"] = utc_now()
+    write_json_atomic(state_path, state)
+
+    # 4. Remove locks where entity_id matches task_id
+    locks_file = locks_path(root)
+    locks_data = read_json(locks_file)
+    before_count = len(locks_data.get("locks", []))
+    locks_data["locks"] = [
+        lk for lk in locks_data.get("locks", []) if lk.get("entity_id") != task_id
+    ]
+    write_json_atomic(locks_file, locks_data)
+
+    # 5. Append workspace event
+    append_workspace_event(
+        root,
+        "task_cleaned_up",
+        "task",
+        task_id,
+        f"Cleaned up completed task {task_id}",
+    )
+
+    return {"task_id": task_id, "cleaned": True}
 
 
 # ---------------------------------------------------------------------------

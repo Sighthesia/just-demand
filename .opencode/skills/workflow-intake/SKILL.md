@@ -36,6 +36,8 @@ Typical triggers:
 - extended verification or review
 - research that would produce long notes or comparisons
 
+Before any later implementation or verification phase begins, the promoted task must have its current task context files written. The main agent must not improvise by directly editing code from intake context alone.
+
 ## High-Detail Requests
 
 For detailed UI or interaction requests, do not restart discovery. Use this pattern:

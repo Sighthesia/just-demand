@@ -10,7 +10,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = REPO_ROOT / ".agent-workflow" / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from workflow_core import create_intake, ensure_workspace, promote_to_task, read_json, task_event_path
+from workflow_core import (
+    acquire_lock,
+    cleanup_completed_task,
+    complete_verification,
+    create_intake,
+    create_validation_revision,
+    ensure_workspace,
+    list_unfinished_tasks,
+    locks_path,
+    promote_to_task,
+    read_json,
+    start_execution,
+    task_event_path,
+    workspace_dir,
+)
 
 
 class WorkflowCoreTests(unittest.TestCase):
@@ -214,6 +228,125 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("intake_id", result.stdout)
             state = read_json(root / ".agent-workflow" / "workspace" / "state.json")
             self.assertIsNotNone(state["current_intake_id"])
+
+    def test_list_unfinished_tasks_and_cli_list_active(self):
+        import json as std_json
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake_a = create_intake(root, "Task A", "First", "session-main")
+            intake_b = create_intake(root, "Task B", "Second", "session-main")
+            task_a = promote_to_task(root, intake_a["intake_id"], "Task A", "Goal A", "design", ["A"])
+            task_b = promote_to_task(root, intake_b["intake_id"], "Task B", "Goal B", "design", ["B"])
+
+            tasks = list_unfinished_tasks(root)
+            task_ids = {task["id"] for task in tasks}
+            self.assertIn(task_a["task_id"], task_ids)
+            self.assertIn(task_b["task_id"], task_ids)
+
+            script = REPO_ROOT / ".agent-workflow" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "list-active"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = std_json.loads(result.stdout)
+            self.assertIn("tasks", payload)
+            listed_ids = {task["id"] for task in payload["tasks"]}
+            self.assertEqual(listed_ids, task_ids)
+
+    def test_cleanup_completed_task_removes_dir_and_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Cleanup test", "Build cleanup", "s1")
+            promoted = promote_to_task(root, intake["intake_id"], "Cleanup test", "Build cleanup", "design", ["Cleanup works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Cleanup test.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["workflow-implement"])
+            complete_verification(root, task_id, "passed", "All done")
+
+            state = read_json(workspace_dir(root) / "state.json")
+            self.assertIn(task_id, state["active_task_ids"])
+            self.assertEqual(state["current_task_id"], task_id)
+
+            acquire_lock(root, scope="task", entity_id=task_id, owner="s1", purpose="test-lock")
+            locks_data = read_json(locks_path(root))
+            self.assertTrue(any(lk["entity_id"] == task_id for lk in locks_data["locks"]))
+
+            result = cleanup_completed_task(root, task_id)
+            self.assertTrue(result["cleaned"])
+            self.assertEqual(result["task_id"], task_id)
+
+            task_dir = root / ".agent-workflow" / "tasks" / "active" / task_id
+            self.assertFalse(task_dir.exists())
+
+            state = read_json(workspace_dir(root) / "state.json")
+            self.assertNotIn(task_id, state["active_task_ids"])
+            self.assertIsNone(state["current_task_id"])
+
+            locks_data = read_json(locks_path(root))
+            self.assertFalse(any(lk["entity_id"] == task_id for lk in locks_data["locks"]))
+
+            events = (workspace_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            event_types = [json.loads(e)["type"] for e in events if e]
+            self.assertIn("task_cleaned_up", event_types)
+
+    def test_cleanup_non_done_task_raises_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Not done", "Build not done", "s1")
+            promoted = promote_to_task(root, intake["intake_id"], "Not done", "Build not done", "design", ["Not done yet"])
+            task_id = promoted["task_id"]
+
+            with self.assertRaises(RuntimeError):
+                cleanup_completed_task(root, task_id)
+
+            task_dir = root / ".agent-workflow" / "tasks" / "active" / task_id
+            self.assertTrue(task_dir.exists())
+
+    def test_cleanup_task_cli_success(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI cleanup", "Build CLI cleanup", "s1")
+            promoted = promote_to_task(root, intake["intake_id"], "CLI cleanup", "Build CLI cleanup", "design", ["CLI cleanup works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "CLI cleanup.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["workflow-implement"])
+            complete_verification(root, task_id, "passed", "All done")
+
+            script = REPO_ROOT / ".agent-workflow" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "cleanup-task", task_id],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["cleaned"])
+            self.assertEqual(payload["task_id"], task_id)
+
+    def test_cleanup_task_cli_fails_for_non_done(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI not done", "Build CLI not done", "s1")
+            promoted = promote_to_task(root, intake["intake_id"], "CLI not done", "Build CLI not done", "design", ["Not done"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / ".agent-workflow" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "cleanup-task", task_id],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

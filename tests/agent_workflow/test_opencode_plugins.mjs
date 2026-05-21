@@ -7,6 +7,8 @@ import test from "node:test"
 import {
   buildWorkflowBreadcrumb,
   getActiveTask,
+  getMissingRequiredContextFiles,
+  listUnfinishedTasks,
   readJson,
   readTaskContext,
 } from "../../.opencode/plugins/agent-workflow-lib.js"
@@ -58,6 +60,61 @@ test("readJson returns null for invalid JSON", () => {
 
 test("readJson returns null for missing file", () => {
   assert.equal(readJson("/nonexistent/path.json"), null)
+})
+
+// ---------------------------------------------------------------------------
+// lib: listUnfinishedTasks
+// ---------------------------------------------------------------------------
+test("listUnfinishedTasks returns only unfinished tasks", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const activeDir = join(root, ".agent-workflow", "tasks", "active")
+  mkdirSync(join(activeDir, "task-done"), { recursive: true })
+  writeFileSync(join(activeDir, "task-done", "task.json"), JSON.stringify({ id: "task-done", title: "Done task", status: "done" }))
+  mkdirSync(join(activeDir, "task-active"), { recursive: true })
+  writeFileSync(join(activeDir, "task-active", "task.json"), JSON.stringify({ id: "task-active", title: "Active task", status: "planning", current_step: "step1" }))
+
+  const result = listUnfinishedTasks(root)
+  assert.equal(result.length, 1)
+  assert.equal(result[0].id, "task-active")
+  assert.equal(result[0].title, "Active task")
+  assert.equal(result[0].status, "planning")
+  assert.equal(result[0].current_step, "step1")
+  assert.ok(result[0].path.includes("task-active"))
+})
+
+test("listUnfinishedTasks skips directories with missing task.json", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const activeDir = join(root, ".agent-workflow", "tasks", "active")
+  mkdirSync(join(activeDir, "task-nojson"), { recursive: true })
+  mkdirSync(join(activeDir, "task-ok"), { recursive: true })
+  writeFileSync(join(activeDir, "task-ok", "task.json"), JSON.stringify({ id: "task-ok", status: "implementing" }))
+
+  const result = listUnfinishedTasks(root)
+  assert.equal(result.length, 1)
+  assert.equal(result[0].id, "task-ok")
+})
+
+test("listUnfinishedTasks skips directories with corrupt task.json", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const activeDir = join(root, ".agent-workflow", "tasks", "active")
+  mkdirSync(join(activeDir, "task-bad"), { recursive: true })
+  writeFileSync(join(activeDir, "task-bad", "task.json"), "{not valid json")
+  mkdirSync(join(activeDir, "task-ok"), { recursive: true })
+  writeFileSync(join(activeDir, "task-ok", "task.json"), JSON.stringify({ id: "task-ok", status: "design" }))
+
+  const result = listUnfinishedTasks(root)
+  assert.equal(result.length, 1)
+  assert.equal(result[0].id, "task-ok")
+})
+
+test("listUnfinishedTasks returns empty array when active dir missing", () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".agent-workflow", "workspace"), { recursive: true })
+  const result = listUnfinishedTasks(root)
+  assert.deepEqual(result, [])
 })
 
 // ---------------------------------------------------------------------------
@@ -141,6 +198,16 @@ test("readTaskContext for workflow-docs includes deferred options", () => {
   const context = readTaskContext(root, "task-a", "workflow-docs")
   assert.match(context, /deferred options/i)
   assert.match(context, /Option X/)
+})
+
+test("getMissingRequiredContextFiles reports missing implement context files", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".agent-workflow", "tasks", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  const missing = getMissingRequiredContextFiles(root, "task-a", "workflow-implement")
+  assert.deepEqual(missing, ["implement.md"])
 })
 
 // ---------------------------------------------------------------------------
@@ -256,6 +323,20 @@ test("subagent-context injects context for supported subagent type", async () =>
   assert.match(output.args.prompt, /# Implement/)
   assert.match(output.args.prompt, /# Requested Work/)
   assert.match(output.args.prompt, /Do the work/)
+})
+
+test("subagent-context blocks supported subagent when required context files are missing", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".agent-workflow", "tasks", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task" }
+  const output = { args: { subagent_type: "workflow-implement", prompt: "Do the work" } }
+  await plugin["tool.execute.before"](input, output)
+  assert.match(output.args.prompt, /# BLOCKED/)
+  assert.match(output.args.prompt, /implement\.md/)
 })
 
 test("subagent-context skips non-supported subagent type", async () => {
