@@ -83,7 +83,7 @@ export const readTaskContext = (directory, taskId, agentName) => {
       if (facts) parts.push(`# Workspace Facts\n\n${facts}`)
       const researchDir = join(taskDir, "research")
       if (existsSync(researchDir)) {
-        parts.push(`Research output directory: ${researchDir}`)
+        parts.push("Research outputs: write any artifacts under this task's local research/ directory.")
       }
       break
     }

@@ -163,7 +163,7 @@ test("readTaskContext for workflow-research includes workspace facts", () => {
   assert.match(context, /JSONL/)
 })
 
-test("readTaskContext for workflow-research includes research output path", () => {
+test("readTaskContext for workflow-research avoids absolute research path leakage", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".agent-workflow", "tasks", "active", "task-a")
@@ -171,7 +171,9 @@ test("readTaskContext for workflow-research includes research output path", () =
   mkdirSync(join(taskDir, "research"), { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   const context = readTaskContext(root, "task-a", "workflow-research")
-  assert.match(context, /research output directory/i)
+  assert.match(context, /research outputs/i)
+  assert.match(context, /local research\//i)
+  assert.equal(context.includes(root), false)
 })
 
 // ---------------------------------------------------------------------------
@@ -319,10 +321,28 @@ test("subagent-context injects context for supported subagent type", async () =>
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /Active task: task-a/)
   assert.match(output.args.prompt, /# Injected Workflow Context/)
+  assert.match(output.args.prompt, /# Execution Rules/)
+  assert.match(output.args.prompt, /Do not call the Task tool\./)
   assert.match(output.args.prompt, /# Context/)
   assert.match(output.args.prompt, /# Implement/)
   assert.match(output.args.prompt, /# Requested Work/)
   assert.match(output.args.prompt, /Do the work/)
+})
+
+test("subagent-context avoids absolute path leakage for workflow-research", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".agent-workflow", "tasks", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "research"), { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: research topic")
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task" }
+  const output = { args: { subagent_type: "workflow-research", prompt: "Investigate this" } }
+  await plugin["tool.execute.before"](input, output)
+  assert.match(output.args.prompt, /research outputs/i)
+  assert.match(output.args.prompt, /local research\//i)
+  assert.equal(output.args.prompt.includes(root), false)
 })
 
 test("subagent-context blocks supported subagent when required context files are missing", async () => {
