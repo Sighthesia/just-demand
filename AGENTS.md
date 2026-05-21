@@ -2,6 +2,23 @@
 
 This repo is an OpenCode-first local agent workflow runtime: Python scripts own workflow state, OpenCode plugins inject lightweight context, and project skills hold the detailed workflow rules.
 
+## Design Philosophy
+
+- Keep the user focused on goals, constraints, preferences, and final decisions, not workflow mechanics.
+- Use scripts for machine state, plugins for lightweight injection, and skills for detailed process rules.
+- Share durable facts and decisions through files, not long chat history.
+- Inject as little as possible into the main session: no active unfinished formal task means no workflow prompt injection.
+- Inject rich context only for the subagent actively executing a formal task.
+
+## Ideal Workflow
+
+1. User proposes a goal or problem.
+2. Main agent clarifies the need in user language and records durable decisions or deferred options when needed.
+3. Once direction is confirmed, promote intake to a formal task package under `.agent-workflow/tasks/active/`.
+4. Main agent dispatches focused `workflow-*` subagents with injected task context.
+5. `workflow-check` verifies against the task brief and active validation revision before completion is claimed.
+6. Main agent summarizes outcomes, remaining risks, and any durable memory updates.
+
 ## Commands
 
 - Python workflow tests: `python3 -m unittest tests.agent_workflow.test_workflow_core -v`
