@@ -8,7 +8,9 @@ export default async ({ directory }) => {
       if (input?.agent && String(input.agent).startsWith("workflow-")) return
       const taskId = getActiveTask(directory)
       const task = taskId ? readTaskJson(directory, taskId) : null
+      if (!task || task.status === "done") return
       const breadcrumb = buildWorkflowBreadcrumb({ taskId, status: task?.status || "none" })
+      if (!breadcrumb) return
       const parts = output?.parts || []
       const textPart = parts.find((part) => part.type === "text")
       if (textPart) textPart.text = `${breadcrumb}\n\n${textPart.text || ""}`
