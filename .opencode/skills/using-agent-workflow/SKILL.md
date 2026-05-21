@@ -27,6 +27,7 @@ Do not expose internal workflow mechanics to the user unless they are explicitly
 - Subagents execute focused work from injected task context.
 - Scripts are the write path for `.agent-workflow/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
+- Long-context-consumption work belongs to subagents. The main agent should not perform broad code reading, large multi-file edits, or extended verification inline when a `workflow-*` subagent can do it from a formal task package.
 
 ## Skill Routing
 

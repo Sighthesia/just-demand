@@ -9,13 +9,14 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 - Share durable facts and decisions through files, not long chat history.
 - Inject as little as possible into the main session: no active unfinished formal task means no workflow prompt injection.
 - Inject rich context only for the subagent actively executing a formal task.
+- Long-context-consumption work must be delegated to subagents. If a task needs broad code reading, multi-file implementation, extended verification, or any context that would bloat the main session, the main agent should shape and dispatch it instead of doing it inline.
 
 ## Ideal Workflow
 
 1. User proposes a goal or problem.
 2. Main agent clarifies the need in user language and records durable decisions or deferred options when needed.
 3. Once direction is confirmed, promote intake to a formal task package under `.agent-workflow/tasks/active/`.
-4. Main agent dispatches focused `workflow-*` subagents with injected task context.
+4. Main agent dispatches focused `workflow-*` subagents with injected task context. Long-context implementation, research, and verification should happen here, not inline in the main session.
 5. `workflow-check` verifies against the task brief and active validation revision before completion is claimed.
 6. Main agent summarizes outcomes, remaining risks, and any durable memory updates.
 
@@ -66,6 +67,8 @@ Run Python and Node tests after changing `.agent-workflow/scripts/`, `.opencode/
 - `workflow-implement`: scoped implementation only; no commits; do not modify `.agent-workflow/workspace/` except through designated workflow scripts.
 - `workflow-check`: verify against the task brief; may fix only low-risk local issues related to the current task.
 - `workflow-docs`: docs and durable notes only; no business-code changes; no commits.
+
+Main-session rule: do not consume long implementation or verification context inline when a `workflow-*` subagent can own it.
 
 ## OpenCode / Node Notes
 

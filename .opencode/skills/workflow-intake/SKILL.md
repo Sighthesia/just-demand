@@ -24,6 +24,18 @@ Clarify the user's need before exposing workflow mechanics.
 5. Summarize confirmed expectations and remaining gaps.
 6. Suggest promoting to a formal work item only after the user confirms the direction.
 
+## Routing Rule
+
+When the clarified work will consume long context, do not keep it in the main session after shaping. Promote it to a formal work item and route execution through `workflow-*` subagents.
+
+Typical triggers:
+
+- multi-file implementation
+- broad codebase reading
+- complex UI or interaction work with many states
+- extended verification or review
+- research that would produce long notes or comparisons
+
 ## High-Detail Requests
 
 For detailed UI or interaction requests, do not restart discovery. Use this pattern:

@@ -14,6 +14,7 @@ Execute formal work items through focused subagents and script-owned state.
 - Scripts are the only write path for workflow machine state under `.agent-workflow/`.
 - Plugins and agents may read state, but lifecycle transitions must go through scripts.
 - Do not dispatch implementation before the user has confirmed the direction and the task is ready.
+- Long-context implementation, research, and verification must run through subagents. The main session should coordinate and summarize, not absorb the full execution context inline.
 
 ## Subagent Routing
 
@@ -36,6 +37,6 @@ This is a fallback for context injection failures.
 
 1. Confirm active formal work item.
 2. Ensure the task package has `context.md`, `implement.md`, and `verify.md`.
-3. Dispatch the narrowest suitable subagent.
+3. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
 4. Review subagent output before moving to the next phase.
 5. Run verification before claiming completion.
