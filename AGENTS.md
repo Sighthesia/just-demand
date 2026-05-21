@@ -37,6 +37,7 @@ Run Python and Node tests after changing `.agent-workflow/scripts/`, `.opencode/
 
 | Skill | Use when |
 | --- | --- |
+| `.opencode/skills/using-agent-workflow/SKILL.md` | Start here when working in this repo, when unsure which workflow skill applies, or when changing the workflow runtime itself. |
 | `.opencode/skills/workflow-intake/SKILL.md` | The user proposes or clarifies work before a formal task exists. |
 | `.opencode/skills/workflow-execution/SKILL.md` | A formal work item is ready to execute or workflow subagents are being dispatched. |
 | `.opencode/skills/workflow-verification/SKILL.md` | Reporting completion, handling failed verification, or processing user correction feedback. |
