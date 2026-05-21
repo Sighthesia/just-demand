@@ -22,3 +22,5 @@ __pycache__/
 # Auto-generated placeholder files
 .agent-workflow/global/architecture.md
 .agent-workflow/global/glossary.md
+
+packages/
