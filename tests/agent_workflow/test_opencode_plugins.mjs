@@ -177,26 +177,29 @@ test("subagent-context factory returns hooks object with tool.execute.before", a
 })
 
 // ---------------------------------------------------------------------------
-// session-start: injects rules.md content
+// session-start: injects short skill bootstrap
 // ---------------------------------------------------------------------------
-test("session-start injects rules.md content into message", async () => {
+test("session-start injects skill bootstrap into message", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
-  await plugin["chat.message"]({}, output)
-  assert.match(output.parts[0].text, /# Rules/)
-  assert.match(output.parts[0].text, /Be concise/)
+  await plugin["chat.message"]({ sessionID: "s1" }, output)
+  assert.match(output.parts[0].text, /Agent Workflow Bootstrap/)
+  assert.match(output.parts[0].text, /workflow-intake/)
+  assert.doesNotMatch(output.parts[0].text, /Be concise/)
   assert.match(output.parts[0].text, /Hello/)
 })
 
-test("session-start does not inject when rules.md missing", async () => {
+test("session-start injects once per session", async () => {
   const root = makeRoot()
-  mkdirSync(join(root, ".agent-workflow"), { recursive: true })
+  scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
-  await plugin["chat.message"]({}, output)
-  assert.equal(output.parts[0].text, "Hello")
+  await plugin["chat.message"]({ sessionID: "s-once" }, output)
+  await plugin["chat.message"]({ sessionID: "s-once" }, output)
+  const matches = output.parts[0].text.match(/Agent Workflow Bootstrap/g) || []
+  assert.equal(matches.length, 1)
 })
 
 test("session-start skips injection for workflow- agents", async () => {
@@ -204,7 +207,7 @@ test("session-start skips injection for workflow- agents", async () => {
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
-  await plugin["chat.message"]({ agent: "workflow-implement" }, output)
+  await plugin["chat.message"]({ agent: "workflow-implement", sessionID: "s-skip" }, output)
   assert.equal(output.parts[0].text, "Hello")
 })
 
@@ -221,6 +224,18 @@ test("state injects breadcrumb with active task", async () => {
   const output = { parts: [{ type: "text", text: "Hello" }] }
   await plugin["chat.message"]({}, output)
   assert.match(output.parts[0].text, /Formal work item: task-a/)
+  assert.match(output.parts[0].text, /workflow-execution/)
+  assert.match(output.parts[0].text, /Hello/)
+})
+
+test("state suggests intake skill when no active task", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".agent-workflow", "workspace"), { recursive: true })
+  writeFileSync(join(root, ".agent-workflow", "workspace", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "Hello" }] }
+  await plugin["chat.message"]({}, output)
+  assert.match(output.parts[0].text, /workflow-intake/)
   assert.match(output.parts[0].text, /Hello/)
 })
 

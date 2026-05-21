@@ -28,9 +28,12 @@ export const readTaskJson = (directory, taskId) => {
 
 export const buildWorkflowBreadcrumb = ({ taskId, status }) => {
   if (!taskId) {
-    return "<workflow-state>\nNo formal work item is active. Clarify the user's need before suggesting a formal work item.\n</workflow-state>"
+    return "<workflow-state>\nNo formal work item is active. Load project skill `workflow-intake` before shaping new work. Use `workflow-memory` when durable decisions or deferred options appear.\n</workflow-state>"
   }
-  return `<workflow-state>\nFormal work item: ${taskId}\nStatus: ${status}\nNext: keep the user-facing conversation focused on goals, expected behavior, tradeoffs, and approval.\n</workflow-state>`
+  const skill = status === "verifying" || status === "changes_requested" || status === "done"
+    ? "workflow-verification"
+    : "workflow-execution"
+  return `<workflow-state>\nFormal work item: ${taskId}\nStatus: ${status}\nLoad project skill \`${skill}\` before continuing. Keep user-facing conversation focused on outcomes, tradeoffs, and approval.\n</workflow-state>`
 }
 
 export const readTaskContext = (directory, taskId, agentName) => {
