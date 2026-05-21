@@ -5,7 +5,6 @@ import { join } from "node:path"
 import test from "node:test"
 
 import {
-  buildWorkflowBreadcrumb,
   getActiveTask,
   getMissingRequiredContextFiles,
   listUnfinishedTasks,
@@ -117,20 +116,7 @@ test("listUnfinishedTasks returns empty array when active dir missing", () => {
   assert.deepEqual(result, [])
 })
 
-// ---------------------------------------------------------------------------
-// lib: buildWorkflowBreadcrumb
-// ---------------------------------------------------------------------------
-test("buildWorkflowBreadcrumb hides internal details", () => {
-  const text = buildWorkflowBreadcrumb({ taskId: "task-a", status: "planning" })
-  assert.match(text, /formal work item/i)
-  assert.doesNotMatch(text, /repo_map/)
-  assert.doesNotMatch(text, /JSONL/)
-})
 
-test("buildWorkflowBreadcrumb with no taskId returns empty string", () => {
-  const text = buildWorkflowBreadcrumb({ taskId: null, status: "none" })
-  assert.equal(text, "")
-})
 
 // ---------------------------------------------------------------------------
 // lib: readTaskContext - implement
@@ -267,9 +253,9 @@ test("session-start skips injection for workflow- agents", async () => {
 })
 
 // ---------------------------------------------------------------------------
-// state: injects breadcrumb into message
+// state: main-session does not inject workflow state
 // ---------------------------------------------------------------------------
-test("state injects breadcrumb with active task", async () => {
+test("state does not inject workflow state into main-session messages", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".agent-workflow", "tasks", "active", "task-a")
@@ -278,9 +264,7 @@ test("state injects breadcrumb with active task", async () => {
   const plugin = await stateFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
   await plugin["chat.message"]({}, output)
-  assert.match(output.parts[0].text, /Formal work item: task-a/)
-  assert.match(output.parts[0].text, /Status: planning/)
-  assert.match(output.parts[0].text, /Hello/)
+  assert.equal(output.parts[0].text, "Hello")
 })
 
 test("state does not inject when no active task", async () => {

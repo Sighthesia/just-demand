@@ -51,7 +51,7 @@ Run Python and Node tests after changing `.agent-workflow/scripts/`, `.opencode/
 
 - Do not hand-edit `.agent-workflow/workspace/state.json`, `locks.json`, or event logs except through `.agent-workflow/scripts/` code.
 - Main-session plugins should not inject anything when there is no active unfinished formal task.
-- `agent-workflow-state.js` injects only a short `<workflow-state>` for active tasks whose status is not `done`.
+- `agent-workflow-state.js` does not inject any `<workflow-state>` into main-session messages. Tasks should be inspected explicitly via list-active scripts.
 - `agent-workflow-subagent-context.js` injects task context only when dispatching supported `workflow-*` subagents.
 - `workflow-implement` requires `context.md` and `implement.md`; `workflow-check` requires `context.md` and `verify.md`; `workflow-docs` requires `context.md` and `decisions.md`; `workflow-research` requires `context.md`.
 - If required task context files are missing, implementation or verification must not proceed. The plugin intentionally injects a blocking notice instead of silent fallback.

@@ -75,7 +75,7 @@ Scripts are the source of truth for state mutation. They create tasks, build con
 
 ### OpenCode Plugins
 
-Plugins adapt the file-backed workflow into OpenCode runtime behavior. They should inject context and breadcrumbs, not make product decisions.
+Plugins adapt the file-backed workflow into OpenCode runtime behavior. They should inject only the context needed for the current execution path, not make product decisions.
 
 ## Directory Structure
 
@@ -916,9 +916,7 @@ It skips subagent turns to avoid drowning subagent-specific context.
 
 ### Workflow State Plugin
 
-Injects a short breadcrumb on each main-agent user turn. The breadcrumb reminds the main agent of the current phase and next expected action.
-
-It should be short and should not duplicate full context.
+Does not inject `<workflow-state>` into main-agent turns. Main-session task awareness should come from explicit `list-active` script checks before execution, not per-turn prompt injection.
 
 ### Subagent Context Plugin
 

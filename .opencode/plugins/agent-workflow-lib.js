@@ -51,10 +51,7 @@ export const listUnfinishedTasks = (directory) => {
   }
 }
 
-export const buildWorkflowBreadcrumb = ({ taskId, status }) => {
-  if (!taskId) return ""
-  return `<workflow-state>\nFormal work item: ${taskId}\nStatus: ${status}\n</workflow-state>`
-}
+
 
 export const readTaskContext = (directory, taskId, agentName) => {
   const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)

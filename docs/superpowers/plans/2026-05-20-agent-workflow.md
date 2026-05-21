@@ -4,7 +4,7 @@
 
 **Goal:** Build a minimal OpenCode-first local agent workflow runtime with file-backed intake, task promotion, lifecycle state, locks, validation revisions, and context injection hooks.
 
-**Architecture:** Implement the state-changing core in Python scripts under `.agent-workflow/scripts/`, with tests using Python `unittest` and temporary directories. Implement OpenCode plugins as thin JavaScript adapters that read workflow state and inject main-session breadcrumbs or subagent context without mutating `.agent-workflow/` state.
+**Architecture:** Implement the state-changing core in Python scripts under `.agent-workflow/scripts/`, with tests using Python `unittest` and temporary directories. Implement OpenCode plugins as thin JavaScript adapters that read workflow state and inject only startup or subagent context without mutating `.agent-workflow/` state.
 
 **Tech Stack:** Python 3 standard library, Node.js standard library, OpenCode plugin files, Markdown task/context files, JSON/JSONL state.
 
@@ -18,7 +18,7 @@
 - Create `.agent-workflow/workspace/preferences.md`, `.agent-workflow/workspace/decisions.md`, `.agent-workflow/workspace/deferred_options.md`, `.agent-workflow/workspace/facts.md`, `.agent-workflow/workspace/open_questions.md`: workspace-level durable memory files.
 - Create `.opencode/plugins/agent-workflow-lib.js`: shared JavaScript helpers for reading workflow state and task files.
 - Create `.opencode/plugins/agent-workflow-session-start.js`: injects main-session startup context.
-- Create `.opencode/plugins/agent-workflow-state.js`: injects per-turn workflow breadcrumb.
+- Create `.opencode/plugins/agent-workflow-state.js`: preserves a stable no-op main-session state hook.
 - Create `.opencode/plugins/agent-workflow-subagent-context.js`: injects task package context into workflow subagent prompts.
 - Create `.opencode/agent/workflow-research.md`, `.opencode/agent/workflow-implement.md`, `.opencode/agent/workflow-check.md`, `.opencode/agent/workflow-docs.md`: OpenCode subagent definitions.
 - Create `tests/agent_workflow/test_workflow_core.py`: Python tests for workflow state and lifecycle.
@@ -840,20 +840,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { buildWorkflowBreadcrumb, getActiveTask, readTaskContext } from "../../.opencode/plugins/agent-workflow-lib.js"
+import { getActiveTask, readTaskContext } from "../../.opencode/plugins/agent-workflow-lib.js"
 
 test("getActiveTask reads current task from workspace state", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-workflow-"))
   mkdirSync(join(root, ".agent-workflow", "workspace"), { recursive: true })
   writeFileSync(join(root, ".agent-workflow", "workspace", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
   assert.equal(getActiveTask(root), "task-a")
-})
-
-test("buildWorkflowBreadcrumb hides internal details", () => {
-  const text = buildWorkflowBreadcrumb({ taskId: "task-a", status: "planning" })
-  assert.match(text, /formal work item/)
-  assert.doesNotMatch(text, /repo_map/)
-  assert.doesNotMatch(text, /JSONL/)
 })
 
 test("readTaskContext combines context and implement brief", () => {
@@ -902,13 +895,6 @@ export const readTaskJson = (directory, taskId) => {
   return existsSync(path) ? readJson(path) : null
 }
 
-export const buildWorkflowBreadcrumb = ({ taskId, status }) => {
-  if (!taskId) {
-    return "<workflow-state>\nNo formal work item is active. Clarify the user's need before suggesting a formal work item.\n</workflow-state>"
-  }
-  return `<workflow-state>\nFormal work item: ${taskId}\nStatus: ${status}\nNext: keep the user-facing conversation focused on goals, expected behavior, tradeoffs, and approval.\n</workflow-state>`
-}
-
 export const readTaskContext = (directory, taskId, agentName) => {
   const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
   const parts = []
@@ -933,24 +919,10 @@ export const readTaskContext = (directory, taskId, agentName) => {
 Create `.opencode/plugins/agent-workflow-session-start.js` with this content:
 
 ```javascript
-import { existsSync } from "node:fs"
-import { join } from "node:path"
-import { buildWorkflowBreadcrumb, getActiveTask, readTaskJson, workflowRoot } from "./agent-workflow-lib.js"
-
-export default async ({ directory }) => {
+export default async () => {
   return {
-    "chat.message": async (input, output) => {
-      if (!existsSync(workflowRoot(directory))) return
-      if (input?.agent && String(input.agent).startsWith("workflow-")) return
-      const taskId = getActiveTask(directory)
-      const task = taskId ? readTaskJson(directory, taskId) : null
-      const breadcrumb = buildWorkflowBreadcrumb({ taskId, status: task?.status || "none" })
-      const rulesPath = join(workflowRoot(directory), "global", "rules.md")
-      const rules = existsSync(rulesPath) ? `\n\n${breadcrumb}` : breadcrumb
-      const parts = output?.parts || []
-      const textPart = parts.find((part) => part.type === "text")
-      if (textPart) textPart.text = `${rules}\n\n${textPart.text || ""}`
-      else parts.unshift({ type: "text", text: rules })
+    "chat.message": async () => {
+      return
     },
   }
 }
@@ -959,21 +931,12 @@ export default async ({ directory }) => {
 Create `.opencode/plugins/agent-workflow-state.js` with this content:
 
 ```javascript
-import { existsSync } from "node:fs"
-import { buildWorkflowBreadcrumb, getActiveTask, readTaskJson, workflowRoot } from "./agent-workflow-lib.js"
-
-export default async ({ directory }) => {
+export default async () => {
   return {
-    "chat.message": async (input, output) => {
-      if (!existsSync(workflowRoot(directory))) return
-      if (input?.agent && String(input.agent).startsWith("workflow-")) return
-      const taskId = getActiveTask(directory)
-      const task = taskId ? readTaskJson(directory, taskId) : null
-      const breadcrumb = buildWorkflowBreadcrumb({ taskId, status: task?.status || "none" })
-      const parts = output?.parts || []
-      const textPart = parts.find((part) => part.type === "text")
-      if (textPart) textPart.text = `${breadcrumb}\n\n${textPart.text || ""}`
-      else parts.unshift({ type: "text", text: breadcrumb })
+    "chat.message": async () => {
+      // Main-session workflow state injection disabled.
+      // Tasks should be inspected explicitly via list-active scripts.
+      return
     },
   }
 }
