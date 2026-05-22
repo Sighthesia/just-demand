@@ -5,18 +5,18 @@ const path = require('path');
 const { execSync } = require('child_process');
 const os = require('os');
 
-const CLI = path.join(__dirname, '..', 'bin', 'agent-workflow.js');
+const CLI = path.join(__dirname, '..', 'bin', 'just-demand.js');
 const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 
 function createTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workflow-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'just-demand-test-'));
 }
 
 function rmTempDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-describe('agent-workflow init', () => {
+describe('just-demand init', () => {
   let tmpDir;
 
   before(() => {
@@ -35,10 +35,10 @@ describe('agent-workflow init', () => {
     console.log(output);
 
     // Check some key files exist
-    assert.ok(fs.existsSync(path.join(target, '.agent-workflow/scripts/workflow_core.py')));
-    assert.ok(fs.existsSync(path.join(target, '.agent-workflow/scripts/task.py')));
-    assert.ok(fs.existsSync(path.join(target, '.agent-workflow/global/rules.md')));
-    assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/agent-workflow-state.js')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/workflow_core.py')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/task.py')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand/global/rules.md')));
+    assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/just-demand-state.js')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/agent/workflow-implement.md')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/skills/workflow-execution/SKILL.md')));
     assert.ok(fs.existsSync(path.join(target, 'AGENTS.md')));
@@ -56,8 +56,8 @@ describe('agent-workflow init', () => {
 
     execSync(`node ${CLI} init ${target}`, { encoding: 'utf8' });
 
-    assert.ok(fs.existsSync(path.join(target, '.agent-workflow/scripts/task.py')));
-    assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/agent-workflow-state.js')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/task.py')));
+    assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/just-demand-state.js')));
   });
 
   it('creates the target directory when it does not exist', () => {
@@ -66,7 +66,7 @@ describe('agent-workflow init', () => {
     const output = execSync(`node ${CLI} init ${target}`, { encoding: 'utf8' });
 
     assert.ok(output.includes('created target directory'));
-    assert.ok(fs.existsSync(path.join(target, '.agent-workflow/scripts/workflow_core.py')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/workflow_core.py')));
   });
 
   it('skips existing files without overwriting', () => {
@@ -108,7 +108,7 @@ describe('agent-workflow init', () => {
     // Create .gitignore with some existing lines
     fs.writeFileSync(
       path.join(target, '.gitignore'),
-      'node_modules/\n.env\n# Workflow runtime state and task files\n.agent-workflow/tasks/\n'
+      'node_modules/\n.env\n# Workflow runtime state and task files\n.just-demand/tasks/\n'
     );
 
     const output = execSync(`node ${CLI} ${target}`, { encoding: 'utf8' });
@@ -119,11 +119,11 @@ describe('agent-workflow init', () => {
 
     // Check that missing lines were added
     const content = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
-    assert.ok(content.includes('.agent-workflow/workspace/state.json'));
-    assert.ok(content.includes('.agent-workflow/workspace/events.jsonl'));
+    assert.ok(content.includes('.just-demand/workspace/state.json'));
+    assert.ok(content.includes('.just-demand/workspace/events.jsonl'));
     // Should NOT duplicate existing line
     const lines = content.split('\n');
-    const taskLineCount = lines.filter(l => l === '.agent-workflow/tasks/').length;
+    const taskLineCount = lines.filter(l => l === '.just-demand/tasks/').length;
     assert.strictEqual(taskLineCount, 1);
   });
 
@@ -152,7 +152,7 @@ describe('agent-workflow init', () => {
     // Create a pre-existing plugin file that should be overwritten
     const pluginDir = path.join(target, '.opencode', 'plugins');
     fs.mkdirSync(pluginDir, { recursive: true });
-    const pluginPath = path.join(pluginDir, 'agent-workflow-state.js');
+    const pluginPath = path.join(pluginDir, 'just-demand-state.js');
     fs.writeFileSync(pluginPath, '// old plugin\n');
 
     const output = execSync(`node ${CLI} --force ${target}`, { encoding: 'utf8' });
@@ -160,11 +160,11 @@ describe('agent-workflow init', () => {
 
     // Should report overwrite for both files
     assert.ok(output.includes('overwrite AGENTS.md'));
-    assert.ok(output.includes('overwrite .opencode/plugins/agent-workflow-state.js'));
+    assert.ok(output.includes('overwrite .opencode/plugins/just-demand-state.js'));
 
     // AGENTS.md should be overwritten with template content
     const agentsContent = fs.readFileSync(agentsMdPath, 'utf8');
-    assert.ok(agentsContent.includes('Agent Workflow'));
+    assert.ok(agentsContent.includes('Just Demand'));
     assert.ok(!agentsContent.includes('# Existing AGENTS.md'));
 
     // Plugin file should be overwritten with template content
@@ -214,8 +214,8 @@ describe('agent-workflow init', () => {
 
     // Check that missing lines were added
     const content = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
-    assert.ok(content.includes('.agent-workflow/workspace/state.json'));
-    assert.ok(content.includes('.agent-workflow/workspace/events.jsonl'));
+    assert.ok(content.includes('.just-demand/workspace/state.json'));
+    assert.ok(content.includes('.just-demand/workspace/events.jsonl'));
     // Should NOT duplicate existing line
     const lines = content.split('\n');
     const nodeModulesCount = lines.filter(l => l === 'node_modules/').length;
@@ -233,7 +233,7 @@ describe('agent-workflow init', () => {
     assert.ok(output.includes('installer metadata written'));
 
     // Check metadata file exists
-    const metadataPath = path.join(target, '.agent-workflow', 'installer-metadata.json');
+    const metadataPath = path.join(target, '.just-demand', 'installer-metadata.json');
     assert.ok(fs.existsSync(metadataPath));
 
     // Check metadata content
@@ -254,13 +254,13 @@ describe('agent-workflow init', () => {
     console.log(output);
 
     // Check metadata content
-    const metadataPath = path.join(target, '.agent-workflow', 'installer-metadata.json');
+    const metadataPath = path.join(target, '.just-demand', 'installer-metadata.json');
     const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
     assert.strictEqual(metadata.action, 'init');
   });
 });
 
-describe('agent-workflow upgrade', () => {
+describe('just-demand upgrade', () => {
   let tmpDir;
 
   before(() => {
@@ -282,7 +282,7 @@ describe('agent-workflow upgrade', () => {
     // Create a pre-existing plugin file that should be overwritten
     const pluginDir = path.join(target, '.opencode', 'plugins');
     fs.mkdirSync(pluginDir, { recursive: true });
-    const pluginPath = path.join(pluginDir, 'agent-workflow-state.js');
+    const pluginPath = path.join(pluginDir, 'just-demand-state.js');
     fs.writeFileSync(pluginPath, '// old plugin\n');
 
     const output = execSync(`node ${CLI} upgrade ${target}`, { encoding: 'utf8' });
@@ -290,11 +290,11 @@ describe('agent-workflow upgrade', () => {
 
     // Should report overwrite for both files
     assert.ok(output.includes('overwrite AGENTS.md'));
-    assert.ok(output.includes('overwrite .opencode/plugins/agent-workflow-state.js'));
+    assert.ok(output.includes('overwrite .opencode/plugins/just-demand-state.js'));
 
     // AGENTS.md should be overwritten with template content
     const agentsContent = fs.readFileSync(agentsMdPath, 'utf8');
-    assert.ok(agentsContent.includes('Agent Workflow'));
+    assert.ok(agentsContent.includes('Just Demand'));
     assert.ok(!agentsContent.includes('# Old AGENTS.md'));
 
     // Plugin file should be overwritten with template content
@@ -344,8 +344,8 @@ describe('agent-workflow upgrade', () => {
 
     // Check that missing lines were added
     const content = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
-    assert.ok(content.includes('.agent-workflow/workspace/state.json'));
-    assert.ok(content.includes('.agent-workflow/workspace/events.jsonl'));
+    assert.ok(content.includes('.just-demand/workspace/state.json'));
+    assert.ok(content.includes('.just-demand/workspace/events.jsonl'));
     // Should NOT duplicate existing line
     const lines = content.split('\n');
     const nodeModulesCount = lines.filter(l => l === 'node_modules/').length;
@@ -358,7 +358,7 @@ describe('agent-workflow upgrade', () => {
     const output = execSync(`node ${CLI} upgrade ${target}`, { encoding: 'utf8' });
 
     assert.ok(output.includes('created target directory'));
-    assert.ok(fs.existsSync(path.join(target, '.agent-workflow/scripts/task.py')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/task.py')));
   });
 
   it('produces upgrade-specific log message', () => {
@@ -367,8 +367,8 @@ describe('agent-workflow upgrade', () => {
 
     const output = execSync(`node ${CLI} upgrade ${target}`, { encoding: 'utf8' });
 
-    assert.ok(output.includes('Upgrading agent workflow in:'));
-    assert.ok(!output.includes('Initializing agent workflow into:'));
+    assert.ok(output.includes('Upgrading Just Demand in:'));
+    assert.ok(!output.includes('Initializing Just Demand into:'));
   });
 
   it('writes installer metadata on upgrade', () => {
@@ -382,7 +382,7 @@ describe('agent-workflow upgrade', () => {
     assert.ok(output.includes('installer metadata written'));
 
     // Check metadata file exists
-    const metadataPath = path.join(target, '.agent-workflow', 'installer-metadata.json');
+    const metadataPath = path.join(target, '.just-demand', 'installer-metadata.json');
     assert.ok(fs.existsSync(metadataPath));
 
     // Check metadata content
@@ -401,7 +401,7 @@ describe('agent-workflow upgrade', () => {
 
     // First upgrade
     execSync(`node ${CLI} upgrade ${target}`, { encoding: 'utf8' });
-    const metadataPath = path.join(target, '.agent-workflow', 'installer-metadata.json');
+    const metadataPath = path.join(target, '.just-demand', 'installer-metadata.json');
     const firstMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
     const firstTimestamp = firstMetadata.timestamp;
 

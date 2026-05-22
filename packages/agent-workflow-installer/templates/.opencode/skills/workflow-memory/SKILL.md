@@ -33,6 +33,15 @@ Revisit When:
 - <trigger>
 ```
 
+## Task-Local Extraction Before Archival
+
+When a task is about to leave the active set (archived or cleaned up), extract durable knowledge first:
+
+- Copy reusable decisions from task `decisions.md` to workspace memory if they apply beyond the task.
+- Copy verified lessons to the appropriate skill or workspace memory if they are reusable.
+- Keep one-off business details, raw logs, secrets, and unverified guesses out of skills and workspace memory.
+- If extraction fails, preserve the full task package in archive rather than losing information.
+
 ## Boundaries
 
 - Do not store secrets, credentials, tokens, cookies, or private keys.

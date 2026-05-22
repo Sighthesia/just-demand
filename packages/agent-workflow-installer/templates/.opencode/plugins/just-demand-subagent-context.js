@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflowRoot } from "./agent-workflow-lib.js"
+import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflowRoot } from "./just-demand-lib.js"
 
 const SUPPORTED = new Set(["workflow-research", "workflow-implement", "workflow-check", "workflow-docs"])
 

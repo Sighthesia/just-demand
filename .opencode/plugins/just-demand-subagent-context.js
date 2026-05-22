@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflowRoot } from "./agent-workflow-lib.js"
+import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflowRoot } from "./just-demand-lib.js"
 
 const SUPPORTED = new Set(["workflow-research", "workflow-implement", "workflow-check", "workflow-docs"])
 
@@ -19,7 +19,7 @@ export default async ({ directory }) => {
       }
       const context = readTaskContext(directory, taskId, args.subagent_type)
       if (!context) return
-      args.prompt = `Active task: ${taskId}\n\n# Injected Workflow Context\n\n${context}\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
+      args.prompt = `Active task: ${taskId}\n\n# Injected Workflow Context\n\n${context}\n\n---\n\n# Execution Rules\n\nComplete the requested work in this subagent.\nDo not call the Task tool.\nDo not dispatch another subagent.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
     },
   }
 }

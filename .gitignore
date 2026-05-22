@@ -12,15 +12,15 @@ __pycache__/
 .opencode/node_modules/
 
 # Workflow runtime state and task files
-.agent-workflow/tasks/
-.agent-workflow/workspace/state.json
-.agent-workflow/workspace/events.jsonl
-.agent-workflow/workspace/locks.json
-.agent-workflow/workspace/intake/
-.agent-workflow/workspace/sessions/
+.just-demand/tasks/
+.just-demand/workspace/state.json
+.just-demand/workspace/events.jsonl
+.just-demand/workspace/locks.json
+.just-demand/workspace/intake/
+.just-demand/workspace/sessions/
 
 # Auto-generated placeholder files
-.agent-workflow/global/architecture.md
-.agent-workflow/global/glossary.md
+.just-demand/global/architecture.md
+.just-demand/global/glossary.md
 
 packages/

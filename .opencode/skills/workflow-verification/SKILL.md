@@ -22,6 +22,9 @@ verifying + passed  -> done
 verifying + failed  -> changes_requested
 verifying + blocked -> blocked
 changes_requested   -> executing after a rework plan is accepted
+debugging           -> executing after diagnosis completes
+tweaking            -> executing or done after adjustments finish
+paused              -> resuming to any active status
 ```
 
 ## Outcome-Language Correction
@@ -36,6 +39,50 @@ I want it to feel more like [target feeling].
 
 Translate that internally into implementation changes. Ask only contrast questions when the feedback is ambiguous.
 
+## Lesson Capture Gate
+
+After verification passes, check whether the task involved non-trivial debugging. If any of the following are true, load the global `capture-lessons` skill and use its pattern before final closure:
+
+- The same issue required at least three meaningful fix attempts.
+- Repeated debugging was needed to reach the root cause.
+- The root cause was non-obvious or involved a tool, framework, state machine, cache, concurrency, or permission issue.
+
+### How to route
+
+1. If the lesson is clearly reusable across modules or projects, use `capture-lessons` to create a new pattern-based skill under `.agents/skills/<pattern-name>/SKILL.md`. Update the skills index if creating a new skill.
+2. If the lesson is durable but project-local (e.g., this repo's conventions, scripts, or architecture), store it in workspace memory instead.
+3. If the lesson is task-only, write to the task's `decisions.md`.
+
+### Capture boundaries
+
+Do not create a skill for:
+
+- One-off business rules.
+- Current module-only details.
+- Unverified hypotheses, raw logs, secrets, or credentials.
+
+### Output
+
+When reporting completion, state:
+
+- Whether `capture-lessons` was used.
+- Where the lesson was stored (new skill path, workspace memory key, or task decisions).
+- If skipped, why the lesson was not reusable or global enough.
+
+If the debugging was trivial or the lesson is one-off, skip this gate.
+
+## Task Archival Expectation
+
+After verification passes and the user accepts (or the task is confirmed done), the script-owned verification path archives the task package rather than destructively cleaning it up. Extract durable decisions and verified lessons first. Preserve the full task package; do not destructively delete. Use `archive-task` only for manual retry of completed active tasks.
+
+## Checkpoint Commit Expectation
+
+After `workflow-check` passes with no unresolved findings, the main agent should create a local checkpoint commit using the safety gate in `workflow-execution`. This records that the verified slice passed engineering checks; it does not mean auto-push or irreversible product finality.
+
+- If later feedback requires a small correction, use a follow-up commit after the next clean check.
+- If the direction was fundamentally wrong, prefer a revert commit over history rewrite.
+- If feedback becomes repeatedly unstable, mark the task `debugging` or `tweaking` and pause auto-commit until another clean check passes.
+
 ## Required Report
 
 When reporting verification, include:
@@ -44,3 +91,6 @@ When reporting verification, include:
 - Pass/fail result.
 - Remaining risks.
 - Whether a new validation revision was created.
+- Whether a lesson was captured (and where).
+- Whether the task is ready for archival.
+- Whether checkpoint commit was created, skipped, or blocked, with reason.

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-export const workflowRoot = (directory) => join(directory, ".agent-workflow")
+export const workflowRoot = (directory) => join(directory, ".just-demand")
 
 export const readJson = (path) => {
   try {
@@ -51,10 +51,7 @@ export const listUnfinishedTasks = (directory) => {
   }
 }
 
-export const buildWorkflowBreadcrumb = ({ taskId, status }) => {
-  if (!taskId) return ""
-  return `<workflow-state>\nFormal work item: ${taskId}\nStatus: ${status}\n</workflow-state>`
-}
+
 
 export const readTaskContext = (directory, taskId, agentName) => {
   const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
@@ -83,7 +80,7 @@ export const readTaskContext = (directory, taskId, agentName) => {
       if (facts) parts.push(`# Workspace Facts\n\n${facts}`)
       const researchDir = join(taskDir, "research")
       if (existsSync(researchDir)) {
-        parts.push(`Research output directory: ${researchDir}`)
+        parts.push("Research outputs: write any artifacts under this task's local research/ directory.")
       }
       break
     }

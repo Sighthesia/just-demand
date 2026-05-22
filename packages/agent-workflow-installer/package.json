@@ -1,9 +1,9 @@
 {
-  "name": "agent-workflow-installer",
+  "name": "just-demand-installer",
   "version": "0.1.0",
-  "description": "Local installer for the agent workflow runtime",
+  "description": "Local installer for the Just Demand runtime",
   "bin": {
-    "agent-workflow": "./bin/agent-workflow.js"
+    "just-demand": "./bin/just-demand.js"
   },
   "scripts": {
     "sync-templates": "node scripts/sync-templates.js",
@@ -14,5 +14,8 @@
     "templates/"
   ],
   "license": "UNLICENSED",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "just-demand-installer": "file:just-demand-installer-0.1.0.tgz"
+  }
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * agent-workflow CLI
+ * Just Demand CLI
  *
- * Installs or upgrades the agent workflow runtime templates in a target workspace.
- * Templates are derived from the agent-workflow runtime in this repository:
+ * Installs or upgrades the Just Demand runtime templates in a target workspace.
+ * Templates are derived from the Just Demand runtime in this repository:
  * https://github.com/Sighthesia/on-demand
  *
  * Default behavior: skip existing files, report created/skipped.
@@ -17,13 +17,13 @@ const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 
 // Files to copy from templates to target root
 const COPY_MAP = {
-  '.agent-workflow/scripts': '.agent-workflow/scripts',
-  '.agent-workflow/global/rules.md': '.agent-workflow/global/rules.md',
-  '.agent-workflow/workspace/decisions.md': '.agent-workflow/workspace/decisions.md',
-  '.agent-workflow/workspace/deferred_options.md': '.agent-workflow/workspace/deferred_options.md',
-  '.agent-workflow/workspace/facts.md': '.agent-workflow/workspace/facts.md',
-  '.agent-workflow/workspace/open_questions.md': '.agent-workflow/workspace/open_questions.md',
-  '.agent-workflow/workspace/preferences.md': '.agent-workflow/workspace/preferences.md',
+  '.just-demand/scripts': '.just-demand/scripts',
+  '.just-demand/global/rules.md': '.just-demand/global/rules.md',
+  '.just-demand/workspace/decisions.md': '.just-demand/workspace/decisions.md',
+  '.just-demand/workspace/deferred_options.md': '.just-demand/workspace/deferred_options.md',
+  '.just-demand/workspace/facts.md': '.just-demand/workspace/facts.md',
+  '.just-demand/workspace/open_questions.md': '.just-demand/workspace/open_questions.md',
+  '.just-demand/workspace/preferences.md': '.just-demand/workspace/preferences.md',
   '.opencode/plugins': '.opencode/plugins',
   '.opencode/agent': '.opencode/agent',
   '.opencode/skills': '.opencode/skills',
@@ -46,16 +46,16 @@ const GITIGNORE_LINES = [
   '.opencode/node_modules/',
   '',
   '# Workflow runtime state and task files',
-  '.agent-workflow/tasks/',
-  '.agent-workflow/workspace/state.json',
-  '.agent-workflow/workspace/events.jsonl',
-  '.agent-workflow/workspace/locks.json',
-  '.agent-workflow/workspace/intake/',
-  '.agent-workflow/workspace/sessions/',
+  '.just-demand/tasks/',
+  '.just-demand/workspace/state.json',
+  '.just-demand/workspace/events.jsonl',
+  '.just-demand/workspace/locks.json',
+  '.just-demand/workspace/intake/',
+  '.just-demand/workspace/sessions/',
   '',
   '# Auto-generated placeholder files',
-  '.agent-workflow/global/architecture.md',
-  '.agent-workflow/global/glossary.md',
+  '.just-demand/global/architecture.md',
+  '.just-demand/global/glossary.md',
 ];
 
 function parseArgs(argv) {
@@ -168,7 +168,7 @@ function mergeOpencodePackageJson(targetRoot) {
  * Records which installer version last touched this workspace.
  */
 function writeInstallerMetadata(targetRoot, command) {
-  const metadataPath = path.join(targetRoot, '.agent-workflow', 'installer-metadata.json');
+  const metadataPath = path.join(targetRoot, '.just-demand', 'installer-metadata.json');
   const pkgPath = path.join(__dirname, '..', 'package.json');
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 
@@ -181,7 +181,7 @@ function writeInstallerMetadata(targetRoot, command) {
 
   ensureDirSync(path.dirname(metadataPath));
   fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2) + '\n');
-  console.log(`  installer metadata written to .agent-workflow/installer-metadata.json`);
+  console.log(`  installer metadata written to .just-demand/installer-metadata.json`);
 }
 
 function main() {
@@ -195,9 +195,9 @@ function main() {
   const targetRoot = path.resolve(target);
 
   if (command === 'upgrade') {
-    console.log(`Upgrading agent workflow in: ${targetRoot}`);
+    console.log(`Upgrading Just Demand in: ${targetRoot}`);
   } else {
-    console.log(`Initializing agent workflow into: ${targetRoot}${force ? ' (force)' : ''}`);
+    console.log(`Initializing Just Demand into: ${targetRoot}${force ? ' (force)' : ''}`);
   }
 
   if (!fs.existsSync(targetRoot)) {

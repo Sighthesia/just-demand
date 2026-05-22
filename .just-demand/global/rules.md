@@ -1,4 +1,4 @@
-# Agent Workflow Rules
+# Just Demand Rules
 
 - Clarify the user's need before exposing workflow mechanics.
 - Advance one user-understandable topic per turn.

@@ -7,7 +7,7 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 SCHEMA_VERSION = "1.0"
@@ -23,7 +23,7 @@ def slugify(value: str) -> str:
 
 
 def workflow_dir(root: Path) -> Path:
-    return root / ".agent-workflow"
+    return root / ".just-demand"
 
 
 def workspace_dir(root: Path) -> Path:
@@ -73,9 +73,9 @@ def ensure_workspace(root: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
     memory_files = {
-        base / "global" / "rules.md": "# Agent Workflow Rules\n\n",
-        base / "global" / "architecture.md": "# Agent Workflow Architecture\n\n",
-        base / "global" / "glossary.md": "# Agent Workflow Glossary\n\n",
+        base / "global" / "rules.md": "# Just Demand Rules\n\n",
+        base / "global" / "architecture.md": "# Just Demand Architecture\n\n",
+        base / "global" / "glossary.md": "# Just Demand Glossary\n\n",
         base / "workspace" / "preferences.md": "# Preferences\n\n",
         base / "workspace" / "decisions.md": "# Decisions\n\n",
         base / "workspace" / "deferred_options.md": "# Deferred Options\n\n",
@@ -152,6 +152,20 @@ def append_task_event(root: Path, task_id: str, event_type: str, summary: str, *
     return event
 
 
+VALID_TASK_STATUSES = frozenset({
+    "planning",
+    "executing",
+    "verifying",
+    "changes_requested",
+    "blocked",
+    "done",
+    "paused",
+    "tweaking",
+    "debugging",
+})
+MARKABLE_TASK_STATUSES = VALID_TASK_STATUSES - {"done"}
+
+
 def default_task_json(
     task_id: str,
     intake_id: str,
@@ -182,6 +196,9 @@ def default_task_json(
         "deferred_option_refs": [],
         "subtasks": [],
         "locks": [],
+        "progress": None,
+        "impact": [],
+        "last_note": None,
         "last_event_seq": 0,
         "created_at": now,
         "updated_at": now,
@@ -407,7 +424,7 @@ def task_path(root: Path, task_id: str) -> Path:
     return tasks_dir(root) / "active" / task_id
 
 
-def list_unfinished_tasks(root: Path) -> list[dict[str, Any]]:
+def list_unfinished_tasks(root: Path, verbose: bool = False) -> list[dict[str, Any]]:
     active_dir = tasks_dir(root) / "active"
     if not active_dir.exists():
         return []
@@ -422,16 +439,85 @@ def list_unfinished_tasks(root: Path) -> list[dict[str, Any]]:
         task = read_json(task_json)
         if task.get("status") == "done":
             continue
-        tasks.append(
-            {
-                "id": task.get("id", task_dir.name),
-                "title": task.get("title", ""),
-                "status": task.get("status", "unknown"),
-                "current_step": task.get("current_step", ""),
-                "path": str(task_dir),
-            }
-        )
+        entry: dict[str, Any] = {
+            "id": task.get("id", task_dir.name),
+            "title": task.get("title", ""),
+            "status": task.get("status", "unknown"),
+            "progress": task.get("progress"),
+            "impact": task.get("impact", []),
+        }
+        if verbose:
+            entry["current_step"] = task.get("current_step", "")
+            entry["path"] = str(task_dir)
+        tasks.append(entry)
     return tasks
+
+
+def mark_task(
+    root: Path,
+    task_id: str,
+    status: str,
+    *,
+    progress: int | None = None,
+    impact: list[str] | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Mark task status, progress, impact scope, and note.
+
+    Returns a compact result dict for low-token CLI output.
+    """
+    if status not in MARKABLE_TASK_STATUSES:
+        raise ValueError(
+            f"Invalid mark status '{status}'. Valid: {', '.join(sorted(MARKABLE_TASK_STATUSES))}"
+        )
+
+    if progress is not None and (progress < 0 or progress > 100):
+        raise ValueError(f"Progress must be 0-100, got {progress}")
+
+    tpath = task_path(root, task_id) / "task.json"
+    if not tpath.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(tpath)
+    before_status = task.get("status")
+
+    updates: dict[str, Any] = {"status": status}
+    if progress is not None:
+        updates["progress"] = progress
+    if impact is not None:
+        updates["impact"] = impact
+    if note is not None:
+        updates["last_note"] = note
+
+    task = update_task(root, task_id, updates)
+
+    summary_parts = [f"status={status}"]
+    if progress is not None:
+        summary_parts.append(f"progress={progress}")
+    if impact:
+        summary_parts.append(f"impact={','.join(impact)}")
+    if note:
+        summary_parts.append(f"note={note}")
+
+    append_task_event(
+        root,
+        task_id,
+        "task_marked",
+        f"Marked: {' '.join(summary_parts)}",
+        before_status=before_status,
+        after_status=status,
+    )
+    append_workspace_event(
+        root,
+        "task_marked",
+        "task",
+        task_id,
+        f"Marked {task_id}: {' '.join(summary_parts)}",
+        before_status=before_status,
+        after_status=status,
+    )
+
+    return {"ok": True, "id": task_id, "status": status, "progress": task.get("progress")}
 
 
 def update_task(root: Path, task_id: str, updates: dict[str, Any]) -> dict[str, Any]:
@@ -444,13 +530,28 @@ def update_task(root: Path, task_id: str, updates: dict[str, Any]) -> dict[str, 
 
 
 def cleanup_completed_task(root: Path, task_id: str) -> dict[str, Any]:
-    """Remove a completed task and clean up all runtime references."""
+    """Remove a completed task and clean up all runtime references.
+
+    For archived tasks, this deletes the archived task package.
+    For active tasks with status 'done', this deletes the active task package.
+    """
     ensure_workspace(root)
 
+    # Check if task is in archive first
+    archive_dir = tasks_dir(root) / "archive"
+    archive_task_dir = archive_dir / task_id
     active_dir = tasks_dir(root) / "active"
-    task_dir = active_dir / task_id
-    task_json_path = task_dir / "task.json"
+    active_task_dir = active_dir / task_id
 
+    task_dir = None
+    if archive_task_dir.is_dir():
+        task_dir = archive_task_dir
+    elif active_task_dir.is_dir():
+        task_dir = active_task_dir
+    else:
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task_json_path = task_dir / "task.json"
     if not task_json_path.is_file():
         raise FileNotFoundError(f"Task not found: {task_id}")
 
@@ -486,7 +587,6 @@ def cleanup_completed_task(root: Path, task_id: str) -> dict[str, Any]:
     # 4. Remove locks where entity_id matches task_id
     locks_file = locks_path(root)
     locks_data = read_json(locks_file)
-    before_count = len(locks_data.get("locks", []))
     locks_data["locks"] = [
         lk for lk in locks_data.get("locks", []) if lk.get("entity_id") != task_id
     ]
@@ -502,6 +602,193 @@ def cleanup_completed_task(root: Path, task_id: str) -> dict[str, Any]:
     )
 
     return {"task_id": task_id, "cleaned": True}
+
+
+def _extract_task_decisions(root: Path, task_dir: Path) -> Optional[str]:
+    """Extract meaningful decisions from task decisions.md.
+
+    Returns the extracted content if there are actual decisions beyond the header,
+    otherwise returns None.
+    """
+    decisions_path = task_dir / "decisions.md"
+    if not decisions_path.is_file():
+        return None
+
+    content = decisions_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+
+    # Skip header lines (# Decisions and blank lines after it)
+    decision_lines = []
+    header_passed = False
+    for line in lines:
+        if not header_passed:
+            if line.startswith("# "):
+                header_passed = True
+                continue
+            elif line.strip() == "":
+                continue
+            else:
+                header_passed = True
+        if header_passed:
+            decision_lines.append(line)
+
+    # Check if there's meaningful content (not just blank lines)
+    meaningful_content = "\n".join(decision_lines).strip()
+    if not meaningful_content:
+        return None
+
+    return meaningful_content
+
+
+def _extract_task_facts(root: Path, task_dir: Path) -> Optional[str]:
+    """Extract verification summary and task info as facts.
+
+    Returns a formatted string suitable for workspace facts.md,
+    or None if there's nothing useful to extract.
+    """
+    task_json_path = task_dir / "task.json"
+    if not task_json_path.is_file():
+        return None
+
+    task_data = read_json(task_json_path)
+    task_id = task_data.get("id", "")
+    title = task_data.get("title", "")
+    verification_status = task_data.get("verification_status", "")
+    status = task_data.get("status", "")
+
+    # Find verification output file
+    outputs_dir = task_dir / "outputs"
+    verification_file = None
+    if outputs_dir.is_dir():
+        for f in outputs_dir.iterdir():
+            if f.name.startswith("verification-") and f.name.endswith(".md"):
+                verification_file = f
+                break
+
+    lines = []
+    lines.append(f"- Task {task_id} ({title}) completed with status '{status}'.")
+
+    if verification_file:
+        # Read verification summary
+        vcontent = verification_file.read_text(encoding="utf-8")
+        summary = None
+        in_summary = False
+        for line in vcontent.splitlines():
+            if line.startswith("## Summary"):
+                in_summary = True
+                continue
+            if in_summary:
+                if line.startswith("##") or line.strip() == "":
+                    if summary:
+                        break
+                    continue
+                summary = line.strip()
+                break
+        if summary:
+            lines.append(f"  Verification summary: {summary}")
+
+    return "\n".join(lines)
+
+
+def archive_task(root: Path, task_id: str) -> dict[str, Any]:
+    """Archive a completed task by moving it to tasks/archive/.
+
+    This preserves the full task directory while removing it from active state.
+    Durable decisions and facts are extracted to workspace before archival.
+    """
+    ensure_workspace(root)
+
+    active_dir = tasks_dir(root) / "active"
+    task_dir = active_dir / task_id
+    task_json_path = task_dir / "task.json"
+
+    if not task_json_path.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task_data = read_json(task_json_path)
+    if task_data.get("status") != "done":
+        raise RuntimeError(
+            f"Cannot archive task {task_id}: status is '{task_data.get('status')}', expected 'done'"
+        )
+
+    archive_dir = tasks_dir(root) / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_task_dir = archive_dir / task_id
+    if archive_task_dir.exists():
+        raise FileExistsError(f"Archive destination already exists: {archive_task_dir}")
+
+    # 1. Extract durable knowledge before moving
+    extraction_errors = []
+
+    # Extract decisions
+    try:
+        decisions_content = _extract_task_decisions(root, task_dir)
+        if decisions_content:
+            workspace_decisions = workspace_dir(root) / "decisions.md"
+            with workspace_decisions.open("a", encoding="utf-8") as f:
+                f.write(f"\n\n## From Task: {task_id}\n\n{decisions_content}\n")
+    except Exception as e:
+        extraction_errors.append(f"decisions extraction failed: {e}")
+
+    # Extract facts
+    try:
+        facts_content = _extract_task_facts(root, task_dir)
+        if facts_content:
+            workspace_facts = workspace_dir(root) / "facts.md"
+            with workspace_facts.open("a", encoding="utf-8") as f:
+                f.write(f"\n{facts_content}\n")
+    except Exception as e:
+        extraction_errors.append(f"facts extraction failed: {e}")
+
+    # 2. Move task directory to archive
+    try:
+        shutil.move(str(task_dir), str(archive_task_dir))
+    except Exception as e:
+        # If move fails, report error but keep task in active state
+        raise RuntimeError(f"Failed to archive task {task_id}: {e}")
+
+    # 3. Update workspace state
+    state_path = workspace_dir(root) / "state.json"
+    state = read_json(state_path)
+
+    active_ids = state.get("active_task_ids", [])
+    if task_id in active_ids:
+        active_ids.remove(task_id)
+    state["active_task_ids"] = active_ids
+
+    if state.get("current_task_id") == task_id:
+        state["current_task_id"] = None
+
+    # Clear current_task_id in active_sessions
+    for session in state.get("active_sessions", {}).values():
+        if session.get("current_task_id") == task_id:
+            session["current_task_id"] = None
+
+    state["updated_at"] = utc_now()
+    write_json_atomic(state_path, state)
+
+    # 4. Remove locks where entity_id matches task_id
+    locks_file = locks_path(root)
+    locks_data = read_json(locks_file)
+    locks_data["locks"] = [
+        lk for lk in locks_data.get("locks", []) if lk.get("entity_id") != task_id
+    ]
+    write_json_atomic(locks_file, locks_data)
+
+    # 5. Append workspace event
+    append_workspace_event(
+        root,
+        "task_archived",
+        "task",
+        task_id,
+        f"Archived completed task {task_id}",
+    )
+
+    result = {"task_id": task_id, "archived": True, "archive_path": str(archive_task_dir)}
+    if extraction_errors:
+        result["extraction_warnings"] = extraction_errors
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -597,7 +884,12 @@ def complete_verification(
     task_id: str,
     result: str,
     summary: str,
+    auto_archive: bool = True,
 ) -> dict[str, Any]:
+    """Complete verification for a task.
+
+    When result='passed' and auto_archive=True, the task is automatically archived.
+    """
     result_to_status = {
         "passed": "done",
         "failed": "changes_requested",
@@ -654,4 +946,33 @@ def complete_verification(
         before_status=before_status,
         after_status=new_status,
     )
-    return task
+
+    # Auto-archive when verification passes
+    archive_result = None
+    archive_error = None
+    if result == "passed" and auto_archive:
+        try:
+            archive_result = archive_task(root, task_id)
+        except Exception as e:
+            archive_error = str(e)
+            # If archival fails, task stays active but verification is still recorded
+            append_workspace_event(
+                root,
+                "task_archive_failed",
+                "task",
+                task_id,
+                f"Failed to archive task {task_id}: {e}",
+            )
+
+    result_data = task
+    if archive_result:
+        result_data["archived"] = True
+        result_data["archive_path"] = archive_result.get("archive_path")
+        if "extraction_warnings" in archive_result:
+            result_data["extraction_warnings"] = archive_result["extraction_warnings"]
+    else:
+        result_data["archived"] = False
+        if archive_error:
+            result_data["archive_error"] = archive_error
+
+    return result_data

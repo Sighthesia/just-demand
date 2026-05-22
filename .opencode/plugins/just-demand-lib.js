@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-export const workflowRoot = (directory) => join(directory, ".agent-workflow")
+export const workflowRoot = (directory) => join(directory, ".just-demand")
 
 export const readJson = (path) => {
   try {

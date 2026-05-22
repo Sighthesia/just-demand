@@ -6,7 +6,7 @@
  * Usage: node scripts/sync-templates.js [repo-root]
  *
  * If repo-root is omitted, assumes this package lives at
- * packages/agent-workflow-installer/ inside the repo (two levels up).
+ * packages/just-demand-installer/ inside the repo (two levels up).
  *
  * This script:
  *  1. Removes the existing templates/ tree.
@@ -23,9 +23,9 @@ const DEFAULT_REPO_ROOT = path.resolve(PACKAGE_DIR, '..', '..');
 
 // Source paths relative to repo root → destination paths relative to templates/
 const SYNC_MAP = [
-  { src: '.agent-workflow/scripts', dest: '.agent-workflow/scripts', recursive: true },
-  { src: '.agent-workflow/global/rules.md', dest: '.agent-workflow/global/rules.md', recursive: false },
-  { src: '.agent-workflow/workspace', dest: '.agent-workflow/workspace', recursive: true, filter: (name) => name.endsWith('.md') },
+  { src: '.just-demand/scripts', dest: '.just-demand/scripts', recursive: true },
+  { src: '.just-demand/global/rules.md', dest: '.just-demand/global/rules.md', recursive: false },
+  { src: '.just-demand/workspace', dest: '.just-demand/workspace', recursive: true, filter: (name) => name.endsWith('.md') },
   { src: '.opencode/plugins', dest: '.opencode/plugins', recursive: true },
   { src: '.opencode/agent', dest: '.opencode/agent', recursive: true },
   { src: '.opencode/skills', dest: '.opencode/skills', recursive: true },
@@ -109,7 +109,7 @@ function main() {
 
   if (!fs.existsSync(path.join(repoRoot, 'AGENTS.md'))) {
     console.error(`Error: AGENTS.md not found at ${repoRoot}`);
-    console.error('Pass the repo root as an argument if this package is not at packages/agent-workflow-installer/');
+    console.error('Pass the repo root as an argument if this package is not at packages/just-demand-installer/');
     process.exit(1);
   }
 
