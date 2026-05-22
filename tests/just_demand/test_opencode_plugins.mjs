@@ -367,6 +367,16 @@ test("subagent-context skips when no active task", async () => {
   assert.equal(output.args.prompt, "Do work")
 })
 
+test("subagent-context skips when workflow root is missing", async () => {
+  const root = makeRoot()
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task" }
+  const output = { args: { subagent_type: "workflow-implement", prompt: "Do work" } }
+  await plugin["tool.execute.before"](input, output)
+  assert.equal(output.args.prompt, "Do work")
+  assert.equal(existsSync(join(root, ".just-demand")), false)
+})
+
 test("subagent-context skips when tool is not Task", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -375,4 +385,25 @@ test("subagent-context skips when tool is not Task", async () => {
   const output = { args: { subagent_type: "workflow-implement", prompt: "Run this" } }
   await plugin["tool.execute.before"](input, output)
   assert.equal(output.args.prompt, "Run this")
+})
+
+// ---------------------------------------------------------------------------
+// subagent-context: duplicate injection protection
+// ---------------------------------------------------------------------------
+test("subagent-context avoids duplicate injection when prompt already contains workflow context", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task" }
+  // Prompt already contains injection marker
+  const existingContext = "# Injected Workflow Context\n\nExisting context"
+  const output = { args: { subagent_type: "workflow-implement", prompt: `${existingContext}\n\nDo the work` } }
+  await plugin["tool.execute.before"](input, output)
+  // Should not add duplicate injection
+  assert.equal(output.args.prompt, `${existingContext}\n\nDo the work`)
+  assert.doesNotMatch(output.args.prompt, /Active task: task-a/)
 })

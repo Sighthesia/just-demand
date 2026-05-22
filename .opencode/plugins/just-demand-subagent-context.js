@@ -3,6 +3,9 @@ import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflo
 
 const SUPPORTED = new Set(["workflow-research", "workflow-implement", "workflow-check", "workflow-docs"])
 
+// Marker to detect if prompt has already been injected with workflow context
+const INJECTION_MARKER = "# Injected Workflow Context"
+
 export default async ({ directory }) => {
   return {
     "tool.execute.before": async (input, output) => {
@@ -10,6 +13,12 @@ export default async ({ directory }) => {
       if (String(input?.tool || "").toLowerCase() !== "task") return
       const args = output?.args
       if (!args || !SUPPORTED.has(args.subagent_type)) return
+      
+      // Skip if prompt already contains workflow context (duplicate injection protection)
+      if (args.prompt && args.prompt.includes(INJECTION_MARKER)) {
+        return
+      }
+      
       const taskId = getActiveTask(directory)
       if (!taskId) return
       const missing = getMissingRequiredContextFiles(directory, taskId, args.subagent_type)

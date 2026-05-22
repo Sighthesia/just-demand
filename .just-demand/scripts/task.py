@@ -15,6 +15,13 @@ from workflow_core import (
     mark_task,
     promote_to_task,
 )
+from install import (
+    init_project,
+    install_opencode_global,
+    update_opencode_global,
+    doctor_opencode_global,
+    uninstall_opencode_global,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,12 +57,34 @@ def build_parser() -> argparse.ArgumentParser:
     archive = sub.add_parser("archive-task", help="Archive a completed task to tasks/archive/")
     archive.add_argument("task_id", help="Task ID to archive (must be status 'done')")
 
+    # Installation commands
+    init = sub.add_parser("init", help="Initialize project-local .just-demand state")
+    
+    install = sub.add_parser("install", help="Install Just Demand globally for OpenCode")
+    install.add_argument("--opencode", action="store_true", help="Install OpenCode runtime assets")
+    install.add_argument("--global", action="store_true", dest="global_install", help="Install globally")
+    install.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
+    
+    update = sub.add_parser("update", help="Update existing global installation")
+    update.add_argument("--opencode", action="store_true", help="Update OpenCode runtime assets")
+    update.add_argument("--global", action="store_true", dest="global_update", help="Update global installation")
+    update.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
+    
+    doctor = sub.add_parser("doctor", help="Report installation and activation status")
+    doctor.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
+    
+    uninstall = sub.add_parser("uninstall", help="Remove global Just Demand installation")
+    uninstall.add_argument("--opencode", action="store_true", help="Uninstall OpenCode runtime assets")
+    uninstall.add_argument("--global", action="store_true", dest="global_uninstall", help="Uninstall global installation")
+    uninstall.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
+
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     root = Path(args.root).resolve()
+    
     if args.command == "create-intake":
         result = create_intake(root, args.title, args.raw_request, args.session)
     elif args.command == "promote":
@@ -76,9 +105,40 @@ def main() -> int:
         result = cleanup_completed_task(root, args.task_id)
     elif args.command == "archive-task":
         result = archive_task(root, args.task_id)
+    elif args.command == "init":
+        result = init_project(root)
+    elif args.command == "install":
+        if not args.opencode or not args.global_install:
+            result = {"status": "error", "message": "Install requires --opencode --global flags"}
+        else:
+            config_root = Path(args.config_root) if args.config_root else None
+            result = install_opencode_global(config_root)
+    elif args.command == "update":
+        if not args.opencode or not args.global_update:
+            result = {"status": "error", "message": "Update requires --opencode --global flags"}
+        else:
+            config_root = Path(args.config_root) if args.config_root else None
+            result = update_opencode_global(config_root)
+    elif args.command == "doctor":
+        config_root = Path(args.config_root) if args.config_root else None
+        result = doctor_opencode_global(config_root, root)
+    elif args.command == "uninstall":
+        if not args.opencode or not args.global_uninstall:
+            result = {"status": "error", "message": "Uninstall requires --opencode --global flags"}
+        else:
+            config_root = Path(args.config_root) if args.config_root else None
+            result = uninstall_opencode_global(config_root)
     else:
         raise RuntimeError(f"Unsupported command: {args.command}")
     print(json.dumps(result, ensure_ascii=False))
+    # Return 0 for success, 1 for error status
+    if isinstance(result, dict):
+        if result.get("status") == "success":
+            return 0
+        elif result.get("status") == "error":
+            return 1
+        # For other results (task operations), assume success
+        return 0
     return 0
 
 

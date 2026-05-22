@@ -27,6 +27,7 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 ## Commands
 
 - Python workflow tests: `python3 -m unittest tests.just_demand.test_workflow_core -v`
+- Python install tests: `python3 -m unittest tests.just_demand.test_install -v`
 - OpenCode plugin tests: `node --test tests/just_demand/test_opencode_plugins.mjs`
 - Validate OpenCode plugin package config: `python3 -m json.tool .opencode/package.json`
 - CLI smoke test: `tmpdir=$(mktemp -d) && python3 .just-demand/scripts/task.py --root "$tmpdir" create-intake "Agent workflow" "Build workflow" --session session-main`
@@ -36,6 +37,14 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 - Mark task status/progress/impact: `python3 .just-demand/scripts/task.py --root . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
 - Archive completed task: `python3 .just-demand/scripts/task.py --root . archive-task <task-id>`
 - Clean up completed task: `python3 .just-demand/scripts/task.py --root . cleanup-task <task-id>`
+
+### Installation Commands
+
+- Initialize project: `python3 .just-demand/scripts/task.py --root <project-root> init`
+- Install globally: `python3 .just-demand/scripts/task.py install --opencode --global [--config-root <path>]`
+- Update global install: `python3 .just-demand/scripts/task.py update --opencode --global [--config-root <path>]`
+- Check status: `python3 .just-demand/scripts/task.py --root <project-root> doctor [--config-root <path>]`
+- Uninstall globally: `python3 .just-demand/scripts/task.py uninstall --opencode --global [--config-root <path>]`
 
 Run Python and Node tests after changing `.just-demand/scripts/`, `.opencode/plugins/`, `.opencode/agent/`, or `.opencode/skills/`.
 

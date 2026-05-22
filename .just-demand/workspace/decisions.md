@@ -29,3 +29,10 @@ A clean `workflow-check` result (no findings or only fixed low-risk local issues
 
 Reason:
 This balances engineering closure with recoverability. Checkpoint commits after verification provide evidence of verified slices while allowing easy correction via follow-up or revert commits.
+
+
+## From Task: 2026-05-22-global-just-demand-install-task
+
+- Use global OpenCode installation for reusable runtime assets and explicit project-local initialization for `.just-demand` state.
+- Keep plugin writes out of ordinary startup; scripts remain the write path for workflow state.
+- First implementation should be local/in-repo CLI behavior, not package publication.
