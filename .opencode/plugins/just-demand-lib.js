@@ -65,17 +65,17 @@ export const readTaskContext = (directory, taskId, agentName) => {
   if (decisions) parts.push(decisions)
 
   switch (agentName) {
-    case "workflow-implement": {
+    case "just-demand-implement": {
       const implement = readTextIfExists(join(taskDir, "implement.md"))
       if (implement) parts.push(implement)
       break
     }
-    case "workflow-check": {
+    case "just-demand-check": {
       const verify = readTextIfExists(join(taskDir, "verify.md"))
       if (verify) parts.push(verify)
       break
     }
-    case "workflow-research": {
+    case "just-demand-research": {
       const facts = readTextIfExists(join(workspaceDir, "facts.md"))
       if (facts) parts.push(`# Workspace Facts\n\n${facts}`)
       const researchDir = join(taskDir, "research")
@@ -84,7 +84,7 @@ export const readTaskContext = (directory, taskId, agentName) => {
       }
       break
     }
-    case "workflow-docs": {
+    case "just-demand-docs": {
       const wsDecisions = readTextIfExists(join(workspaceDir, "decisions.md"))
       if (wsDecisions) parts.push(`# Workspace Decisions\n\n${wsDecisions}`)
       const deferred = readTextIfExists(join(workspaceDir, "deferred_options.md"))
@@ -98,13 +98,13 @@ export const readTaskContext = (directory, taskId, agentName) => {
 
 export const getRequiredContextFiles = (agentName) => {
   switch (agentName) {
-    case "workflow-implement":
+    case "just-demand-implement":
       return ["context.md", "implement.md"]
-    case "workflow-check":
+    case "just-demand-check":
       return ["context.md", "verify.md"]
-    case "workflow-docs":
+    case "just-demand-docs":
       return ["context.md", "decisions.md"]
-    case "workflow-research":
+    case "just-demand-research":
       return ["context.md"]
     default:
       return []

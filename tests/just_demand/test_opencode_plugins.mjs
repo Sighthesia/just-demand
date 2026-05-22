@@ -128,7 +128,7 @@ test("readTaskContext combines context and implement brief", () => {
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
   writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
-  const context = readTaskContext(root, "task-a", "workflow-implement")
+  const context = readTaskContext(root, "task-a", "just-demand-implement")
   assert.match(context, /# Context/)
   assert.match(context, /# Implement/)
   assert.doesNotMatch(context, /# Verify/)
@@ -137,26 +137,26 @@ test("readTaskContext combines context and implement brief", () => {
 // ---------------------------------------------------------------------------
 // lib: readTaskContext - research
 // ---------------------------------------------------------------------------
-test("readTaskContext for workflow-research includes workspace facts", () => {
+test("readTaskContext for just-demand-research includes workspace facts", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const context = readTaskContext(root, "task-a", "workflow-research")
+  const context = readTaskContext(root, "task-a", "just-demand-research")
   assert.match(context, /# Context/)
   assert.match(context, /workspace facts/i)
   assert.match(context, /JSONL/)
 })
 
-test("readTaskContext for workflow-research avoids absolute research path leakage", () => {
+test("readTaskContext for just-demand-research avoids absolute research path leakage", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   mkdirSync(join(taskDir, "research"), { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const context = readTaskContext(root, "task-a", "workflow-research")
+  const context = readTaskContext(root, "task-a", "just-demand-research")
   assert.match(context, /research outputs/i)
   assert.match(context, /local research\//i)
   assert.equal(context.includes(root), false)
@@ -165,25 +165,25 @@ test("readTaskContext for workflow-research avoids absolute research path leakag
 // ---------------------------------------------------------------------------
 // lib: readTaskContext - docs
 // ---------------------------------------------------------------------------
-test("readTaskContext for workflow-docs includes workspace decisions", () => {
+test("readTaskContext for just-demand-docs includes workspace decisions", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const context = readTaskContext(root, "task-a", "workflow-docs")
+  const context = readTaskContext(root, "task-a", "just-demand-docs")
   assert.match(context, /# Context/)
   assert.match(context, /workspace decisions/i)
   assert.match(context, /approach A/)
 })
 
-test("readTaskContext for workflow-docs includes deferred options", () => {
+test("readTaskContext for just-demand-docs includes deferred options", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const context = readTaskContext(root, "task-a", "workflow-docs")
+  const context = readTaskContext(root, "task-a", "just-demand-docs")
   assert.match(context, /deferred options/i)
   assert.match(context, /Option X/)
 })
@@ -194,7 +194,7 @@ test("getMissingRequiredContextFiles reports missing implement context files", (
   const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const missing = getMissingRequiredContextFiles(root, "task-a", "workflow-implement")
+  const missing = getMissingRequiredContextFiles(root, "task-a", "just-demand-implement")
   assert.deepEqual(missing, ["implement.md"])
 })
 
@@ -243,12 +243,12 @@ test("session-start returns hook without injecting bootstrap", async () => {
   assert.equal(output.parts[0].text, "Hello")
 })
 
-test("session-start skips injection for workflow- agents", async () => {
+test("session-start skips injection for just-demand- agents", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
-  await plugin["chat.message"]({ agent: "workflow-implement", sessionID: "s-skip" }, output)
+  await plugin["chat.message"]({ agent: "just-demand-implement", sessionID: "s-skip" }, output)
   assert.equal(output.parts[0].text, "Hello")
 })
 
@@ -301,7 +301,7 @@ test("subagent-context injects context for supported subagent type", async () =>
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "workflow-implement", prompt: "Do the work" } }
+  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /Active task: task-a/)
   assert.match(output.args.prompt, /# Injected Workflow Context/)
@@ -313,7 +313,7 @@ test("subagent-context injects context for supported subagent type", async () =>
   assert.match(output.args.prompt, /Do the work/)
 })
 
-test("subagent-context avoids absolute path leakage for workflow-research", async () => {
+test("subagent-context avoids absolute path leakage for just-demand-research", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
@@ -322,7 +322,7 @@ test("subagent-context avoids absolute path leakage for workflow-research", asyn
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: research topic")
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "workflow-research", prompt: "Investigate this" } }
+  const output = { args: { subagent_type: "just-demand-research", prompt: "Investigate this" } }
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /research outputs/i)
   assert.match(output.args.prompt, /local research\//i)
@@ -337,7 +337,7 @@ test("subagent-context blocks supported subagent when required context files are
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "workflow-implement", prompt: "Do the work" } }
+  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /# BLOCKED/)
   assert.match(output.args.prompt, /implement\.md/)
@@ -362,7 +362,7 @@ test("subagent-context skips when no active task", async () => {
   writeFileSync(join(root, ".just-demand", "workspace", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "workflow-implement", prompt: "Do work" } }
+  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do work" } }
   await plugin["tool.execute.before"](input, output)
   assert.equal(output.args.prompt, "Do work")
 })
@@ -371,7 +371,7 @@ test("subagent-context skips when workflow root is missing", async () => {
   const root = makeRoot()
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "workflow-implement", prompt: "Do work" } }
+  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do work" } }
   await plugin["tool.execute.before"](input, output)
   assert.equal(output.args.prompt, "Do work")
   assert.equal(existsSync(join(root, ".just-demand")), false)
@@ -382,7 +382,7 @@ test("subagent-context skips when tool is not Task", async () => {
   scaffoldWorkflow(root)
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Bash" }
-  const output = { args: { subagent_type: "workflow-implement", prompt: "Run this" } }
+  const output = { args: { subagent_type: "just-demand-implement", prompt: "Run this" } }
   await plugin["tool.execute.before"](input, output)
   assert.equal(output.args.prompt, "Run this")
 })
@@ -401,7 +401,7 @@ test("subagent-context avoids duplicate injection when prompt already contains w
   const input = { tool: "Task" }
   // Prompt already contains injection marker
   const existingContext = "# Injected Workflow Context\n\nExisting context"
-  const output = { args: { subagent_type: "workflow-implement", prompt: `${existingContext}\n\nDo the work` } }
+  const output = { args: { subagent_type: "just-demand-implement", prompt: `${existingContext}\n\nDo the work` } }
   await plugin["tool.execute.before"](input, output)
   // Should not add duplicate injection
   assert.equal(output.args.prompt, `${existingContext}\n\nDo the work`)

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflowRoot } from "./just-demand-lib.js"
 
-const SUPPORTED = new Set(["workflow-research", "workflow-implement", "workflow-check", "workflow-docs"])
+const SUPPORTED = new Set(["just-demand-research", "just-demand-implement", "just-demand-check", "just-demand-docs"])
 
 // Marker to detect if prompt has already been injected with workflow context
 const INJECTION_MARKER = "# Injected Workflow Context"

@@ -25,7 +25,7 @@ Source Task: 2026-05-22-checkpoint-commit-after-clean-check-task
 Supersedes: none
 
 Decision:
-A clean `workflow-check` result (no findings or only fixed low-risk local issues) authorizes an automatic local checkpoint commit. Positive user acceptance remains a valid commit trigger but is secondary. Later corrections use follow-up commits for small fixes or revert commits for fundamentally wrong direction; do not rewrite history by default. Repeated unstable feedback pauses auto-commit until another clean check passes.
+A clean `just-demand-check` result (no findings or only fixed low-risk local issues) authorizes an automatic local checkpoint commit. Positive user acceptance remains a valid commit trigger but is secondary. Later corrections use follow-up commits for small fixes or revert commits for fundamentally wrong direction; do not rewrite history by default. Repeated unstable feedback pauses auto-commit until another clean check passes.
 
 Reason:
 This balances engineering closure with recoverability. Checkpoint commits after verification provide evidence of verified slices while allowing easy correction via follow-up or revert commits.

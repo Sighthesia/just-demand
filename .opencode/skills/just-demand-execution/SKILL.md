@@ -1,6 +1,6 @@
 ---
-name: workflow-execution
-description: Use when a formal work item is ready to execute, when dispatching workflow-research, workflow-implement, workflow-check, or workflow-docs subagents, or when building context for focused execution.
+name: just-demand-execution
+description: Use when a formal work item is ready to execute, when dispatching just-demand-research, just-demand-implement, just-demand-check, or just-demand-docs subagents, or when building context for focused execution.
 ---
 
 # Workflow Execution
@@ -21,10 +21,10 @@ Execute formal work items through focused subagents and script-owned state.
 
 ## Subagent Routing
 
-- `workflow-research`: research only; no code changes.
-- `workflow-implement`: scoped implementation; no commits.
-- `workflow-check`: verify requirements and fix only low-risk local issues within scope.
-- `workflow-docs`: update workflow docs and durable notes; no business-code changes.
+- `just-demand-research`: research only; no code changes.
+- `just-demand-implement`: scoped implementation; no commits.
+- `just-demand-check`: verify requirements and fix only low-risk local issues within scope.
+- `just-demand-docs`: update workflow docs and durable notes; no business-code changes.
 
 ## Task Marking Policy
 
@@ -51,7 +51,7 @@ python3 .just-demand/scripts/task.py --root . mark <task-id> <status> [--progres
 
 ### Impact scope
 
-List the main directories, modules, or files affected. Use short user-readable paths like `.just-demand/scripts/`, `tests/just_demand/`, or `.opencode/skills/workflow-execution/`. This helps other agents avoid overestimating conflict risk.
+List the main directories, modules, or files affected. Use short user-readable paths like `.just-demand/scripts/`, `tests/just_demand/`, or `.opencode/skills/just-demand-execution/`. This helps other agents avoid overestimating conflict risk.
 
 ## Dispatch Prompt
 
@@ -74,12 +74,12 @@ This is a fallback for context injection failures.
 
 ## Checkpoint Commit Policy
 
-A clean `workflow-check` result (no findings or only fixed low-risk local issues) authorizes an automatic local checkpoint commit. The commit represents "this verified slice passed engineering checks", not permanent product finality. Positive user acceptance remains a valid commit trigger but is secondary.
+A clean `just-demand-check` result (no findings or only fixed low-risk local issues) authorizes an automatic local checkpoint commit. The commit represents "this verified slice passed engineering checks", not permanent product finality. Positive user acceptance remains a valid commit trigger but is secondary.
 
 ### When to commit automatically
 
-- After `workflow-check` passes with no unresolved findings.
-- After fixing low-risk local issues identified by `workflow-check` and re-verifying.
+- After `just-demand-check` passes with no unresolved findings.
+- After fixing low-risk local issues identified by `just-demand-check` and re-verifying.
 - Positive user acceptance phrases (e.g., `effective`, `good`, `OK`, `LGTM`, `works`, `looks good`, `valid`, `不错`, `有效`, `可以`, `没问题`, `达成`, `就这样`) still authorize commit, but are not required.
 
 ### Non-trigger cases
@@ -119,7 +119,7 @@ Before staging or committing:
 
 When execution involves repeated debugging (>=3 attempts, or non-obvious root cause involving tools, frameworks, or state):
 
-1. After the fix passes verification, route through the lesson-capture gate in `workflow-verification` before claiming completion.
+1. After the fix passes verification, route through the lesson-capture gate in `just-demand-verification` before claiming completion.
 2. Reusable patterns should become skills via the global `capture-lessons` skill. Project-local lessons go to workspace memory. Task-only lessons go to task `decisions.md`.
 3. Do not skip the capture gate just because the user already accepted the fix. If a reusable pattern was discovered, record it.
 
@@ -129,9 +129,9 @@ Completed and verified tasks should be archived to `tasks/archive/` rather than 
 
 ## Required Context Files
 
-- `workflow-implement`: `context.md`, `implement.md`
-- `workflow-check`: `context.md`, `verify.md`
-- `workflow-docs`: `context.md`, `decisions.md`
-- `workflow-research`: `context.md`
+- `just-demand-implement`: `context.md`, `implement.md`
+- `just-demand-check`: `context.md`, `verify.md`
+- `just-demand-docs`: `context.md`, `decisions.md`
+- `just-demand-research`: `context.md`
 
 If required files are missing, stop and create or refresh the task context package first.

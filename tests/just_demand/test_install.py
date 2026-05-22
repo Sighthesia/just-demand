@@ -164,16 +164,16 @@ class InstallCoreTests(unittest.TestCase):
         self.assertIn("just-demand-state.js", DEPLOYED_FILES["plugins"])
         self.assertIn("just-demand-subagent-context.js", DEPLOYED_FILES["plugins"])
         
-        self.assertIn("workflow-check.md", DEPLOYED_FILES["agents"])
-        self.assertIn("workflow-docs.md", DEPLOYED_FILES["agents"])
-        self.assertIn("workflow-implement.md", DEPLOYED_FILES["agents"])
-        self.assertIn("workflow-research.md", DEPLOYED_FILES["agents"])
+        self.assertIn("just-demand-check.md", DEPLOYED_FILES["agents"])
+        self.assertIn("just-demand-docs.md", DEPLOYED_FILES["agents"])
+        self.assertIn("just-demand-implement.md", DEPLOYED_FILES["agents"])
+        self.assertIn("just-demand-research.md", DEPLOYED_FILES["agents"])
         
         self.assertIn("using-just-demand", DEPLOYED_FILES["skills"])
-        self.assertIn("workflow-execution", DEPLOYED_FILES["skills"])
-        self.assertIn("workflow-intake", DEPLOYED_FILES["skills"])
-        self.assertIn("workflow-memory", DEPLOYED_FILES["skills"])
-        self.assertIn("workflow-verification", DEPLOYED_FILES["skills"])
+        self.assertIn("just-demand-execution", DEPLOYED_FILES["skills"])
+        self.assertIn("just-demand-intake", DEPLOYED_FILES["skills"])
+        self.assertIn("just-demand-memory", DEPLOYED_FILES["skills"])
+        self.assertIn("just-demand-verification", DEPLOYED_FILES["skills"])
 
 
 class InstallIntegrationTests(unittest.TestCase):
@@ -187,7 +187,7 @@ class InstallIntegrationTests(unittest.TestCase):
             
             # Check that files were deployed
             self.assertTrue((config_root / "plugins" / "just-demand-lib.js").exists())
-            self.assertTrue((config_root / "agents" / "workflow-implement.md").exists())
+            self.assertTrue((config_root / "agents" / "just-demand-implement.md").exists())
             self.assertTrue((config_root / "skills" / "using-just-demand").exists())
             self.assertTrue((config_root / "package.json").exists())
 
@@ -205,6 +205,28 @@ class InstallIntegrationTests(unittest.TestCase):
             for skill in DEPLOYED_FILES["skills"]:
                 with self.subTest(skill=skill):
                     self.assertTrue((config_root / "skills" / skill / "SKILL.md").exists())
+
+    def test_install_opencode_global_deploys_expected_agent_permissions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp)
+            install_opencode_global(config_root)
+
+            implement_agent = (config_root / "agents" / "just-demand-implement.md").read_text(encoding="utf-8")
+            check_agent = (config_root / "agents" / "just-demand-check.md").read_text(encoding="utf-8")
+            docs_agent = (config_root / "agents" / "just-demand-docs.md").read_text(encoding="utf-8")
+
+            for content in (implement_agent, check_agent):
+                self.assertIn('"*": ask', content)
+                self.assertIn('"git status": allow', content)
+                self.assertIn('"git diff *": allow', content)
+                self.assertIn('"git log *": allow', content)
+                self.assertIn('"python3 .just-demand/scripts/task.py --root . list-active": allow', content)
+                self.assertIn('"python3 -m unittest tests.just_demand.test_workflow_core -v": allow', content)
+                self.assertIn('"python3 -m unittest tests.just_demand.test_install -v": allow', content)
+                self.assertIn('"node --test tests/just_demand/test_opencode_plugins.mjs": allow', content)
+                self.assertIn('"python3 -m json.tool .opencode/package.json": allow', content)
+
+            self.assertIn('bash: deny', docs_agent)
     
     def test_install_opencode_global_creates_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:

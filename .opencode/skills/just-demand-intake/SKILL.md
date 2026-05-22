@@ -1,5 +1,5 @@
 ---
-name: workflow-intake
+name: just-demand-intake
 description: Use when the user proposes a new goal, feature, bugfix, design, refactor, research item, UI request, or any unclear work that may become a formal work item. Clarifies the user's need before task creation.
 ---
 
@@ -26,7 +26,7 @@ Clarify the user's need before exposing workflow mechanics.
 
 ## Routing Rule
 
-When the clarified work will consume long context, do not keep it in the main session after shaping. Promote it to a formal work item and route execution through `workflow-*` subagents.
+When the clarified work will consume long context, do not keep it in the main session after shaping. Promote it to a formal work item and route execution through `just-demand-*` subagents.
 
 Typical triggers:
 

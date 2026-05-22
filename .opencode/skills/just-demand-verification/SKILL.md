@@ -1,6 +1,6 @@
 ---
-name: workflow-verification
-description: Use after implementation, after workflow-check output, when verification fails, when the user gives correction feedback, or before claiming a workflow task is done.
+name: just-demand-verification
+description: Use after implementation, after just-demand-check output, when verification fails, when the user gives correction feedback, or before claiming a workflow task is done.
 ---
 
 # Workflow Verification
@@ -77,7 +77,7 @@ After verification passes and the user accepts (or the task is confirmed done), 
 
 ## Checkpoint Commit Expectation
 
-After `workflow-check` passes with no unresolved findings, the main agent should create a local checkpoint commit using the safety gate in `workflow-execution`. This records that the verified slice passed engineering checks; it does not mean auto-push or irreversible product finality.
+After `just-demand-check` passes with no unresolved findings, the main agent should create a local checkpoint commit using the safety gate in `just-demand-execution`. This records that the verified slice passed engineering checks; it does not mean auto-push or irreversible product finality.
 
 - If later feedback requires a small correction, use a follow-up commit after the next clean check.
 - If the direction was fundamentally wrong, prefer a revert commit over history rewrite.

@@ -11,7 +11,7 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 - Inject rich context only for the subagent actively executing a formal task.
 - Long-context-consumption work must be delegated to subagents. If a task needs broad code reading, multi-file implementation, extended verification, or any context that would bloat the main session, the main agent should shape and dispatch it instead of doing it inline.
 - Before modifying code, or before dispatching any subagent that may modify or verify code, there must be a current formal task and its required task context files must already exist.
-- Invisible closure: completed verified tasks should be archived, not left active. A clean `workflow-check` authorizes an automatic local checkpoint commit (scoped staging, no auto-push); later corrections use follow-up or revert commits. Repeated unstable feedback pauses auto-commit until another clean check passes. Non-trivial debugging triggers automatic lesson capture into skills. The user judges product-level quality; the agent handles engineering closure.
+- Invisible closure: completed verified tasks should be archived, not left active. A clean `just-demand-check` authorizes an automatic local checkpoint commit (scoped staging, no auto-push); later corrections use follow-up or revert commits. Repeated unstable feedback pauses auto-commit until another clean check passes. Non-trivial debugging triggers automatic lesson capture into skills. The user judges product-level quality; the agent handles engineering closure.
 
 ## Ideal Workflow
 
@@ -20,8 +20,8 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 3. Once direction is confirmed, promote intake to a formal task package under `.just-demand/tasks/active/`.
 4. Before execution, inspect all unfinished formal tasks to avoid cross-task conflicts.
 5. Ensure the current task package has the required context files for the intended subagent.
-6. Main agent dispatches focused `workflow-*` subagents with injected task context. Long-context implementation, research, and verification should happen here, not inline in the main session.
-7. `workflow-check` verifies against the task brief and active validation revision before completion is claimed.
+6. Main agent dispatches focused `just-demand-*` subagents with injected task context. Long-context implementation, research, and verification should happen here, not inline in the main session.
+7. `just-demand-check` verifies against the task brief and active validation revision before completion is claimed.
 8. Main agent summarizes outcomes, remaining risks, and any durable memory updates.
 
 ## Commands
@@ -64,8 +64,8 @@ Run Python and Node tests after changing `.just-demand/scripts/`, `.opencode/plu
 - Do not hand-edit `.just-demand/workspace/state.json`, `locks.json`, or event logs except through `.just-demand/scripts/` code.
 - Main-session plugins should not inject anything when there is no active unfinished formal task.
 - `just-demand-state.js` does not inject any `<workflow-state>` into main-session messages. Tasks should be inspected explicitly via list-active scripts.
-- `just-demand-subagent-context.js` injects task context only when dispatching supported `workflow-*` subagents.
-- `workflow-implement` requires `context.md` and `implement.md`; `workflow-check` requires `context.md` and `verify.md`; `workflow-docs` requires `context.md` and `decisions.md`; `workflow-research` requires `context.md`.
+- `just-demand-subagent-context.js` injects task context only when dispatching supported `just-demand-*` subagents.
+- `just-demand-implement` requires `context.md` and `implement.md`; `just-demand-check` requires `context.md` and `verify.md`; `just-demand-docs` requires `context.md` and `decisions.md`; `just-demand-research` requires `context.md`.
 - If required task context files are missing, implementation or verification must not proceed. The plugin intentionally injects a blocking notice instead of silent fallback.
 - Before implementation or subagent dispatch, use `python3 .just-demand/scripts/task.py --root . list-active` to inspect all unfinished tasks and avoid cross-task conflicts.
 - `just-demand-session-start.js` intentionally does not inject long bootstrap/rules text.
@@ -76,20 +76,20 @@ Run Python and Node tests after changing `.just-demand/scripts/`, `.opencode/plu
 | Skill | Use when |
 | --- | --- |
 | `.opencode/skills/using-just-demand/SKILL.md` | Start here when working in this repo, when unsure which workflow skill applies, or when changing the workflow runtime itself. |
-| `.opencode/skills/workflow-intake/SKILL.md` | The user proposes or clarifies work before a formal task exists. |
-| `.opencode/skills/workflow-execution/SKILL.md` | A formal work item is ready to execute or workflow subagents are being dispatched. |
-| `.opencode/skills/workflow-verification/SKILL.md` | Reporting completion, handling failed verification, or processing user correction feedback. |
-| `.opencode/skills/workflow-memory/SKILL.md` | Recording durable decisions, preferences, facts, open questions, or deferred options. |
-| Global `capture-lessons` (`.agents/skills/capture-lessons/SKILL.md`) | After non-trivial debugging (>=3 attempts, architectural traps, reusable methodology) to extract a pattern-based reusable skill. Used by workflow-verification and workflow-execution. |
+| `.opencode/skills/just-demand-intake/SKILL.md` | The user proposes or clarifies work before a formal task exists. |
+| `.opencode/skills/just-demand-execution/SKILL.md` | A formal work item is ready to execute or workflow subagents are being dispatched. |
+| `.opencode/skills/just-demand-verification/SKILL.md` | Reporting completion, handling failed verification, or processing user correction feedback. |
+| `.opencode/skills/just-demand-memory/SKILL.md` | Recording durable decisions, preferences, facts, open questions, or deferred options. |
+| Global `capture-lessons` (`.agents/skills/capture-lessons/SKILL.md`) | After non-trivial debugging (>=3 attempts, architectural traps, reusable methodology) to extract a pattern-based reusable skill. Used by just-demand-verification and just-demand-execution. |
 
 ## Subagent Boundaries
 
-- `workflow-research`: research only; `edit: deny`, `bash: deny`.
-- `workflow-implement`: scoped implementation only; no commits; do not modify `.just-demand/workspace/` except through designated workflow scripts.
-- `workflow-check`: verify against the task brief; may fix only low-risk local issues related to the current task.
-- `workflow-docs`: docs and durable notes only; no business-code changes; no commits.
+- `just-demand-research`: research only; `edit: deny`, `bash: deny`.
+- `just-demand-implement`: scoped implementation only; no commits; do not modify `.just-demand/workspace/` except through designated workflow scripts.
+- `just-demand-check`: verify against the task brief; may fix only low-risk local issues related to the current task.
+- `just-demand-docs`: docs and durable notes only; no business-code changes; no commits.
 
-Main-session rule: do not consume long implementation or verification context inline when a `workflow-*` subagent can own it.
+Main-session rule: do not consume long implementation or verification context inline when a `just-demand-*` subagent can own it.
 
 ## OpenCode / Node Notes
 

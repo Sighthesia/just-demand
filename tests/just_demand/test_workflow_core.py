@@ -154,7 +154,7 @@ class WorkflowCoreTests(unittest.TestCase):
             )
             self.assertEqual(revision["revision"], "r001")
 
-            start_execution(root, task_id=task_id, subagents=["workflow-implement"])
+            start_execution(root, task_id=task_id, subagents=["just-demand-implement"])
             task_path = root / ".just-demand" / "tasks" / "active" / task_id / "task.json"
             task = read_json(task_path)
             self.assertEqual(task["status"], "executing")
@@ -213,7 +213,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 ["Intake", "Task", "Execution", "Verification", "Done"],
                 ["Intake created", "Task promoted", "Execution starts", "Verification passes", "Task closes"],
             )
-            start_execution(root, task["task_id"], ["workflow-implement"])
+            start_execution(root, task["task_id"], ["just-demand-implement"])
             final_task = complete_verification(root, task["task_id"], "passed", "End-to-end path works")
             self.assertEqual(final_task["status"], "done")
             # Verify auto-archived
@@ -271,7 +271,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "Cleanup test.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             state = read_json(workspace_dir(root) / "state.json")
@@ -323,7 +323,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "CLI cleanup.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
@@ -362,7 +362,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "Archive test.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             # Verify task is still active before archive
@@ -413,7 +413,7 @@ class WorkflowCoreTests(unittest.TestCase):
             )
 
             create_validation_revision(root, task_id, "Decision extraction.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             # Archive the task
@@ -433,7 +433,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "Fact extraction.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "Verification summary text", auto_archive=False)
 
             # Archive the task
@@ -457,7 +457,7 @@ class WorkflowCoreTests(unittest.TestCase):
             (outputs_dir / "custom-output.txt").write_text("custom content", encoding="utf-8")
 
             create_validation_revision(root, task_id, "Preserve test.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             # Archive the task
@@ -501,7 +501,7 @@ class WorkflowCoreTests(unittest.TestCase):
             )
 
             create_validation_revision(root, task_id, "Archive collision.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             archive_destination = tasks_dir(root) / "archive" / task_id
@@ -522,7 +522,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "Auto archive.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
 
             # Complete verification with passed result (auto_archive=True by default)
             result = complete_verification(root, task_id, "passed", "All done")
@@ -545,7 +545,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "Auto archive failure.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
 
             archive_destination = tasks_dir(root) / "archive" / task_id
             archive_destination.mkdir(parents=True)
@@ -568,7 +568,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "No archive.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
 
             # Complete verification with failed result
             result = complete_verification(root, task_id, "failed", "Not done yet")
@@ -588,7 +588,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "CLI archive.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
@@ -627,7 +627,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promoted["task_id"]
 
             create_validation_revision(root, task_id, "Cleanup archived.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             # Archive first
@@ -797,7 +797,7 @@ class WorkflowCoreTests(unittest.TestCase):
             mark_task(root, task_id, "tweaking", progress=95, note="Almost done")
 
             create_validation_revision(root, task_id, "Mark archive.", ["C1"], ["E1"])
-            start_execution(root, task_id, ["workflow-implement"])
+            start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
             archive_task(root, task_id)
 

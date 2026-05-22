@@ -1,5 +1,5 @@
 ---
-name: workflow-memory
+name: just-demand-memory
 description: Use when recording durable preferences, decisions, deferred options, workspace facts, open questions, or when the user chooses a lightweight path over a more robust option.
 ---
 
