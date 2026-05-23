@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +51,21 @@ def set_intake_scope(root: Path, intake_id: str, scope: str = "Confirmed impleme
         "Scope",
         scope,
     )
+
+
+def init_git_repo(root: Path) -> None:
+    subprocess.run(["git", "init"], cwd=root, text=True, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Just Demand Tests"], cwd=root, text=True, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "tests@example.com"], cwd=root, text=True, capture_output=True, check=True)
+    tracked = root / "tracked.txt"
+    tracked.write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=root, text=True, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "chore: seed repo"], cwd=root, text=True, capture_output=True, check=True)
+
+
+def git_stdout(root: Path, *args: str) -> str:
+    result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=True)
+    return result.stdout
 
 
 class WorkflowCoreTests(unittest.TestCase):
@@ -685,6 +701,72 @@ class WorkflowCoreTests(unittest.TestCase):
             # Verify task not in active
             active_dir = tasks_dir(root) / "active" / task_id
             self.assertFalse(active_dir.exists())
+
+    def test_complete_verification_creates_checkpoint_commit_for_task_scoped_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "Scoped commit", "Build scoped commit", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Scoped commit", "Build scoped commit", "implementation", ["Scoped commit works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Scoped commit.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-implement"])
+            mark_task(root, task_id, "executing", impact=["tracked.txt"])
+
+            (root / "tracked.txt").write_text("updated\n", encoding="utf-8")
+            (root / "unrelated.txt").write_text("leave me out\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"]["paths"], ["tracked.txt"])
+
+            task = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertTrue(task["checkpoint_commit"]["created"])
+
+            latest_log = git_stdout(root, "log", "--oneline", "-1")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint scoped commit")
+
+            committed_files = [line for line in git_stdout(root, "show", "--name-only", "--format=", "HEAD").splitlines() if line.strip()]
+            self.assertEqual(committed_files, ["tracked.txt"])
+
+            status_output = git_stdout(root, "status", "--short")
+            self.assertIn("?? unrelated.txt", status_output)
+
+    def test_complete_verification_cli_creates_checkpoint_commit_and_archives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "CLI checkpoint", "Build CLI checkpoint", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "CLI checkpoint", "Build CLI checkpoint", "implementation", ["CLI checkpoint works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "CLI checkpoint.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-implement"])
+            mark_task(root, task_id, "executing", impact=["tracked.txt"])
+
+            (root / "tracked.txt").write_text("updated from cli\n", encoding="utf-8")
+
+            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "complete-verification", task_id, "passed", "All done"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+
+            self.assertTrue(payload["archived"])
+            self.assertTrue(payload["checkpoint_commit"]["created"])
+            self.assertTrue((tasks_dir(root) / "archive" / task_id).is_dir())
+
+            latest_log = git_stdout(root, "log", "--oneline", "-1")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint cli checkpoint")
 
     def test_complete_verification_reports_archive_failure(self):
         with tempfile.TemporaryDirectory() as tmp:

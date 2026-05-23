@@ -89,6 +89,14 @@ After verification passes and the user accepts (or the task is confirmed done), 
 
 After `just-demand-check` passes with no unresolved findings, the main agent should create a local checkpoint commit using the safety gate in `just-demand-execution`. This records that the verified slice passed engineering checks; it does not mean auto-push or irreversible product finality.
 
+Use the script-owned closure path instead of inventing an inline sequence:
+
+```text
+python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed "<summary>"
+```
+
+This command records the verification result, applies the checkpoint-commit safety gate, and archives the task when appropriate.
+
 - If later feedback requires a small correction, use a follow-up commit after the next clean check.
 - If the direction was fundamentally wrong, prefer a revert commit over history rewrite.
 - If feedback becomes repeatedly unstable, mark the task `debugging` or `tweaking` and pause auto-commit until another clean check passes.

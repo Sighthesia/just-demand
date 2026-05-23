@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from workflow_core import (
     archive_task,
     cleanup_completed_task,
+    complete_verification,
     create_intake,
     list_unfinished_tasks,
     mark_task,
@@ -56,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     archive = sub.add_parser("archive-task", help="Archive a completed task to tasks/archive/")
     archive.add_argument("task_id", help="Task ID to archive (must be status 'done')")
+
+    complete = sub.add_parser("complete-verification", help="Record verification result and optionally create a checkpoint commit")
+    complete.add_argument("task_id", help="Task ID to complete verification for")
+    complete.add_argument("result", choices=["passed", "failed", "blocked"])
+    complete.add_argument("summary", help="Short verification summary")
+    complete.add_argument("--no-auto-archive", action="store_true", help="Keep passed task active instead of archiving it")
+    complete.add_argument("--no-checkpoint-commit", action="store_true", help="Skip automatic checkpoint commit on passed verification")
 
     # Installation commands
     init = sub.add_parser("init", help="Initialize project-local .just-demand state")
@@ -106,6 +114,15 @@ def main() -> int:
             result = cleanup_completed_task(root, args.task_id)
         elif args.command == "archive-task":
             result = archive_task(root, args.task_id)
+        elif args.command == "complete-verification":
+            result = complete_verification(
+                root,
+                args.task_id,
+                args.result,
+                args.summary,
+                auto_archive=not args.no_auto_archive,
+                checkpoint_commit=not args.no_checkpoint_commit,
+            )
         elif args.command == "init":
             result = init_project(root)
         elif args.command == "install":

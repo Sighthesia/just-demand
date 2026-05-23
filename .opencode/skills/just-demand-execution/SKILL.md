@@ -82,6 +82,14 @@ A clean `just-demand-check` result (no findings or only fixed low-risk local iss
 - After fixing low-risk local issues identified by `just-demand-check` and re-verifying.
 - Positive user acceptance phrases (e.g., `effective`, `good`, `OK`, `LGTM`, `works`, `looks good`, `valid`, `不错`, `有效`, `可以`, `没问题`, `达成`, `就这样`) still authorize commit, but are not required.
 
+Use the script-owned closure command for passed verification:
+
+```text
+python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed "<summary>"
+```
+
+That command records verification, runs the checkpoint-commit safety gate, and archives the task. Use `--no-checkpoint-commit` only when the user explicitly asked to avoid committing.
+
 ### Non-trigger cases
 
 - The phrase occurs during planning or discussion, not after a change was made.

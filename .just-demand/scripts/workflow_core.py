@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -672,6 +673,205 @@ def update_task(root: Path, task_id: str, updates: dict[str, Any]) -> dict[str, 
     return task
 
 
+def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _normalize_repo_path(value: str) -> str:
+    normalized = value.replace("\\", "/").strip()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    while normalized.endswith("/"):
+        normalized = normalized[:-1]
+    return normalized
+
+
+def _parse_git_status_paths(output: str) -> list[str]:
+    paths: list[str] = []
+    for line in output.splitlines():
+        if len(line) < 4:
+            continue
+        candidate = line[3:].strip()
+        if not candidate:
+            continue
+        if " -> " in candidate:
+            candidate = candidate.split(" -> ", 1)[1].strip()
+        normalized = _normalize_repo_path(candidate)
+        if normalized:
+            paths.append(normalized)
+    return paths
+
+
+def _path_matches_scope(path: str, scope: str) -> bool:
+    normalized_path = _normalize_repo_path(path)
+    normalized_scope = _normalize_repo_path(scope)
+    if not normalized_path or not normalized_scope:
+        return False
+    return normalized_path == normalized_scope or normalized_path.startswith(normalized_scope + "/")
+
+
+def _is_disallowed_checkpoint_path(path: str) -> bool:
+    normalized = _normalize_repo_path(path)
+    if normalized.endswith(".pyc"):
+        return True
+    parts = normalized.split("/")
+    if "__pycache__" in parts:
+        return True
+    return normalized.startswith(".pytest_cache/") or normalized.startswith(".opencode/node_modules/")
+
+
+def _checkpoint_commit_message(task: dict[str, Any]) -> str:
+    task_type = str(task.get("type", "")).strip().lower()
+    if task_type in {"bug", "bugfix", "fix", "incident"}:
+        prefix = "fix"
+    elif task_type in {"implementation", "feature", "feat"}:
+        prefix = "feat"
+    else:
+        prefix = "chore"
+    subject = slugify(str(task.get("title") or task.get("id") or "task")).replace("-", " ")
+    return f"{prefix}: checkpoint {subject}"
+
+
+def _record_checkpoint_commit_result(root: Path, task_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    stored = dict(result)
+    stored["attempted_at"] = utc_now()
+    update_task(root, task_id, {"checkpoint_commit": stored})
+
+    if stored.get("created"):
+        summary = f"Checkpoint commit created: {stored.get('commit_hash')} ({stored.get('message')})"
+        event_type = "checkpoint_commit_created"
+    else:
+        summary = f"Checkpoint commit skipped: {stored.get('reason', 'unknown')}"
+        event_type = "checkpoint_commit_skipped"
+
+    append_task_event(root, task_id, event_type, summary)
+    append_workspace_event(root, event_type, "task", task_id, summary)
+    return stored
+
+
+def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
+    tpath = task_path(root, task_id) / "task.json"
+    if not tpath.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(tpath)
+    existing = task.get("checkpoint_commit") or {}
+    if existing.get("created"):
+        return {
+            "created": False,
+            "reason": "already_created",
+            "commit_hash": existing.get("commit_hash"),
+            "message": existing.get("message"),
+            "paths": existing.get("paths", []),
+        }
+
+    if task.get("verification_status") != "passed":
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "verification_not_passed", "paths": []},
+        )
+
+    repo_check = _run_git(root, "rev-parse", "--is-inside-work-tree")
+    if repo_check.returncode != 0 or repo_check.stdout.strip() != "true":
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "not_git_repo", "paths": []},
+        )
+
+    status_result = _run_git(root, "status", "--short")
+    if status_result.returncode != 0:
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "git_status_failed", "paths": []},
+        )
+
+    impact_scope = [
+        _normalize_repo_path(entry)
+        for entry in task.get("impact", [])
+        if isinstance(entry, str) and _normalize_repo_path(entry)
+    ]
+    if not impact_scope:
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "impact_scope_missing", "paths": []},
+        )
+
+    candidate_paths = [
+        path
+        for path in _parse_git_status_paths(status_result.stdout)
+        if any(_path_matches_scope(path, scope) for scope in impact_scope)
+        and not _is_disallowed_checkpoint_path(path)
+    ]
+    candidate_paths = list(dict.fromkeys(candidate_paths))
+    if not candidate_paths:
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "no_task_scoped_changes", "paths": []},
+        )
+
+    diff_result = _run_git(root, "diff", "--", *candidate_paths)
+    if diff_result.returncode != 0:
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "git_diff_failed", "paths": candidate_paths},
+        )
+
+    log_result = _run_git(root, "log", "--oneline", "-10")
+    if log_result.returncode != 0:
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "git_log_failed", "paths": candidate_paths},
+        )
+
+    add_result = _run_git(root, "add", "--", *candidate_paths)
+    if add_result.returncode != 0:
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "git_add_failed", "paths": candidate_paths},
+        )
+
+    message = _checkpoint_commit_message(task)
+    commit_result = _run_git(root, "commit", "-m", message, "--", *candidate_paths)
+    if commit_result.returncode != 0:
+        reason = "git_commit_failed"
+        failure_output = "\n".join(part for part in [commit_result.stdout, commit_result.stderr] if part).lower()
+        if "nothing to commit" in failure_output:
+            reason = "no_task_scoped_changes"
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": reason, "message": message, "paths": candidate_paths},
+        )
+
+    head_result = _run_git(root, "rev-parse", "HEAD")
+    commit_hash = head_result.stdout.strip() if head_result.returncode == 0 else None
+    return _record_checkpoint_commit_result(
+        root,
+        task_id,
+        {
+            "created": True,
+            "reason": None,
+            "commit_hash": commit_hash,
+            "message": message,
+            "paths": candidate_paths,
+        },
+    )
+
+
 def cleanup_completed_task(root: Path, task_id: str) -> dict[str, Any]:
     """Remove a completed task and clean up all runtime references.
 
@@ -1028,6 +1228,7 @@ def complete_verification(
     result: str,
     summary: str,
     auto_archive: bool = True,
+    checkpoint_commit: bool = True,
 ) -> dict[str, Any]:
     """Complete verification for a task.
 
@@ -1090,6 +1291,10 @@ def complete_verification(
         after_status=new_status,
     )
 
+    checkpoint_result = None
+    if result == "passed" and checkpoint_commit:
+        checkpoint_result = create_checkpoint_commit(root, task_id)
+
     # Auto-archive when verification passes
     archive_result = None
     archive_error = None
@@ -1108,6 +1313,8 @@ def complete_verification(
             )
 
     result_data = task
+    if checkpoint_result is not None:
+        result_data["checkpoint_commit"] = checkpoint_result
     if archive_result:
         result_data["archived"] = True
         result_data["archive_path"] = archive_result.get("archive_path")
