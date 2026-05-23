@@ -10,8 +10,8 @@ Clarify the user's need before exposing workflow mechanics.
 ## Core Rules
 
 - Focus on the user's described outcome, expected behavior, anti-outcomes, constraints, and tradeoffs.
-- Advance one user-understandable topic per turn.
-- Ask several related questions when the topic needs exploration.
+- Ask all related blocking questions in one turn when their answers would change the work, instead of asking one timid question at a time.
+- Keep the turn user-understandable, but do not use brevity as a reason to skip material uncertainty.
 - Prefer choices, contrasts, and recommended defaults over open-ended interrogation.
 - Do not discuss task packages, repo maps, JSONL, context injection, or subagent mechanics unless the user is explicitly designing those mechanisms.
 
@@ -20,9 +20,10 @@ Clarify the user's need before exposing workflow mechanics.
 1. Restate the user's goal and suspected anti-outcome.
 2. Identify the requirement type: UI, workflow, bugfix, architecture, docs, research, or implementation.
 3. Extract what the user already specified.
-4. Ask only questions whose answers would prevent user-visible mismatch.
-5. Summarize confirmed expectations and remaining gaps.
-6. Suggest promoting to a formal work item only after the user confirms the direction.
+4. Identify every missing detail whose answer could prevent user-visible mismatch.
+5. Ask the related blocking questions together, with concise options or recommended defaults when possible.
+6. Summarize confirmed expectations and remaining gaps.
+7. Suggest promoting to a formal work item only after the user confirms the direction.
 
 Record clarification in user-language buckets that can later become task data:
 
@@ -34,6 +35,42 @@ Record clarification in user-language buckets that can later become task data:
 - non-blocking questions
 
 Treat blocking questions as promotion blockers. Non-blocking questions may stay open if execution can still proceed safely.
+
+## Blocking Questions Policy
+
+A question is blocking when guessing the answer could change implementation path, validation criteria, user-facing behavior, or acceptable scope. Blocking questions include unresolved choices about expected behavior, actual behavior, reproduction conditions, affected scope, anti-outcomes, data loss/risk tolerance, or which tradeoff the user prefers.
+
+Do not demote a question to non-blocking just because a likely answer exists. Only proceed without asking when the user already answered it, the repository has an explicit durable decision, or the implementation is safely reversible and user-visible behavior will not change.
+
+## Question Threshold
+
+Ask implementation questions only when they affect:
+
+- Product behavior or user-visible outcomes
+- Architecture decisions or module boundaries
+- Compatibility with existing systems or data
+- Security, cost, or long-term maintenance
+
+Do not ask about implementation details that are purely engineering preferences when they do not affect the above categories.
+
+## One-Turn Questioning Rule
+
+For ambiguous new work or correction feedback, ask several related questions in the same response. Prefer this shape:
+
+```text
+Known: <what is already clear>
+Blocking questions:
+1. <choice that changes implementation>
+2. <scope/risk question>
+3. <validation question>
+Default if you do not care: <recommended default>
+```
+
+Avoid this shape:
+
+```text
+Can you clarify?
+```
 
 ## Questioning Patterns
 

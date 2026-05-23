@@ -14,6 +14,7 @@ Persist durable knowledge without turning exploratory chat into permanent policy
 - Deferred options: robust or broader approaches intentionally postponed.
 - Task decisions: choices that apply only to the current formal work item.
 - Open questions: unresolved items that block or shape future work.
+- Operating principles: durable role model, priorities, and communication defaults that apply across all work.
 
 ## Deferred Option Rule
 

@@ -37,7 +37,7 @@ It currently feels like [current feeling].
 I want it to feel more like [target feeling].
 ```
 
-Translate that internally into implementation changes. Ask only contrast questions when the feedback is ambiguous.
+Translate clear correction feedback internally into implementation changes. If the correction feedback is vague, contrastive, or could point to multiple fixes, stop and clarify before implementing.
 
 When correction feedback is vague, conflicting, or shows behavior drift without enough detail to act safely, route back into clarification-style questioning before more execution. In particular, re-establish:
 
@@ -47,7 +47,7 @@ When correction feedback is vague, conflicting, or shows behavior drift without 
 - scope of the correction
 - which questions are blocking versus non-blocking
 
-If the user says the result is "not quite right" or "still off," do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
+Ask the related clarification questions together in one turn rather than one timid question. If the user says the result is "not quite right," "still off," or otherwise reports drift, do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
 
 ## Lesson Capture Gate
 
@@ -112,3 +112,13 @@ When reporting verification, include:
 - Whether a lesson was captured (and where).
 - Whether the task is ready for archival.
 - Whether checkpoint commit was created, skipped, or blocked, with reason.
+
+### Default Final Report
+
+Unless the task involved debugging, architecture changes, new mechanisms, or explicit analysis is requested, keep the final report brief:
+
+1. **What changed**
+2. **Verification result**
+3. **Remaining risk or next decision** (if any)
+
+Only include root cause, detailed tradeoffs, Minimum Viable Knowledge, or analogy when the task involved debugging, architecture changes, new mechanisms, or the user explicitly asks for deeper analysis.

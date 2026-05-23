@@ -19,6 +19,31 @@ Execute formal work items through focused subagents and script-owned state.
 - Before dispatching a subagent or starting implementation, mark the task status with `mark`.
 - Before ending a turn with unfinished work, mark the task `paused` with current progress and known impact.
 
+### Evidence-First Execution
+
+- Evidence over stale memory. When information may be outdated or uncertain, verify against current codebase state.
+- Prioritize business value over technical cleverness. Stability and maintainability over short-term speed.
+
+### Dependency Justification
+
+Before introducing a new dependency, briefly explain:
+
+1. Why standard library or existing modules are insufficient
+2. Maturity and ecosystem position
+3. Alternatives considered
+4. Why the benefit justifies maintenance cost
+
+### Post-Change Structure Summary
+
+After adding or modifying UI or a new feature, briefly list the main structure of the changed area:
+
+- Changed components/modules (use actual names from code)
+- Key containers
+- Important props/state
+- Entry points
+
+Keep this summary short and structured. Prefer names as they appear in code. If names are unclear, propose concise labels based on the current structure.
+
 ## Subagent Routing
 
 - `just-demand-research`: research only; no code changes.
@@ -63,14 +88,24 @@ Active task: <task-id>
 
 This is a fallback for context injection failures.
 
+## Clarification Gate Before Execution
+
+Before dispatching any implementation subagent, verify that the task is sufficiently clarified:
+
+1. Check that `blocking_questions` in the task's clarification data is empty.
+2. Check that `scope`, `expected_behavior`, and `actual_behavior` (for bug work) are non-empty.
+3. If any blocking question remains or critical fields are empty, DO NOT dispatch. Route back to clarification instead: update the intake with the gaps and ask the user.
+4. Do not guess what the user wants to fill in missing fields. Ask.
+
 ## Execution Loop
 
 1. Confirm active formal work item.
 2. Run `python3 .just-demand/scripts/task.py --root . list-active` and inspect all unfinished tasks for conflict risk.
 3. Ensure the current task package has the required files for the intended subagent.
-4. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
-5. Review subagent output before moving to the next phase.
-6. Run verification before claiming completion.
+4. Verify the clarification gate above passes. If not, route back to clarification.
+5. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
+6. Review subagent output before moving to the next phase.
+7. Run verification before claiming completion.
 
 ## Checkpoint Commit Policy
 
@@ -130,6 +165,15 @@ When execution involves repeated debugging (>=3 attempts, or non-obvious root ca
 1. After the fix passes verification, route through the lesson-capture gate in `just-demand-verification` before claiming completion.
 2. Reusable patterns should become skills via the global `capture-lessons` skill. Project-local lessons go to workspace memory. Task-only lessons go to task `decisions.md`.
 3. Do not skip the capture gate just because the user already accepted the fix. If a reusable pattern was discovered, record it.
+
+### Circuit Breaker
+
+After two consecutive attempts fail to fix the same issue:
+
+1. Stop modifying code directly.
+2. Add necessary telemetry/logging to capture real context.
+3. Reassess the requirement, context, boundaries, tests, and assumptions.
+4. Escalate with options or use a subagent for independent analysis.
 
 ## Task Archival Expectation
 

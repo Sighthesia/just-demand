@@ -36,3 +36,9 @@ This balances engineering closure with recoverability. Checkpoint commits after 
 - Use global OpenCode installation for reusable runtime assets and explicit project-local initialization for `.just-demand` state.
 - Keep plugin writes out of ordinary startup; scripts remain the write path for workflow state.
 - First implementation should be local/in-repo CLI behavior, not package publication.
+
+
+## From Task: 2026-05-23-integrate-agents-ref-rules-task
+
+- Treat the reference as a durable workflow philosophy update, not a one-off task preference.
+- Keep always-loaded text concise and move operational detail into targeted skills.
