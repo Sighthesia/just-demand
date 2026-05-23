@@ -1,6 +1,6 @@
 ---
 name: using-just-demand
-description: Use at the start of work in this repository, when asked about the agent workflow itself, or when unsure which just-demand-* skill to load. Routes to the right workflow skill without injecting long rules every turn.
+description: Use at the start of work.
 ---
 
 # Using Just Demand
