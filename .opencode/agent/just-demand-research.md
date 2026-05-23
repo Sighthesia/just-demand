@@ -2,8 +2,12 @@
 description: Researches a focused just-demand question and writes findings without changing code.
 mode: subagent
 permission:
-  edit: deny
-  bash: deny
+  read: allow
+  write: allow
+  edit: allow
+  bash: allow
+  glob: allow
+  grep: allow
   task: deny
 ---
 
