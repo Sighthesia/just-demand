@@ -41,6 +41,7 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 ### Installation Commands
 
 - Initialize project: `python3 .just-demand/scripts/task.py --root <project-root> init`
+- Refresh local scripts in initialized workspaces: `python3 .just-demand/scripts/task.py sync-workspaces [--search-root <path>]`
 - Install globally: `python3 .just-demand/scripts/task.py install --opencode --global [--config-root <path>]`
 - Update global install: `python3 .just-demand/scripts/task.py update --opencode --global [--config-root <path>]`
 - Check status: `python3 .just-demand/scripts/task.py --root <project-root> doctor [--config-root <path>]`

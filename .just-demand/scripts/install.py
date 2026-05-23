@@ -55,6 +55,11 @@ def get_repo_opencode_dir() -> Path:
     return get_repo_root() / ".opencode"
 
 
+def get_repo_scripts_dir() -> Path:
+    """Get the project-local workflow scripts directory in the repository."""
+    return get_repo_root() / ".just-demand" / "scripts"
+
+
 def get_config_root(config_root: Optional[Path] = None) -> Path:
     """Get the OpenCode config root, using provided or default."""
     return config_root or DEFAULT_CONFIG_ROOT
@@ -351,6 +356,65 @@ def doctor_opencode_global(config_root: Optional[Path] = None, project_root: Opt
     }
 
 
+def sync_project_scripts(project_root: Path) -> int:
+    """Copy the repo's project-local workflow scripts into a workspace.
+
+    `init` is the workspace-level sync entrypoint, so rerunning it refreshes any
+    managed script copies from the currently invoked repository checkout.
+    """
+    workflow_root = project_root / ".just-demand"
+    source_scripts = get_repo_scripts_dir()
+    target_scripts = workflow_root / "scripts"
+    manifest = {"installed_files": {}, "version": "1.0"}
+    return deploy_directory(source_scripts, target_scripts, manifest, workflow_root, exclude=["__pycache__"])
+
+
+def discover_initialized_workspaces(search_root: Path) -> list[Path]:
+    """Find initialized project roots beneath a search root."""
+    resolved_root = search_root.resolve()
+    if not resolved_root.exists():
+        raise FileNotFoundError(f"Search root not found: {resolved_root}")
+
+    discovered: set[Path] = set()
+    for state_path in resolved_root.rglob(".just-demand/workspace/state.json"):
+        discovered.add(state_path.parents[2].resolve())
+    return sorted(discovered)
+
+
+def sync_initialized_workspaces(search_roots: Optional[list[Path]] = None) -> dict[str, Any]:
+    """Refresh local workflow scripts for all initialized workspaces under search roots."""
+    roots = search_roots or [Path.cwd()]
+    resolved_search_roots = [root.resolve() for root in roots]
+    workspaces: list[dict[str, Any]] = []
+    seen_projects: set[Path] = set()
+
+    for search_root in resolved_search_roots:
+        for project_root in discover_initialized_workspaces(search_root):
+            if project_root in seen_projects:
+                continue
+            seen_projects.add(project_root)
+            scripts_deployed = sync_project_scripts(project_root)
+            workspaces.append(
+                {
+                    "project_root": str(project_root),
+                    "scripts_deployed": scripts_deployed,
+                    "updated": scripts_deployed > 0,
+                }
+            )
+
+    total_scripts_deployed = sum(item["scripts_deployed"] for item in workspaces)
+    updated_count = sum(1 for item in workspaces if item["updated"])
+    return {
+        "status": "success",
+        "search_roots": [str(root) for root in resolved_search_roots],
+        "workspaces_found": len(workspaces),
+        "workspaces_updated": updated_count,
+        "total_scripts_deployed": total_scripts_deployed,
+        "workspaces": workspaces,
+        "message": f"Synchronized local workflow scripts in {updated_count} of {len(workspaces)} initialized workspaces",
+    }
+
+
 def init_project(project_root: Optional[Path] = None) -> dict[str, Any]:
     """Initialize project-local .just-demand state.
     
@@ -360,11 +424,13 @@ def init_project(project_root: Optional[Path] = None) -> dict[str, Any]:
     
     try:
         ensure_workspace(project_root)
+        scripts_deployed = sync_project_scripts(project_root)
         return {
             "status": "success",
             "project_root": str(project_root),
             "just_demand_dir": str(project_root / ".just-demand"),
-            "message": f"Initialized project workspace in {project_root / '.just-demand'}",
+            "scripts_deployed": scripts_deployed,
+            "message": f"Initialized project workspace in {project_root / '.just-demand'} and synchronized local workflow scripts",
         }
     except Exception as e:
         return {
@@ -397,6 +463,9 @@ def build_parser() -> Any:
     update_parser = sub.add_parser("update", help="Update existing global installation")
     update_parser.add_argument("--opencode", action="store_true", help="Update OpenCode runtime assets")
     update_parser.add_argument("--global", action="store_true", dest="global_update", help="Update global installation")
+
+    sync_parser = sub.add_parser("sync-workspaces", help="Refresh local workflow scripts in initialized workspaces")
+    sync_parser.add_argument("--search-root", action="append", default=None, help="Directory tree to scan for initialized workspaces (repeatable, default: current directory)")
     
     # doctor command
     doctor_parser = sub.add_parser("doctor", help="Report installation and activation status")
@@ -429,6 +498,9 @@ def main() -> int:
             result = {"status": "error", "message": "Update requires --opencode --global flags"}
         else:
             result = update_opencode_global(config_root)
+    elif args.command == "sync-workspaces":
+        search_roots = [Path(path) for path in args.search_root] if args.search_root else None
+        result = sync_initialized_workspaces(search_roots)
     elif args.command == "doctor":
         result = doctor_opencode_global(config_root, project_root)
     elif args.command == "uninstall":

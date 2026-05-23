@@ -86,7 +86,7 @@ python .just-demand/scripts/task.py install --opencode --global --config-root "C
 
 ## Enable In A Project
 
-After the global install, each project only needs local workflow state.
+After the global install, each project needs its own local `.just-demand/` state and the managed `.just-demand/scripts/` snapshot created by `init`.
 
 Linux / macOS:
 
@@ -109,7 +109,7 @@ This creates:
 The normal model is:
 
 - global install provides reusable OpenCode runtime capability
-- each project stores its own local `.just-demand/` state
+- each project stores its own local `.just-demand/` state and local workflow script snapshot
 
 No per-project `.opencode/` copy is required for the normal flow.
 
@@ -140,6 +140,30 @@ python .just-demand/scripts/task.py update --opencode --global --config-root "C:
 ```
 
 Project-local state usually does not need migration for this workflow change. If a project has not been initialized yet, run `init` for that project.
+
+If you have existing initialized projects and want to refresh their local `.just-demand/scripts/` after pulling repository changes, rerun `init` for each project from the updated repository checkout:
+
+```bash
+python3 /stable/path/to/just-demand/.just-demand/scripts/task.py --root "/target/project" init
+```
+
+```powershell
+python C:\path\to\just-demand\.just-demand\scripts\task.py --root "C:\path\to\project" init
+```
+
+`update --opencode --global` refreshes only the global OpenCode runtime assets under the OpenCode config root. It does not fan out to previously initialized project workspaces because those workspaces hold their own local `.just-demand/scripts/` copies. `init` is idempotent and now acts as the explicit workspace script sync step.
+
+If you want one explicit command that refreshes all initialized workspaces under one or more directory trees, use `sync-workspaces`:
+
+```bash
+python3 .just-demand/scripts/task.py sync-workspaces --search-root "/projects" --search-root "/more-projects"
+```
+
+```powershell
+python .just-demand/scripts/task.py sync-workspaces --search-root "C:\Projects" --search-root "D:\Shared"
+```
+
+If you omit `--search-root`, the command scans the current working directory recursively.
 
 ## Check Status
 
@@ -208,10 +232,16 @@ python3 .just-demand/scripts/task.py install --opencode --global
 python3 /stable/path/to/just-demand/.just-demand/scripts/task.py --root "/target/project" init
 ```
 
-4. After updating this repository, refresh the global install:
+4. After updating this repository, refresh the global runtime assets:
 
 ```bash
 python3 .just-demand/scripts/task.py update --opencode --global
+```
+
+5. Refresh local workflow scripts in all initialized workspaces:
+
+```bash
+python3 .just-demand/scripts/task.py sync-workspaces --search-root "/path/to/projects/parent"
 ```
 
 ### Windows
@@ -230,10 +260,16 @@ python C:\Users\You\just-demand\.just-demand\scripts\task.py install --opencode 
 python C:\Users\You\just-demand\.just-demand\scripts\task.py --root "C:\path\to\target\project" init
 ```
 
-4. After updating this repository, refresh the global install:
+4. After updating this repository, refresh the global runtime assets:
 
 ```powershell
 python C:\Users\You\just-demand\.just-demand\scripts\task.py update --opencode --global
+```
+
+5. Refresh local workflow scripts in all initialized workspaces:
+
+```powershell
+python C:\Users\You\just-demand\.just-demand\scripts\task.py sync-workspaces --search-root "C:\path\to\projects\parent"
 ```
 
 ## Verification Commands

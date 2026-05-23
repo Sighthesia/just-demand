@@ -17,6 +17,7 @@ from workflow_core import (
     promote_to_task,
 )
 from install import (
+    sync_initialized_workspaces,
     init_project,
     install_opencode_global,
     update_opencode_global,
@@ -77,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--opencode", action="store_true", help="Update OpenCode runtime assets")
     update.add_argument("--global", action="store_true", dest="global_update", help="Update global installation")
     update.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
+
+    sync = sub.add_parser("sync-workspaces", help="Refresh local workflow scripts in initialized workspaces")
+    sync.add_argument("--search-root", action="append", default=None, help="Directory tree to scan for initialized workspaces (repeatable, default: current directory)")
     
     doctor = sub.add_parser("doctor", help="Report installation and activation status")
     doctor.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
@@ -137,6 +141,9 @@ def main() -> int:
             else:
                 config_root = Path(args.config_root) if args.config_root else None
                 result = update_opencode_global(config_root)
+        elif args.command == "sync-workspaces":
+            search_roots = [Path(path) for path in args.search_root] if args.search_root else None
+            result = sync_initialized_workspaces(search_roots)
         elif args.command == "doctor":
             config_root = Path(args.config_root) if args.config_root else None
             result = doctor_opencode_global(config_root, root)

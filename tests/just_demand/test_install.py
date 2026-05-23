@@ -11,6 +11,7 @@ SCRIPT_DIR = REPO_ROOT / ".just-demand" / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from install import (
+    sync_initialized_workspaces,
     init_project,
     install_opencode_global,
     update_opencode_global,
@@ -35,6 +36,9 @@ class InstallCoreTests(unittest.TestCase):
             self.assertTrue((root / ".just-demand").exists())
             self.assertTrue((root / ".just-demand" / "workspace" / "state.json").exists())
             self.assertTrue((root / ".just-demand" / "workspace" / "preferences.md").exists())
+            self.assertTrue((root / ".just-demand" / "scripts" / "task.py").exists())
+            self.assertTrue((root / ".just-demand" / "scripts" / "install.py").exists())
+            self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())
 
     def test_init_project_creates_only_project_workflow_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -52,6 +56,58 @@ class InstallCoreTests(unittest.TestCase):
             self.assertEqual(result1["status"], "success")
             self.assertEqual(result2["status"], "success")
             # Should not fail on second run
+
+    def test_init_project_refreshes_changed_local_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = SCRIPT_DIR / "task.py"
+
+            init_project(root)
+            target = root / ".just-demand" / "scripts" / "task.py"
+            target.write_text("stale\n", encoding="utf-8")
+
+            result = init_project(root)
+
+            self.assertEqual(result["status"], "success")
+            self.assertGreater(result["scripts_deployed"], 0)
+            self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
+
+    def test_sync_initialized_workspaces_refreshes_all_discovered_projects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            search_root = Path(tmp)
+            project_a = search_root / "project-a"
+            project_b = search_root / "nested" / "project-b"
+            project_a.mkdir(parents=True)
+            project_b.mkdir(parents=True)
+            init_project(project_a)
+            init_project(project_b)
+
+            source_task = SCRIPT_DIR / "task.py"
+            source_core = SCRIPT_DIR / "workflow_core.py"
+            target_task = project_a / ".just-demand" / "scripts" / "task.py"
+            target_core = project_b / ".just-demand" / "scripts" / "workflow_core.py"
+            target_task.write_text("stale task\n", encoding="utf-8")
+            target_core.write_text("stale core\n", encoding="utf-8")
+
+            result = sync_initialized_workspaces([search_root])
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["workspaces_found"], 2)
+            self.assertEqual(result["workspaces_updated"], 2)
+            self.assertGreaterEqual(result["total_scripts_deployed"], 2)
+            self.assertEqual(target_task.read_text(encoding="utf-8"), source_task.read_text(encoding="utf-8"))
+            self.assertEqual(target_core.read_text(encoding="utf-8"), source_core.read_text(encoding="utf-8"))
+
+    def test_sync_initialized_workspaces_returns_empty_result_when_none_found(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            search_root = Path(tmp)
+
+            result = sync_initialized_workspaces([search_root])
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["workspaces_found"], 0)
+            self.assertEqual(result["workspaces_updated"], 0)
+            self.assertEqual(result["total_scripts_deployed"], 0)
     
     def test_get_repo_root_returns_path(self):
         repo_root = get_repo_root()
@@ -333,6 +389,7 @@ class InstallCLITests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "success")
             self.assertTrue((root / ".just-demand").exists())
+            self.assertTrue((root / ".just-demand" / "scripts" / "task.py").exists())
     
     def test_cli_install_requires_flags(self):
         import subprocess
@@ -387,6 +444,34 @@ class InstallCLITests(unittest.TestCase):
             )
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "success")
+
+    def test_cli_sync_workspaces(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            search_root = Path(tmp)
+            project_root = search_root / "project"
+            project_root.mkdir()
+            init_project(project_root)
+
+            source = SCRIPT_DIR / "task.py"
+            target = project_root / ".just-demand" / "scripts" / "task.py"
+            target.write_text("stale\n", encoding="utf-8")
+
+            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "sync-workspaces", "--search-root", str(search_root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+
+            self.assertEqual(payload["status"], "success")
+            self.assertEqual(payload["workspaces_found"], 1)
+            self.assertEqual(payload["workspaces_updated"], 1)
+            self.assertGreater(payload["total_scripts_deployed"], 0)
+            self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
     
     def test_cli_doctor(self):
         import subprocess
