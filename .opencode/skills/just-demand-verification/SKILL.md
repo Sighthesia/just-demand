@@ -39,6 +39,16 @@ I want it to feel more like [target feeling].
 
 Translate that internally into implementation changes. Ask only contrast questions when the feedback is ambiguous.
 
+When correction feedback is vague, conflicting, or shows behavior drift without enough detail to act safely, route back into clarification-style questioning before more execution. In particular, re-establish:
+
+- expected behavior
+- actual behavior
+- reproduction or triggering conditions when relevant
+- scope of the correction
+- which questions are blocking versus non-blocking
+
+If the user says the result is "not quite right" or "still off," do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
+
 ## Lesson Capture Gate
 
 After verification passes, check whether the task involved non-trivial debugging. If any of the following are true, load the global `capture-lessons` skill and use its pattern before final closure:

@@ -13,6 +13,25 @@ export const readJson = (path) => {
 
 export const readTextIfExists = (path) => existsSync(path) ? readFileSync(path, "utf8") : ""
 
+const renderClarificationContext = (task) => {
+  const clarification = task?.clarification || {}
+  const entries = [
+    ["Current Understanding", clarification.current_understanding],
+    ["Expected Behavior", clarification.expected_behavior],
+    ["Actual Behavior", clarification.actual_behavior],
+    ["Reproduction", clarification.reproduction],
+    ["Scope", clarification.scope],
+  ].filter(([, value]) => typeof value === "string" && value.trim())
+
+  if (entries.length === 0) return ""
+
+  return [
+    "# Clarification",
+    "",
+    ...entries.flatMap(([label, value]) => [`## ${label}`, value.trim(), ""]),
+  ].join("\n").trimEnd()
+}
+
 export const getActiveTask = (directory) => {
   const statePath = join(workflowRoot(directory), "workspace", "state.json")
   if (!existsSync(statePath)) return null
@@ -57,12 +76,28 @@ export const readTaskContext = (directory, taskId, agentName) => {
   const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
   const workspaceDir = join(workflowRoot(directory), "workspace")
   const parts = []
+  const task = readTaskJson(directory, taskId)
 
   const context = readTextIfExists(join(taskDir, "context.md"))
   if (context) parts.push(context)
 
+  if (["just-demand-implement", "just-demand-check"].includes(agentName)) {
+    const clarificationContext = renderClarificationContext(task)
+    if (clarificationContext) parts.push(clarificationContext)
+  }
+
   const decisions = readTextIfExists(join(taskDir, "decisions.md"))
   if (decisions) parts.push(decisions)
+
+  const openQuestions = readTextIfExists(join(taskDir, "open_questions.md"))
+  const clarificationQuestions = task?.clarification?.non_blocking_questions || []
+  const hasRemainingOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, "")) || clarificationQuestions.length > 0
+  const renderedOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, ""))
+    ? openQuestions
+    : `# Open Questions\n\n## Remaining Open Questions\n\n${clarificationQuestions.map((question) => `- ${question}`).join("\n")}\n`
+  if (hasRemainingOpenQuestions && ["just-demand-implement", "just-demand-check"].includes(agentName)) {
+    parts.push(renderedOpenQuestions)
+  }
 
   switch (agentName) {
     case "just-demand-implement": {

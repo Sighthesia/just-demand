@@ -3,8 +3,9 @@ import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflo
 
 const SUPPORTED = new Set(["just-demand-research", "just-demand-implement", "just-demand-check", "just-demand-docs"])
 
-// Marker to detect if prompt has already been injected with workflow context
-const INJECTION_MARKER = "# Injected Workflow Context"
+// Markers to detect if prompt has already been injected with workflow context.
+// Keep the legacy header to avoid duplicate injection across old prompts.
+const INJECTION_MARKERS = ["# Just Demand Workflow", "# Injected Workflow Context"]
 
 export default async ({ directory }) => {
   return {
@@ -13,12 +14,12 @@ export default async ({ directory }) => {
       if (String(input?.tool || "").toLowerCase() !== "task") return
       const args = output?.args
       if (!args || !SUPPORTED.has(args.subagent_type)) return
-      
+
       // Skip if prompt already contains workflow context (duplicate injection protection)
-      if (args.prompt && args.prompt.includes(INJECTION_MARKER)) {
+      if (args.prompt && INJECTION_MARKERS.some((marker) => args.prompt.includes(marker))) {
         return
       }
-      
+
       const taskId = getActiveTask(directory)
       if (!taskId) return
       const missing = getMissingRequiredContextFiles(directory, taskId, args.subagent_type)
@@ -28,7 +29,7 @@ export default async ({ directory }) => {
       }
       const context = readTaskContext(directory, taskId, args.subagent_type)
       if (!context) return
-      args.prompt = `Active task: ${taskId}\n\n# Injected Workflow Context\n\n${context}\n\n---\n\n# Execution Rules\n\nComplete the requested work in this subagent.\nDo not call the Task tool.\nDo not dispatch another subagent.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
+      args.prompt = `Active task: ${taskId}\n\n# Just Demand Workflow\n\n${context}\n\n---\n\n# Execution Rules\n\nComplete the requested work in this subagent.\nDo not call the Task tool.\nDo not dispatch another subagent.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
     },
   }
 }

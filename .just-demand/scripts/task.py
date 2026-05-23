@@ -85,51 +85,54 @@ def main() -> int:
     args = build_parser().parse_args()
     root = Path(args.root).resolve()
     
-    if args.command == "create-intake":
-        result = create_intake(root, args.title, args.raw_request, args.session)
-    elif args.command == "promote":
-        criteria = args.acceptance or ["The formal task package exists and can be executed."]
-        result = promote_to_task(root, args.intake_id, args.title, args.goal, args.type, criteria)
-    elif args.command == "list-active":
-        result = {"tasks": list_unfinished_tasks(root, verbose=getattr(args, "verbose", False))}
-    elif args.command == "mark":
-        result = mark_task(
-            root,
-            args.task_id,
-            args.status,
-            progress=args.progress,
-            impact=args.impact,
-            note=args.note,
-        )
-    elif args.command == "cleanup-task":
-        result = cleanup_completed_task(root, args.task_id)
-    elif args.command == "archive-task":
-        result = archive_task(root, args.task_id)
-    elif args.command == "init":
-        result = init_project(root)
-    elif args.command == "install":
-        if not args.opencode or not args.global_install:
-            result = {"status": "error", "message": "Install requires --opencode --global flags"}
-        else:
+    try:
+        if args.command == "create-intake":
+            result = create_intake(root, args.title, args.raw_request, args.session)
+        elif args.command == "promote":
+            criteria = args.acceptance or ["The formal task package exists and can be executed."]
+            result = promote_to_task(root, args.intake_id, args.title, args.goal, args.type, criteria)
+        elif args.command == "list-active":
+            result = {"tasks": list_unfinished_tasks(root, verbose=getattr(args, "verbose", False))}
+        elif args.command == "mark":
+            result = mark_task(
+                root,
+                args.task_id,
+                args.status,
+                progress=args.progress,
+                impact=args.impact,
+                note=args.note,
+            )
+        elif args.command == "cleanup-task":
+            result = cleanup_completed_task(root, args.task_id)
+        elif args.command == "archive-task":
+            result = archive_task(root, args.task_id)
+        elif args.command == "init":
+            result = init_project(root)
+        elif args.command == "install":
+            if not args.opencode or not args.global_install:
+                result = {"status": "error", "message": "Install requires --opencode --global flags"}
+            else:
+                config_root = Path(args.config_root) if args.config_root else None
+                result = install_opencode_global(config_root)
+        elif args.command == "update":
+            if not args.opencode or not args.global_update:
+                result = {"status": "error", "message": "Update requires --opencode --global flags"}
+            else:
+                config_root = Path(args.config_root) if args.config_root else None
+                result = update_opencode_global(config_root)
+        elif args.command == "doctor":
             config_root = Path(args.config_root) if args.config_root else None
-            result = install_opencode_global(config_root)
-    elif args.command == "update":
-        if not args.opencode or not args.global_update:
-            result = {"status": "error", "message": "Update requires --opencode --global flags"}
+            result = doctor_opencode_global(config_root, root)
+        elif args.command == "uninstall":
+            if not args.opencode or not args.global_uninstall:
+                result = {"status": "error", "message": "Uninstall requires --opencode --global flags"}
+            else:
+                config_root = Path(args.config_root) if args.config_root else None
+                result = uninstall_opencode_global(config_root)
         else:
-            config_root = Path(args.config_root) if args.config_root else None
-            result = update_opencode_global(config_root)
-    elif args.command == "doctor":
-        config_root = Path(args.config_root) if args.config_root else None
-        result = doctor_opencode_global(config_root, root)
-    elif args.command == "uninstall":
-        if not args.opencode or not args.global_uninstall:
-            result = {"status": "error", "message": "Uninstall requires --opencode --global flags"}
-        else:
-            config_root = Path(args.config_root) if args.config_root else None
-            result = uninstall_opencode_global(config_root)
-    else:
-        raise RuntimeError(f"Unsupported command: {args.command}")
+            raise RuntimeError(f"Unsupported command: {args.command}")
+    except Exception as exc:
+        result = {"status": "error", "message": str(exc)}
     print(json.dumps(result, ensure_ascii=False))
     # Return 0 for success, 1 for error status
     if isinstance(result, dict):

@@ -73,9 +73,9 @@ def ensure_workspace(root: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
     memory_files = {
-        base / "global" / "rules.md": "# Just Demand Rules\n\n",
-        base / "global" / "architecture.md": "# Just Demand Architecture\n\n",
-        base / "global" / "glossary.md": "# Just Demand Glossary\n\n",
+        base / "global" / "rules.md": "# Just Demand Workflow Rules\n\n",
+        base / "global" / "architecture.md": "# Just Demand Workflow Architecture\n\n",
+        base / "global" / "glossary.md": "# Just Demand Workflow Glossary\n\n",
         base / "workspace" / "preferences.md": "# Preferences\n\n",
         base / "workspace" / "decisions.md": "# Decisions\n\n",
         base / "workspace" / "deferred_options.md": "# Deferred Options\n\n",
@@ -188,6 +188,15 @@ def default_task_json(
         "goal": goal,
         "constraints": [],
         "acceptance_criteria": acceptance_criteria,
+        "clarification": {
+            "current_understanding": "",
+            "expected_behavior": "",
+            "actual_behavior": "",
+            "reproduction": "",
+            "scope": "",
+            "blocking_questions": [],
+            "non_blocking_questions": [],
+        },
         "validation_revision": None,
         "verification_status": "not_started",
         "related_files": [],
@@ -205,6 +214,124 @@ def default_task_json(
     }
 
 
+INTAKE_SECTION_ORDER = [
+    "Raw Request",
+    "Current Understanding",
+    "Expected Outcome",
+    "Expected Behavior",
+    "Actual Behavior",
+    "Reproduction",
+    "Scope",
+    "Anti-Outcome",
+    "Decisions",
+    "Deferred Options",
+    "Blocking Questions",
+    "Non-Blocking Questions",
+    "Open Questions",
+]
+
+
+def parse_markdown_sections(text: str) -> dict[str, str]:
+    section_pattern = re.compile(r"^## (?P<name>.+)$", re.MULTILINE)
+    matches = list(section_pattern.finditer(text))
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        sections[match.group("name").strip()] = text[start:end].strip()
+    return sections
+
+
+def parse_question_block(text: str) -> list[str]:
+    cleaned = text.strip()
+    if not cleaned or cleaned.lower() in {"none", "n/a", "na"}:
+        return []
+    questions: list[str] = []
+    for line in cleaned.splitlines():
+        item = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
+        if item:
+            questions.append(item)
+    return questions
+
+
+def read_intake_sections(root: Path, intake_id: str) -> dict[str, str]:
+    intake_md = workspace_dir(root) / "intake" / f"{intake_id}.md"
+    if not intake_md.is_file():
+        return {}
+    return parse_markdown_sections(intake_md.read_text(encoding="utf-8"))
+
+
+def intake_needs_bug_clarification(task_type: str, raw_request: str, sections: dict[str, str]) -> bool:
+    bug_types = {"bug", "bugfix", "fix", "incident"}
+    if task_type.strip().lower() in bug_types:
+        return True
+    if any(
+        sections.get(name, "").strip()
+        for name in ("Actual Behavior", "Reproduction")
+    ):
+        return True
+    signal_text = "\n".join(
+        [
+            raw_request,
+            sections.get("Current Understanding", ""),
+        ]
+    ).lower()
+    strong_keywords = ["bug", "broken", "regression", "mismatch", "crash", "error", "fails", "failing"]
+    if any(keyword in signal_text for keyword in strong_keywords):
+        return True
+    mismatch_patterns = [
+        r"\bexpected\b.+\b(?:but|got|received)\b",
+        r"\bgot\b.+\binstead\b",
+        r"\bactual\b.+\bexpected\b",
+    ]
+    return any(re.search(pattern, signal_text) for pattern in mismatch_patterns)
+
+
+def build_clarification_payload(root: Path, intake_id: str, task_type: str) -> dict[str, Any]:
+    sections = read_intake_sections(root, intake_id)
+    raw_request = sections.get("Raw Request", "")
+    blocking_questions = parse_question_block(sections.get("Blocking Questions", ""))
+    non_blocking_questions = parse_question_block(
+        sections.get("Non-Blocking Questions", sections.get("Open Questions", ""))
+    )
+    return {
+        "current_understanding": sections.get("Current Understanding", ""),
+        "expected_behavior": sections.get("Expected Behavior", sections.get("Expected Outcome", "")),
+        "actual_behavior": sections.get("Actual Behavior", ""),
+        "reproduction": sections.get("Reproduction", ""),
+        "scope": sections.get("Scope", ""),
+        "blocking_questions": blocking_questions,
+        "non_blocking_questions": non_blocking_questions,
+        "needs_bug_clarification": intake_needs_bug_clarification(task_type, raw_request, sections),
+    }
+
+
+def intake_readiness_errors(root: Path, intake_id: str, task_type: str) -> list[str]:
+    clarification = build_clarification_payload(root, intake_id, task_type)
+    errors: list[str] = []
+    if not clarification["scope"].strip():
+        errors.append("Scope is required before promotion.")
+    if clarification["needs_bug_clarification"]:
+        if not clarification["expected_behavior"].strip():
+            errors.append("Expected Behavior is required for bug or mismatch work before promotion.")
+        if not clarification["actual_behavior"].strip():
+            errors.append("Actual Behavior is required for bug or mismatch work before promotion.")
+        if not clarification["reproduction"].strip():
+            errors.append("Reproduction is required for bug or mismatch work before promotion.")
+    if clarification["blocking_questions"]:
+        errors.append("Blocking Questions must be cleared before promotion.")
+    return errors
+
+
+def render_open_questions_markdown(non_blocking_questions: list[str]) -> str:
+    if not non_blocking_questions:
+        return "# Open Questions\n\n"
+    lines = ["# Open Questions", "", "## Remaining Open Questions", ""]
+    lines.extend([f"- {question}" for question in non_blocking_questions])
+    lines.append("")
+    return "\n".join(lines)
+
+
 def promote_to_task(
     root: Path,
     intake_id: str,
@@ -215,11 +342,15 @@ def promote_to_task(
 ) -> dict[str, str]:
     ensure_workspace(root)
     now = utc_now()
+    readiness_errors = intake_readiness_errors(root, intake_id, task_type)
+    if readiness_errors:
+        raise RuntimeError("Promotion blocked: " + " ".join(readiness_errors))
 
     date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     task_id = f"{date_prefix}-{slugify(title)}-task"
 
     task_data = default_task_json(task_id, intake_id, title, goal, task_type, acceptance_criteria)
+    task_data["clarification"] = build_clarification_payload(root, intake_id, task_type)
     state_path = workspace_dir(root) / "state.json"
     state = read_json(state_path)
 
@@ -235,7 +366,7 @@ def promote_to_task(
         for name, content in {
             "context.md": "# Context\n\n",
             "decisions.md": "# Decisions\n\n",
-            "open_questions.md": "# Open Questions\n\n",
+            "open_questions.md": render_open_questions_markdown(task_data["clarification"]["non_blocking_questions"]),
             "implement.md": "# Implement\n\n",
             "verify.md": "# Verify\n\n",
         }.items():
@@ -311,11 +442,23 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
                 "",
                 "## Expected Outcome",
                 "",
+                "## Expected Behavior",
+                "",
+                "## Actual Behavior",
+                "",
+                "## Reproduction",
+                "",
+                "## Scope",
+                "",
                 "## Anti-Outcome",
                 "",
                 "## Decisions",
                 "",
                 "## Deferred Options",
+                "",
+                "## Blocking Questions",
+                "",
+                "## Non-Blocking Questions",
                 "",
                 "## Open Questions",
                 "",

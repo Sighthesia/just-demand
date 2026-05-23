@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +30,26 @@ from workflow_core import (
     workspace_dir,
     write_json_atomic,
 )
+
+
+def replace_intake_section(path: Path, heading: str, body: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    pattern = rf"(^## {re.escape(heading)}\n)(.*?)(?=^## |\Z)"
+    updated = re.sub(
+        pattern,
+        lambda match: f"{match.group(1)}{body.rstrip()}\n\n",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    path.write_text(updated, encoding="utf-8")
+
+
+def set_intake_scope(root: Path, intake_id: str, scope: str = "Confirmed implementation scope.") -> None:
+    replace_intake_section(
+        root / ".just-demand" / "workspace" / "intake" / f"{intake_id}.md",
+        "Scope",
+        scope,
+    )
 
 
 class WorkflowCoreTests(unittest.TestCase):
@@ -76,6 +97,27 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(event["type"], "intake_created")
             self.assertEqual(event["entity_id"], result["intake_id"])
 
+    def test_create_intake_includes_clarification_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_intake(root, "Bug report", "Feature breaks on save", "session-main")
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{result['intake_id']}.md"
+            intake_text = intake_path.read_text(encoding="utf-8")
+            self.assertIn("## Expected Behavior", intake_text)
+            self.assertIn("## Actual Behavior", intake_text)
+            self.assertIn("## Reproduction", intake_text)
+            self.assertIn("## Scope", intake_text)
+            self.assertIn("## Blocking Questions", intake_text)
+            self.assertIn("## Non-Blocking Questions", intake_text)
+
+    def test_create_intake_leaves_scope_blank_for_clarification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_intake(root, "Feature request", "Add a keyboard shortcut", "session-main")
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{result['intake_id']}.md"
+            intake_text = intake_path.read_text(encoding="utf-8")
+            self.assertRegex(intake_text, r"## Scope\n\n## Anti-Outcome")
+
 
     def test_promote_intake_to_task_creates_formal_package(self):
         from workflow_core import promote_to_task
@@ -88,6 +130,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 raw_request="Build an OpenCode-first agent workflow.",
                 session_id="session-main",
             )
+            set_intake_scope(root, intake["intake_id"], "Build the initial OpenCode-first workflow runtime.")
 
             result = promote_to_task(
                 root,
@@ -113,11 +156,84 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(task["status"], "planning")
             self.assertEqual(task["goal"], "Build an OpenCode-first local workflow runtime.")
             self.assertEqual(task["acceptance_criteria"], ["Workspace intake can be promoted to a formal task."])
+            self.assertEqual(task["clarification"]["scope"], "Build the initial OpenCode-first workflow runtime.")
+            self.assertEqual(task["clarification"]["blocking_questions"], [])
 
             state = read_json(root / ".just-demand" / "workspace" / "state.json")
             self.assertIsNone(state["current_intake_id"])
             self.assertEqual(state["current_task_id"], result["task_id"])
             self.assertIn(result["task_id"], state["active_task_ids"])
+
+    def test_promote_blocks_when_scope_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Workflow", "Build workflow", "session-main")
+
+            with self.assertRaisesRegex(RuntimeError, "Scope is required"):
+                promote_to_task(root, intake["intake_id"], "Workflow", "Build workflow", "design", ["It works"])
+
+    def test_promote_blocks_when_blocking_questions_remain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Workflow", "Build workflow", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            replace_intake_section(intake_path, "Blocking Questions", "- Should this affect archived tasks?")
+
+            with self.assertRaisesRegex(RuntimeError, "Blocking Questions"):
+                promote_to_task(root, intake["intake_id"], "Workflow", "Build workflow", "design", ["It works"])
+
+    def test_promote_blocks_bug_work_without_expected_actual_and_reproduction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Broken save", "Bug: saving fails instead of persisting changes", "session-main")
+
+            with self.assertRaisesRegex(RuntimeError, "Expected Behavior"):
+                promote_to_task(root, intake["intake_id"], "Broken save", "Fix save", "bugfix", ["Saving works"])
+
+    def test_promote_carries_clarification_questions_into_task_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Mismatch", "Bug: expected success toast but got silent failure", "session-main")
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            replace_intake_section(intake_path, "Scope", "Investigate save feedback and toast behavior.")
+            replace_intake_section(intake_path, "Expected Behavior", "User sees a success toast after save.")
+            replace_intake_section(intake_path, "Actual Behavior", "Save fails silently.")
+            replace_intake_section(intake_path, "Reproduction", "1. Edit an item\n2. Click save")
+            replace_intake_section(intake_path, "Non-Blocking Questions", "- Should the toast include the item name?")
+
+            promoted = promote_to_task(root, intake["intake_id"], "Mismatch", "Fix save feedback", "bugfix", ["Save feedback matches behavior"])
+            task_dir = root / ".just-demand" / "tasks" / "active" / promoted["task_id"]
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["expected_behavior"], "User sees a success toast after save.")
+            self.assertEqual(task["clarification"]["actual_behavior"], "Save fails silently.")
+            self.assertEqual(task["clarification"]["reproduction"], "1. Edit an item\n2. Click save")
+            self.assertEqual(task["clarification"]["scope"], "Investigate save feedback and toast behavior.")
+            self.assertEqual(task["clarification"]["non_blocking_questions"], ["Should the toast include the item name?"])
+            self.assertIn("Should the toast include the item name?", (task_dir / "open_questions.md").read_text(encoding="utf-8"))
+
+    def test_feature_request_with_expected_wording_is_not_treated_as_bug(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(
+                root,
+                "Label cleanup",
+                "Add clearer labels and use the expected product names instead of abbreviations.",
+                "session-main",
+            )
+            set_intake_scope(root, intake["intake_id"], "Update labels in the current settings flow only.")
+
+            promoted = promote_to_task(
+                root,
+                intake["intake_id"],
+                "Label cleanup",
+                "Improve settings labels",
+                "design",
+                ["Labels are clearer in settings."],
+            )
+
+            task = read_json(root / ".just-demand" / "tasks" / "active" / promoted["task_id"] / "task.json")
+            self.assertFalse(task["clarification"]["needs_bug_clarification"])
 
 
     def test_lock_acquire_and_release(self):
@@ -142,6 +258,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Agent workflow", "Build workflow", "session-main")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Agent workflow", "Build workflow", "design", ["It can execute lifecycle transitions."])
             task_id = promoted["task_id"]
 
@@ -176,6 +293,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Test", "Test before_status", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Test", "Test before_status", "design", ["Check before_status"])
             task_id = promoted["task_id"]
 
@@ -205,6 +323,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Demo", "Build a demo workflow", "session-main")
+            set_intake_scope(root, intake["intake_id"])
             task = promote_to_task(root, intake["intake_id"], "Demo", "Build a demo workflow", "implementation", ["Lifecycle reaches done"])
             create_validation_revision(
                 root,
@@ -235,6 +354,23 @@ class WorkflowCoreTests(unittest.TestCase):
             state = read_json(root / ".just-demand" / "workspace" / "state.json")
             self.assertIsNotNone(state["current_intake_id"])
 
+    def test_cli_promote_reports_readiness_errors(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Broken save", "Bug: save is broken", "session-main")
+            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "promote", intake["intake_id"], "Broken save", "Fix save", "--type", "bugfix", "--acceptance", "Saving works"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Expected Behavior", payload["message"])
+
     def test_list_unfinished_tasks_and_cli_list_active(self):
         import json as std_json
         import subprocess
@@ -243,6 +379,8 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake_a = create_intake(root, "Task A", "First", "session-main")
             intake_b = create_intake(root, "Task B", "Second", "session-main")
+            set_intake_scope(root, intake_a["intake_id"], "Scope A")
+            set_intake_scope(root, intake_b["intake_id"], "Scope B")
             task_a = promote_to_task(root, intake_a["intake_id"], "Task A", "Goal A", "design", ["A"])
             task_b = promote_to_task(root, intake_b["intake_id"], "Task B", "Goal B", "design", ["B"])
 
@@ -267,6 +405,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Cleanup test", "Build cleanup", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Cleanup test", "Build cleanup", "design", ["Cleanup works"])
             task_id = promoted["task_id"]
 
@@ -304,6 +443,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Not done", "Build not done", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Not done", "Build not done", "design", ["Not done yet"])
             task_id = promoted["task_id"]
 
@@ -319,6 +459,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "CLI cleanup", "Build CLI cleanup", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI cleanup", "Build CLI cleanup", "design", ["CLI cleanup works"])
             task_id = promoted["task_id"]
 
@@ -343,6 +484,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "CLI not done", "Build CLI not done", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI not done", "Build CLI not done", "design", ["Not done"])
             task_id = promoted["task_id"]
 
@@ -358,6 +500,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Archive test", "Build archive", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Archive test", "Build archive", "design", ["Archive works"])
             task_id = promoted["task_id"]
 
@@ -402,6 +545,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Decision extraction", "Build extraction", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Decision extraction", "Build extraction", "design", ["Extraction works"])
             task_id = promoted["task_id"]
 
@@ -429,6 +573,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Fact extraction", "Build extraction", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Fact extraction", "Build extraction", "design", ["Extraction works"])
             task_id = promoted["task_id"]
 
@@ -449,6 +594,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Preserve test", "Build preserve", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Preserve test", "Build preserve", "design", ["Preserve works"])
             task_id = promoted["task_id"]
 
@@ -477,6 +623,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Not done archive", "Build not done", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Not done archive", "Build not done", "design", ["Not done yet"])
             task_id = promoted["task_id"]
 
@@ -491,6 +638,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Archive collision", "Build archive collision", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Archive collision", "Build archive collision", "design", ["Collision is safe"])
             task_id = promoted["task_id"]
 
@@ -518,6 +666,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Auto archive test", "Build auto archive", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Auto archive test", "Build auto archive", "design", ["Auto archive works"])
             task_id = promoted["task_id"]
 
@@ -541,6 +690,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Auto archive failure", "Build auto archive failure", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Auto archive failure", "Build auto archive failure", "design", ["Failure is reported"])
             task_id = promoted["task_id"]
 
@@ -564,6 +714,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "No archive test", "Build no archive", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "No archive test", "Build no archive", "design", ["No archive works"])
             task_id = promoted["task_id"]
 
@@ -584,6 +735,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "CLI archive", "Build CLI archive", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI archive", "Build CLI archive", "design", ["CLI archive works"])
             task_id = promoted["task_id"]
 
@@ -608,6 +760,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "CLI archive not done", "Build CLI archive not done", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI archive not done", "Build CLI archive not done", "design", ["Not done"])
             task_id = promoted["task_id"]
 
@@ -623,6 +776,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Cleanup archived", "Build cleanup archived", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Cleanup archived", "Build cleanup archived", "design", ["Cleanup archived works"])
             task_id = promoted["task_id"]
 
@@ -648,6 +802,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Mark test", "Build mark", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Mark test", "Build mark", "design", ["Mark works"])
             task_id = promoted["task_id"]
 
@@ -666,6 +821,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Invalid mark", "Build invalid", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Invalid mark", "Build invalid", "design", ["Invalid raises"])
             task_id = promoted["task_id"]
 
@@ -676,6 +832,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Mark done", "Build mark done", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Mark done", "Build mark done", "design", ["Done is not marked directly"])
             task_id = promoted["task_id"]
 
@@ -689,6 +846,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Progress mark", "Build progress", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Progress mark", "Build progress", "design", ["Progress raises"])
             task_id = promoted["task_id"]
 
@@ -707,6 +865,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Impact mark", "Build impact", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Impact mark", "Build impact", "design", ["Impact works"])
             task_id = promoted["task_id"]
 
@@ -718,6 +877,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Event mark", "Build event", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Event mark", "Build event", "design", ["Events work"])
             task_id = promoted["task_id"]
 
@@ -737,6 +897,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Concise list", "Build concise", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Concise list", "Build concise", "design", ["Concise works"])
             task_id = promoted["task_id"]
 
@@ -757,6 +918,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Verbose list", "Build verbose", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Verbose list", "Build verbose", "design", ["Verbose works"])
             task_id = promoted["task_id"]
 
@@ -770,6 +932,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Compat list", "Build compat", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Compat list", "Build compat", "design", ["Compat works"])
             task_id = promoted["task_id"]
 
@@ -790,6 +953,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Mark archive", "Build mark archive", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Mark archive", "Build mark archive", "design", ["Mark archive works"])
             task_id = promoted["task_id"]
 
@@ -814,6 +978,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "CLI mark", "Build CLI mark", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI mark", "Build CLI mark", "design", ["CLI mark works"])
             task_id = promoted["task_id"]
 
@@ -835,6 +1000,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "CLI invalid mark", "Build CLI invalid", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI invalid mark", "Build CLI invalid", "design", ["CLI invalid works"])
             task_id = promoted["task_id"]
 
@@ -852,6 +1018,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "CLI verbose list", "Build CLI verbose", "s1")
+            set_intake_scope(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI verbose list", "Build CLI verbose", "design", ["CLI verbose works"])
             task_id = promoted["task_id"]
 
