@@ -48,7 +48,9 @@ When correction feedback is vague, conflicting, or shows behavior drift without 
 - final expected effect and final implementation plan (updated for the correction)
 - which questions are blocking versus non-blocking
 
-Use `socratic-clarification` for the questioning cadence. If the user says the result is "not quite right," "still off," or otherwise reports drift, do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
+Use `socratic-clarification` for the questioning cadence. When clarifying the mismatch, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
+
+If the user says the result is "not quite right," "still off," or otherwise reports drift, do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
 
 ## Progressive Clarification Routing
 

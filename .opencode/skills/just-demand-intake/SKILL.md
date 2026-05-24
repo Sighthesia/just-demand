@@ -12,7 +12,7 @@ Clarify the user's need before exposing workflow mechanics.
 - Focus on the user's described outcome, expected behavior, anti-outcomes, constraints, and tradeoffs.
 - Use `socratic-clarification` for progressive questioning before shaping new or ambiguous work.
 - Keep the turn user-understandable, but do not use brevity as a reason to skip material uncertainty.
-- Prefer choices, contrasts, and recommended defaults over open-ended interrogation.
+- Prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 - Do not discuss task packages, repo maps, JSONL, context injection, or subagent mechanics unless the user is explicitly designing those mechanisms.
 
 ## Process

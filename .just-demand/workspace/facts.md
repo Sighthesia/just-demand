@@ -16,3 +16,6 @@
 
 - Task 2026-05-24-harden-socratic-clarification-workflow-task (Harden Socratic clarification workflow) completed with status 'done'.
   Verification summary: Socratic clarification now uses a brainstorming-style hard gate with final artifact readiness; all Python, Node, config, and whitespace checks passed.
+
+- Task 2026-05-24-increase-question-tool-driven-clarification-task (Increase question tool driven clarification) completed with status 'done'.
+  Verification summary: Socratic clarification now prefers grouped question-tool decisions and approvals where feasible; workflow and plugin tests passed.

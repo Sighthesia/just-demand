@@ -74,12 +74,19 @@ Use the rounds as a state machine. Ask only the rounds that still contain unknow
 
 ### Round 1: Intent and Expected Outcome
 
-One primary question per turn when the user must decide. Use multiple choice or recommended defaults when possible.
+Use the `question` tool to gather intent and expected outcomes when the answer can be expressed as options. Group related decisions when feasible.
 
 - "What should a successful result let you do that you cannot do now?"
 - "What is the desired end state when this is complete?"
 - "What would feel wrong even if technically complete?"
 - "What is the smallest acceptable scope for this pass?"
+
+When multiple intent questions are independent, batch them into one `question` call. For example:
+
+```text
+question: "What success means for this request:"
+options: ["Fix the immediate bug", "Improve the feature", "Refactor the component", "Add new capability"]
+```
 
 Minimum output of this round:
 
@@ -204,6 +211,53 @@ Ask implementation questions only when they affect:
 - Security, cost, or long-term maintenance
 
 Do not ask about implementation details that are purely engineering preferences when they do not affect the above categories.
+
+## Question Tool Preference
+
+Use the `question` tool proactively for structured clarification when the answer can be expressed as concise options, choices, or approvals. Prefer grouped question rounds over one-question-at-a-time text prompting.
+
+### When to use the question tool
+
+- **Grouped decisions**: When multiple tightly-related blocking uncertainties can be captured in one structured call (e.g., scope choices, boundary decisions, tradeoff preferences).
+- **Approvals**: When seeking explicit approval on approaches, final artifacts, or implementation plans.
+- **Boundary capture**: When exploring constraints, anti-outcomes, or edge cases that can be reduced to option sets.
+- **Tradeoff selection**: When presenting 2-3 approaches and the user needs to choose.
+- **Progress checks**: When confirming understanding or validating assumptions before proceeding.
+
+### When to use free-text
+
+- **Symptom description**: When the user needs to describe what happens, how it feels, or what they observe.
+- **Phenomenon description**: When explaining reproduction steps, conditions, or environmental details.
+- **Nuanced explanations**: When the answer requires context, reasoning, or cannot be safely reduced to options.
+- **Open-ended exploration**: When the uncertainty is too broad to predefine choices.
+
+### Grouping strategy
+
+When several blocking uncertainties exist:
+
+1. Group tightly-related questions into one `question` call when the answers are independent and the user can respond without excessive cognitive load.
+2. Keep question groups focused: 2-5 options per question, 1-3 questions per call maximum.
+3. If questions are sequential (each answer affects the next), ask them in sequence but still prefer the `question` tool for each.
+4. Always allow a free-text escape hatch when options feel restrictive.
+
+### Approval capture
+
+Use the `question` tool for explicit approval at key checkpoints:
+
+- After presenting 2-3 approaches with trade-offs.
+- After capturing the final artifact.
+- When confirming scope or boundary decisions.
+
+Keep question text focused on user intent, expected effect, and scope. Do not embed implementation details into the question prompt. Implementation choices belong in the final artifact, not in the question tool text.
+
+Example approval pattern:
+
+```text
+question: "Is this the effect you want?"
+options: ["Yes, proceed", "No, I want something different"]
+```
+
+Do NOT use the question tool to present implementation details or ask about implementation methods. The question tool is for gathering user intent, expected effects, boundaries, scope, and approval. Implementation choices and plans are captured in the final artifact, not in question prompts.
 
 ## Routing Rule
 

@@ -36,6 +36,8 @@ When material uncertainty exists, clarification is not optional and not a nice-t
 
 Do not proceed just because you can guess a plausible path. Clarification is a hard gate: no task promotion, no subagent dispatch, no code edits until final expected effect and final implementation plan are approved.
 
+When clarifying, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
+
 Do not expose internal workflow mechanics to the user unless they are explicitly designing the workflow runtime.
 
 ## Operating Model

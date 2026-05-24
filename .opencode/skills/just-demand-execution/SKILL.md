@@ -101,6 +101,7 @@ Before dispatching any implementation subagent, verify that the task is sufficie
 3. For design and implementation tasks, check that `final_expected_effect`, `chosen_approach`, `final_implementation_plan`, and `approval` are non-empty.
 4. If any blocking question remains or critical fields are empty, DO NOT dispatch. Route back to clarification instead: update the intake with the gaps and ask the user.
 5. Do not guess what the user wants to fill in missing fields. Ask.
+6. When clarifying gaps, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options.
 
 ## Execution Loop
 
