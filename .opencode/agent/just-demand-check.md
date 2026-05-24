@@ -2,14 +2,16 @@
 description: Verifies just-demand changes against the task brief and fixes only low-risk local issues.
 mode: subagent
 permission:
-  edit: allow
   read: allow
   write: allow
   edit: allow
-  bash: allow
   glob: allow
   grep: allow
   bash:
+    "*": ask
+    "git status": allow
+    "git diff *": allow
+    "git log *": allow
     "python3 .just-demand/scripts/task.py --root . list-active": allow
     "python3 -m unittest tests.just_demand.test_workflow_core -v": allow
     "python3 -m unittest tests.just_demand.test_install -v": allow

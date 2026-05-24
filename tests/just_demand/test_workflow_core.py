@@ -53,6 +53,26 @@ def set_intake_scope(root: Path, intake_id: str, scope: str = "Confirmed impleme
     )
 
 
+def set_intake_design_artifact(
+    root: Path,
+    intake_id: str,
+    *,
+    final_expected_effect: str = "User sees the expected result.",
+    approach_options: str = "Approach A: direct implementation. Approach B: staged implementation.",
+    chosen_approach: str = "Approach A: direct implementation.",
+    final_implementation_plan: str = "1. Implement\n2. Verify",
+    validation: str = "Run relevant tests.",
+    approval: str = "Approved by user.",
+) -> None:
+    intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake_id}.md"
+    replace_intake_section(intake_path, "Final Expected Effect", final_expected_effect)
+    replace_intake_section(intake_path, "Approach Options", approach_options)
+    replace_intake_section(intake_path, "Chosen Approach", chosen_approach)
+    replace_intake_section(intake_path, "Final Implementation Plan", final_implementation_plan)
+    replace_intake_section(intake_path, "Validation", validation)
+    replace_intake_section(intake_path, "Approval", approval)
+
+
 def init_git_repo(root: Path) -> None:
     subprocess.run(["git", "init"], cwd=root, text=True, capture_output=True, check=True)
     subprocess.run(["git", "config", "user.name", "Just Demand Tests"], cwd=root, text=True, capture_output=True, check=True)
@@ -147,6 +167,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 session_id="session-main",
             )
             set_intake_scope(root, intake["intake_id"], "Build the initial OpenCode-first workflow runtime.")
+            set_intake_design_artifact(root, intake["intake_id"])
 
             result = promote_to_task(
                 root,
@@ -193,6 +214,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Workflow", "Build workflow", "session-main")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Blocking Questions", "- Should this affect archived tasks?")
 
@@ -238,6 +260,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 "session-main",
             )
             set_intake_scope(root, intake["intake_id"], "Update labels in the current settings flow only.")
+            set_intake_design_artifact(root, intake["intake_id"])
 
             promoted = promote_to_task(
                 root,
@@ -275,6 +298,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Agent workflow", "Build workflow", "session-main")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Agent workflow", "Build workflow", "design", ["It can execute lifecycle transitions."])
             task_id = promoted["task_id"]
 
@@ -310,6 +334,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Test", "Test before_status", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Test", "Test before_status", "design", ["Check before_status"])
             task_id = promoted["task_id"]
 
@@ -340,6 +365,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Demo", "Build a demo workflow", "session-main")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             task = promote_to_task(root, intake["intake_id"], "Demo", "Build a demo workflow", "implementation", ["Lifecycle reaches done"])
             create_validation_revision(
                 root,
@@ -397,6 +423,8 @@ class WorkflowCoreTests(unittest.TestCase):
             intake_b = create_intake(root, "Task B", "Second", "session-main")
             set_intake_scope(root, intake_a["intake_id"], "Scope A")
             set_intake_scope(root, intake_b["intake_id"], "Scope B")
+            set_intake_design_artifact(root, intake_a["intake_id"])
+            set_intake_design_artifact(root, intake_b["intake_id"])
             task_a = promote_to_task(root, intake_a["intake_id"], "Task A", "Goal A", "design", ["A"])
             task_b = promote_to_task(root, intake_b["intake_id"], "Task B", "Goal B", "design", ["B"])
 
@@ -422,6 +450,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Cleanup test", "Build cleanup", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Cleanup test", "Build cleanup", "design", ["Cleanup works"])
             task_id = promoted["task_id"]
 
@@ -460,6 +489,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Not done", "Build not done", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Not done", "Build not done", "design", ["Not done yet"])
             task_id = promoted["task_id"]
 
@@ -476,6 +506,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "CLI cleanup", "Build CLI cleanup", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI cleanup", "Build CLI cleanup", "design", ["CLI cleanup works"])
             task_id = promoted["task_id"]
 
@@ -501,6 +532,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "CLI not done", "Build CLI not done", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI not done", "Build CLI not done", "design", ["Not done"])
             task_id = promoted["task_id"]
 
@@ -517,6 +549,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Archive test", "Build archive", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Archive test", "Build archive", "design", ["Archive works"])
             task_id = promoted["task_id"]
 
@@ -562,6 +595,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Decision extraction", "Build extraction", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Decision extraction", "Build extraction", "design", ["Extraction works"])
             task_id = promoted["task_id"]
 
@@ -590,6 +624,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Fact extraction", "Build extraction", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Fact extraction", "Build extraction", "design", ["Extraction works"])
             task_id = promoted["task_id"]
 
@@ -611,6 +646,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Preserve test", "Build preserve", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Preserve test", "Build preserve", "design", ["Preserve works"])
             task_id = promoted["task_id"]
 
@@ -640,6 +676,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Not done archive", "Build not done", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Not done archive", "Build not done", "design", ["Not done yet"])
             task_id = promoted["task_id"]
 
@@ -655,6 +692,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Archive collision", "Build archive collision", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Archive collision", "Build archive collision", "design", ["Collision is safe"])
             task_id = promoted["task_id"]
 
@@ -683,6 +721,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Auto archive test", "Build auto archive", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Auto archive test", "Build auto archive", "design", ["Auto archive works"])
             task_id = promoted["task_id"]
 
@@ -709,6 +748,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             intake = create_intake(root, "Scoped commit", "Build scoped commit", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Scoped commit", "Build scoped commit", "implementation", ["Scoped commit works"])
             task_id = promoted["task_id"]
 
@@ -743,6 +783,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             intake = create_intake(root, "CLI checkpoint", "Build CLI checkpoint", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI checkpoint", "Build CLI checkpoint", "implementation", ["CLI checkpoint works"])
             task_id = promoted["task_id"]
 
@@ -773,6 +814,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Auto archive failure", "Build auto archive failure", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Auto archive failure", "Build auto archive failure", "design", ["Failure is reported"])
             task_id = promoted["task_id"]
 
@@ -797,6 +839,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "No archive test", "Build no archive", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "No archive test", "Build no archive", "design", ["No archive works"])
             task_id = promoted["task_id"]
 
@@ -818,6 +861,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "CLI archive", "Build CLI archive", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI archive", "Build CLI archive", "design", ["CLI archive works"])
             task_id = promoted["task_id"]
 
@@ -843,6 +887,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "CLI archive not done", "Build CLI archive not done", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI archive not done", "Build CLI archive not done", "design", ["Not done"])
             task_id = promoted["task_id"]
 
@@ -859,6 +904,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Cleanup archived", "Build cleanup archived", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Cleanup archived", "Build cleanup archived", "design", ["Cleanup archived works"])
             task_id = promoted["task_id"]
 
@@ -885,6 +931,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Mark test", "Build mark", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Mark test", "Build mark", "design", ["Mark works"])
             task_id = promoted["task_id"]
 
@@ -908,6 +955,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Pause task", "Track pause", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Pause task", "Track pause", "design", ["Task can pause"])
             task_id = promoted["task_id"]
 
@@ -924,6 +972,8 @@ class WorkflowCoreTests(unittest.TestCase):
             intake_b = create_intake(root, "Task B", "Second task", "s1")
             set_intake_scope(root, intake_a["intake_id"], "Scope A")
             set_intake_scope(root, intake_b["intake_id"], "Scope B")
+            set_intake_design_artifact(root, intake_a["intake_id"])
+            set_intake_design_artifact(root, intake_b["intake_id"])
             task_a = promote_to_task(root, intake_a["intake_id"], "Task A", "Goal A", "design", ["A"])["task_id"]
             task_b = promote_to_task(root, intake_b["intake_id"], "Task B", "Goal B", "design", ["B"])["task_id"]
             self.assertEqual(read_json(root / ".just-demand" / "workspace" / "state.json")["current_task_id"], task_b)
@@ -938,6 +988,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Invalid mark", "Build invalid", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Invalid mark", "Build invalid", "design", ["Invalid raises"])
             task_id = promoted["task_id"]
 
@@ -949,6 +1000,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Mark done", "Build mark done", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Mark done", "Build mark done", "design", ["Done is not marked directly"])
             task_id = promoted["task_id"]
 
@@ -963,6 +1015,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Progress mark", "Build progress", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Progress mark", "Build progress", "design", ["Progress raises"])
             task_id = promoted["task_id"]
 
@@ -982,6 +1035,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Impact mark", "Build impact", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Impact mark", "Build impact", "design", ["Impact works"])
             task_id = promoted["task_id"]
 
@@ -994,6 +1048,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Event mark", "Build event", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Event mark", "Build event", "design", ["Events work"])
             task_id = promoted["task_id"]
 
@@ -1014,6 +1069,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Concise list", "Build concise", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Concise list", "Build concise", "design", ["Concise works"])
             task_id = promoted["task_id"]
 
@@ -1035,6 +1091,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Verbose list", "Build verbose", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Verbose list", "Build verbose", "design", ["Verbose works"])
             task_id = promoted["task_id"]
 
@@ -1049,6 +1106,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Compat list", "Build compat", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Compat list", "Build compat", "design", ["Compat works"])
             task_id = promoted["task_id"]
 
@@ -1070,6 +1128,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Mark archive", "Build mark archive", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "Mark archive", "Build mark archive", "design", ["Mark archive works"])
             task_id = promoted["task_id"]
 
@@ -1095,6 +1154,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "CLI mark", "Build CLI mark", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI mark", "Build CLI mark", "design", ["CLI mark works"])
             task_id = promoted["task_id"]
 
@@ -1117,6 +1177,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "CLI invalid mark", "Build CLI invalid", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI invalid mark", "Build CLI invalid", "design", ["CLI invalid works"])
             task_id = promoted["task_id"]
 
@@ -1135,6 +1196,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "CLI verbose list", "Build CLI verbose", "s1")
             set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
             promoted = promote_to_task(root, intake["intake_id"], "CLI verbose list", "Build CLI verbose", "design", ["CLI verbose works"])
             task_id = promoted["task_id"]
 
@@ -1150,6 +1212,121 @@ class WorkflowCoreTests(unittest.TestCase):
             t = payload["tasks"][0]
             self.assertIn("current_step", t)
             self.assertIn("path", t)
+
+    def test_create_intake_includes_design_artifact_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_intake(root, "Design work", "Build a new feature", "session-main")
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{result['intake_id']}.md"
+            intake_text = intake_path.read_text(encoding="utf-8")
+            self.assertIn("## Final Expected Effect", intake_text)
+            self.assertIn("## Approach Options", intake_text)
+            self.assertIn("## Chosen Approach", intake_text)
+            self.assertIn("## Final Implementation Plan", intake_text)
+            self.assertIn("## Validation", intake_text)
+            self.assertIn("## Approval", intake_text)
+
+    def test_promote_blocks_design_without_final_expected_effect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Design work", "Build a new feature", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            # Set chosen approach and plan but leave final expected effect empty
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            replace_intake_section(intake_path, "Chosen Approach", "Approach A")
+            replace_intake_section(intake_path, "Final Implementation Plan", "1. Implement\n2. Verify")
+            replace_intake_section(intake_path, "Approval", "Approved")
+
+            with self.assertRaisesRegex(RuntimeError, "Final Expected Effect"):
+                promote_to_task(root, intake["intake_id"], "Design work", "Build feature", "design", ["It works"])
+
+    def test_promote_blocks_design_without_chosen_approach(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Design work", "Build a new feature", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            replace_intake_section(intake_path, "Final Expected Effect", "User sees the feature.")
+            replace_intake_section(intake_path, "Final Implementation Plan", "1. Implement\n2. Verify")
+            replace_intake_section(intake_path, "Approval", "Approved")
+
+            with self.assertRaisesRegex(RuntimeError, "Chosen Approach"):
+                promote_to_task(root, intake["intake_id"], "Design work", "Build feature", "design", ["It works"])
+
+    def test_promote_blocks_design_without_final_implementation_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Design work", "Build a new feature", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            replace_intake_section(intake_path, "Final Expected Effect", "User sees the feature.")
+            replace_intake_section(intake_path, "Chosen Approach", "Approach A")
+            replace_intake_section(intake_path, "Approval", "Approved")
+
+            with self.assertRaisesRegex(RuntimeError, "Final Implementation Plan"):
+                promote_to_task(root, intake["intake_id"], "Design work", "Build feature", "design", ["It works"])
+
+    def test_promote_blocks_design_without_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Design work", "Build a new feature", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            replace_intake_section(intake_path, "Final Expected Effect", "User sees the feature.")
+            replace_intake_section(intake_path, "Chosen Approach", "Approach A")
+            replace_intake_section(intake_path, "Final Implementation Plan", "1. Implement\n2. Verify")
+
+            with self.assertRaisesRegex(RuntimeError, "Approval"):
+                promote_to_task(root, intake["intake_id"], "Design work", "Build feature", "design", ["It works"])
+
+    def test_promote_blocks_implementation_without_design_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Impl work", "Implement a feature", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+
+            with self.assertRaisesRegex(RuntimeError, "Final Expected Effect"):
+                promote_to_task(root, intake["intake_id"], "Impl work", "Implement feature", "implementation", ["It works"])
+
+    def test_promote_allows_bugfix_without_design_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Bug fix", "Fix the broken save", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            replace_intake_section(intake_path, "Expected Behavior", "Save succeeds.")
+            replace_intake_section(intake_path, "Actual Behavior", "Save fails silently.")
+            replace_intake_section(intake_path, "Reproduction", "1. Click save")
+
+            # Bugfix should NOT require design artifact fields
+            result = promote_to_task(root, intake["intake_id"], "Bug fix", "Fix save", "bugfix", ["Save works"])
+            self.assertIn("task_id", result)
+
+    def test_promote_carry_design_artifact_into_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Design carry", "Build design carry", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(
+                root,
+                intake["intake_id"],
+                final_expected_effect="User sees the feature working.",
+                approach_options="Approach A: direct.\nApproach B: event-driven.",
+                chosen_approach="Approach B: event-driven.",
+                final_implementation_plan="1. Add event bus\n2. Wire handlers\n3. Verify",
+                validation="Run event flow verification.",
+                approval="Approved by user.",
+            )
+
+            promoted = promote_to_task(root, intake["intake_id"], "Design carry", "Build design carry", "design", ["Carry works"])
+            task_dir = root / ".just-demand" / "tasks" / "active" / promoted["task_id"]
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["final_expected_effect"], "User sees the feature working.")
+            self.assertEqual(task["clarification"]["approach_options"], "Approach A: direct.\nApproach B: event-driven.")
+            self.assertEqual(task["clarification"]["chosen_approach"], "Approach B: event-driven.")
+            self.assertEqual(task["clarification"]["final_implementation_plan"], "1. Add event bus\n2. Wire handlers\n3. Verify")
+            self.assertEqual(task["clarification"]["validation"], "Run event flow verification.")
+            self.assertEqual(task["clarification"]["approval"], "Approved by user.")
 
 
 if __name__ == "__main__":

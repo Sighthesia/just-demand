@@ -37,17 +37,22 @@ It currently feels like [current feeling].
 I want it to feel more like [target feeling].
 ```
 
-Translate clear correction feedback internally into implementation changes. If the correction feedback is vague, contrastive, or could point to multiple fixes, stop and clarify before implementing.
+Translate clear correction feedback internally into implementation changes. If the correction feedback is vague, conflicting, or could point to multiple fixes, stop and route back to `socratic-clarification` before implementing.
 
-When correction feedback is vague, conflicting, or shows behavior drift without enough detail to act safely, route back into clarification-style questioning before more execution. In particular, re-establish:
+When correction feedback is vague, conflicting, or shows behavior drift without enough detail to act safely, load `socratic-clarification` before more execution. The next validation revision must be based on the clarified final expected effect and final implementation plan, not a guessed fix. Re-establish:
 
 - expected behavior
 - actual behavior
 - reproduction or triggering conditions when relevant
 - scope of the correction
+- final expected effect and final implementation plan (updated for the correction)
 - which questions are blocking versus non-blocking
 
-Ask the related clarification questions together in one turn rather than one timid question. If the user says the result is "not quite right," "still off," or otherwise reports drift, do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
+Use `socratic-clarification` for the questioning cadence. If the user says the result is "not quite right," "still off," or otherwise reports drift, do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
+
+## Progressive Clarification Routing
+
+When correction feedback is vague, conflicting, or shows behavior drift without enough detail to act safely, load `socratic-clarification` before more implementation. The next validation revision must be based on the clarified final expected effect and final implementation plan, not a guessed fix.
 
 ## Lesson Capture Gate
 

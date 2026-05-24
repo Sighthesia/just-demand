@@ -88,14 +88,19 @@ Active task: <task-id>
 
 This is a fallback for context injection failures.
 
+## Progressive Clarification Routing
+
+Before execution, if the active task still contains unresolved uncertainty about the user's intended effect, observed phenomenon, boundaries, or tradeoffs, load `socratic-clarification` and route back to clarification. Do not dispatch implementation while the final expected effect and final implementation plan are not explicit.
+
 ## Clarification Gate Before Execution
 
 Before dispatching any implementation subagent, verify that the task is sufficiently clarified:
 
 1. Check that `blocking_questions` in the task's clarification data is empty.
 2. Check that `scope`, `expected_behavior`, and `actual_behavior` (for bug work) are non-empty.
-3. If any blocking question remains or critical fields are empty, DO NOT dispatch. Route back to clarification instead: update the intake with the gaps and ask the user.
-4. Do not guess what the user wants to fill in missing fields. Ask.
+3. For design and implementation tasks, check that `final_expected_effect`, `chosen_approach`, `final_implementation_plan`, and `approval` are non-empty.
+4. If any blocking question remains or critical fields are empty, DO NOT dispatch. Route back to clarification instead: update the intake with the gaps and ask the user.
+5. Do not guess what the user wants to fill in missing fields. Ask.
 
 ## Execution Loop
 

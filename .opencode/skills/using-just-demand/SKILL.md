@@ -15,7 +15,7 @@ Use this repository as an OpenCode-first local agent workflow runtime.
 
 ## First Move
 
-Before shaping work, identify the current situation:
+Before shaping work, identify the current situation. If the user proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch, load `socratic-clarification` first, then continue with the workflow route below.
 
 ```text
 No active formal task -> use just-demand-intake.
@@ -24,9 +24,9 @@ Implementation/check output needs verification -> use just-demand-verification.
 Durable preferences, decisions, facts, open questions, or deferred options appear -> use just-demand-memory.
 ```
 
-## Clarification Is A Blocking Step
+## Clarification Is A Hard Gate
 
-When material uncertainty exists, clarification is not optional and not a nice-to-have. STOP before substantive execution and use `just-demand-intake` when any of the following are true:
+When material uncertainty exists, clarification is not optional and not a nice-to-have. STOP before substantive execution and use `socratic-clarification` when any of the following are true:
 
 - the request is new and direction is still unclear
 - the user reports a bug, regression, mismatch, or "expected X but got Y"
@@ -34,7 +34,7 @@ When material uncertainty exists, clarification is not optional and not a nice-t
 - correction feedback says the result drifted but does not yet pin down the desired behavior
 - you can imagine a reasonable implementation, but a different reasonable interpretation would produce a user-visible mismatch
 
-Do not proceed just because you can guess a plausible path. Ask the blocking questions first, preferably grouped into one concise turn with recommended defaults where helpful. The user can always say to choose the obvious default; until then, unresolved blocking questions outrank execution speed.
+Do not proceed just because you can guess a plausible path. Clarification is a hard gate: no task promotion, no subagent dispatch, no code edits until final expected effect and final implementation plan are approved.
 
 Do not expose internal workflow mechanics to the user unless they are explicitly designing the workflow runtime.
 
@@ -63,6 +63,7 @@ Do not expose internal workflow mechanics to the user unless they are explicitly
 
 | Situation | Load |
 | --- | --- |
+| User proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch | `socratic-clarification` first (hard gate), then the applicable workflow skill |
 | User proposes or clarifies work before a formal task exists | `just-demand-intake` |
 | User reports a bug, regression, vague failure, or expected-vs-actual mismatch before direction is fully clear | `just-demand-intake` |
 | A formal work item is ready for execution or subagent dispatch | `just-demand-execution` |

@@ -10,3 +10,9 @@
 
 - Task 2026-05-23-integrate-agents-ref-rules-task (Integrate AGENTS_REF rules) completed with status 'done'.
   Verification summary: AGENTS_REF principles integrated into concise workflow docs and targeted skills; core/plugin checks passed; install suite has an unrelated pre-existing agent permission assertion failure.
+
+- Task 2026-05-24-create-socratic-clarification-skill-task (Create Socratic clarification skill) completed with status 'done'.
+  Verification summary: Standalone socratic-clarification skill added and routed from just-demand skills; tests and validation passed.
+
+- Task 2026-05-24-harden-socratic-clarification-workflow-task (Harden Socratic clarification workflow) completed with status 'done'.
+  Verification summary: Socratic clarification now uses a brainstorming-style hard gate with final artifact readiness; all Python, Node, config, and whitespace checks passed.

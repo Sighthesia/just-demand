@@ -21,6 +21,12 @@ const renderClarificationContext = (task) => {
     ["Actual Behavior", clarification.actual_behavior],
     ["Reproduction", clarification.reproduction],
     ["Scope", clarification.scope],
+    ["Final Expected Effect", clarification.final_expected_effect],
+    ["Approach Options", clarification.approach_options],
+    ["Chosen Approach", clarification.chosen_approach],
+    ["Final Implementation Plan", clarification.final_implementation_plan],
+    ["Validation", clarification.validation],
+    ["Approval", clarification.approval],
   ].filter(([, value]) => typeof value === "string" && value.trim())
 
   if (entries.length === 0) return ""

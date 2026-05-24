@@ -10,7 +10,7 @@ Clarify the user's need before exposing workflow mechanics.
 ## Core Rules
 
 - Focus on the user's described outcome, expected behavior, anti-outcomes, constraints, and tradeoffs.
-- Ask all related blocking questions in one turn when their answers would change the work, instead of asking one timid question at a time.
+- Use `socratic-clarification` for progressive questioning before shaping new or ambiguous work.
 - Keep the turn user-understandable, but do not use brevity as a reason to skip material uncertainty.
 - Prefer choices, contrasts, and recommended defaults over open-ended interrogation.
 - Do not discuss task packages, repo maps, JSONL, context injection, or subagent mechanics unless the user is explicitly designing those mechanisms.
@@ -20,10 +20,9 @@ Clarify the user's need before exposing workflow mechanics.
 1. Restate the user's goal and suspected anti-outcome.
 2. Identify the requirement type: UI, workflow, bugfix, architecture, docs, research, or implementation.
 3. Extract what the user already specified.
-4. Identify every missing detail whose answer could prevent user-visible mismatch.
-5. Ask the related blocking questions together, with concise options or recommended defaults when possible.
-6. Summarize confirmed expectations and remaining gaps.
-7. Suggest promoting to a formal work item only after the user confirms the direction.
+4. Apply the final artifact from `socratic-clarification` when present.
+5. Record confirmed expectations, remaining gaps, and non-blocking questions.
+6. Promote to a formal work item only after required fields and approval are present.
 
 Record clarification in user-language buckets that can later become task data:
 
@@ -35,6 +34,19 @@ Record clarification in user-language buckets that can later become task data:
 - non-blocking questions
 
 Treat blocking questions as promotion blockers. Non-blocking questions may stay open if execution can still proceed safely.
+
+## Final Artifact Requirements
+
+For design and implementation work, the intake must include the final artifact before promotion:
+
+- **Final Expected Effect**: user-visible outcome in user language
+- **Approach Options**: 2-3 approaches with trade-offs (informational, does not block promotion)
+- **Chosen Approach**: selected approach with brief rationale
+- **Final Implementation Plan**: ordered steps including verification
+- **Validation**: how we will verify the result matches the expected effect
+- **Approval**: explicit user approval of the final artifact
+
+Promotion is blocked for design/implementation tasks when Final Expected Effect, Chosen Approach, Final Implementation Plan, or Approval are missing.
 
 ## Blocking Questions Policy
 
@@ -53,23 +65,25 @@ Ask implementation questions only when they affect:
 
 Do not ask about implementation details that are purely engineering preferences when they do not affect the above categories.
 
-## One-Turn Questioning Rule
+## Intake Recording Shape
 
-For ambiguous new work or correction feedback, ask several related questions in the same response. Prefer this shape:
+When `socratic-clarification` has produced a final artifact, record it in this shape:
 
 ```text
-Known: <what is already clear>
-Blocking questions:
-1. <choice that changes implementation>
-2. <scope/risk question>
-3. <validation question>
-Default if you do not care: <recommended default>
+Final Expected Effect: <user-visible outcome>
+Approach Options: <2-3 options with trade-offs>
+Chosen Approach: <selected approach and rationale>
+Final Implementation Plan: <ordered implementation and verification steps>
+Validation: <how the result will be checked>
+Approval: <explicit user approval or authorization>
 ```
 
-Avoid this shape:
+Avoid vague placeholders:
 
 ```text
-Can you clarify?
+Approved.
+TBD.
+Do the obvious thing.
 ```
 
 ## Questioning Patterns
@@ -113,6 +127,10 @@ Preferred prompts:
 - "What should we explicitly avoid changing?"
 - "Which choice would materially change the implementation path if guessed wrong?"
 - "Which details are nice-to-have and can stay open until execution?"
+
+## Progressive Clarification Routing
+
+When the user proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch, load `socratic-clarification` before shaping or promoting work. That skill owns progressive questioning, overlooked boundary discovery, final expected effect, and final implementation plan.
 
 ## Routing Rule
 

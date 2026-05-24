@@ -157,6 +157,40 @@ test("readTaskContext includes open questions for just-demand-check", () => {
   assert.match(context, /analytics coverage/)
 })
 
+test("readTaskContext includes final design artifact for implement and check", () => {
+  const root = makeRoot()
+  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
+  writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
+  writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    clarification: {
+      scope: "Settings flow only.",
+      final_expected_effect: "User can save settings confidently.",
+      approach_options: "A. Inline save\nB. Background save",
+      chosen_approach: "Approach A: inline save.",
+      final_implementation_plan: "1. Add save handler\n2. Verify save feedback",
+      validation: "Run save flow test.",
+      approval: "User approved Approach A.",
+    },
+  }))
+
+  const implementContext = readTaskContext(root, "task-a", "just-demand-implement")
+  const checkContext = readTaskContext(root, "task-a", "just-demand-check")
+
+  for (const context of [implementContext, checkContext]) {
+    assert.match(context, /Final Expected Effect/)
+    assert.match(context, /User can save settings confidently/)
+    assert.match(context, /Chosen Approach/)
+    assert.match(context, /Approach A: inline save/)
+    assert.match(context, /Final Implementation Plan/)
+    assert.match(context, /Approval/)
+  }
+})
+
 test("readTaskContext falls back to task clarification questions when open_questions is just a header", () => {
   const root = makeRoot()
   const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
