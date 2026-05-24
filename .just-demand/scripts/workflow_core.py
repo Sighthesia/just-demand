@@ -635,6 +635,16 @@ def mark_task(
 
     task = update_task(root, task_id, updates)
 
+    state_path = workspace_dir(root) / "state.json"
+    state = read_json(state_path)
+    if status in {"planning", "executing", "verifying", "changes_requested", "tweaking", "debugging"}:
+        state["current_intake_id"] = None
+        state["current_task_id"] = task_id
+    elif status in {"paused", "blocked"} and state.get("current_task_id") == task_id:
+        state["current_task_id"] = None
+    state["updated_at"] = utc_now()
+    write_json_atomic(state_path, state)
+
     summary_parts = [f"status={status}"]
     if progress is not None:
         summary_parts.append(f"progress={progress}")
@@ -1202,6 +1212,14 @@ def start_execution(root: Path, task_id: str, subagents: list[str]) -> dict[str,
     }
 
     task = update_task(root, task_id, updates)
+
+    state_path = workspace_dir(root) / "state.json"
+    state = read_json(state_path)
+    state["current_intake_id"] = None
+    state["current_task_id"] = task_id
+    state["updated_at"] = utc_now()
+    write_json_atomic(state_path, state)
+
     append_task_event(
         root,
         task_id,

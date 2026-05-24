@@ -899,6 +899,40 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(task["impact"], [".just-demand/scripts/"])
             self.assertEqual(task["last_note"], "Diagnosing state issue")
 
+            state = read_json(root / ".just-demand" / "workspace" / "state.json")
+            self.assertEqual(state["current_task_id"], task_id)
+            self.assertIsNone(state["current_intake_id"])
+
+    def test_mark_task_pause_clears_current_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Pause task", "Track pause", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Pause task", "Track pause", "design", ["Task can pause"])
+            task_id = promoted["task_id"]
+
+            mark_task(root, task_id, "executing")
+            mark_task(root, task_id, "paused")
+
+            state = read_json(root / ".just-demand" / "workspace" / "state.json")
+            self.assertIsNone(state["current_task_id"])
+
+    def test_start_execution_sets_current_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake_a = create_intake(root, "Task A", "First task", "s1")
+            intake_b = create_intake(root, "Task B", "Second task", "s1")
+            set_intake_scope(root, intake_a["intake_id"], "Scope A")
+            set_intake_scope(root, intake_b["intake_id"], "Scope B")
+            task_a = promote_to_task(root, intake_a["intake_id"], "Task A", "Goal A", "design", ["A"])["task_id"]
+            task_b = promote_to_task(root, intake_b["intake_id"], "Task B", "Goal B", "design", ["B"])["task_id"]
+            self.assertEqual(read_json(root / ".just-demand" / "workspace" / "state.json")["current_task_id"], task_b)
+
+            start_execution(root, task_a, ["just-demand-implement"])
+
+            state = read_json(root / ".just-demand" / "workspace" / "state.json")
+            self.assertEqual(state["current_task_id"], task_a)
+
     def test_mark_task_invalid_status_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
