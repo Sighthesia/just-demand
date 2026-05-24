@@ -775,6 +775,15 @@ def _is_disallowed_checkpoint_path(path: str) -> bool:
     parts = normalized.split("/")
     if "__pycache__" in parts:
         return True
+    # Internal workflow runtime state — churns on every operation, not meaningful checkpoints
+    if normalized == ".just-demand":
+        return True
+    if normalized.startswith(".just-demand/tasks/"):
+        return True
+    if normalized.startswith(".just-demand/workspace/") and normalized.endswith(".json"):
+        return True
+    if normalized.startswith(".just-demand/workspace/") and normalized.endswith(".jsonl"):
+        return True
     return normalized.startswith(".pytest_cache/") or normalized.startswith(".opencode/node_modules/")
 
 
@@ -813,22 +822,6 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         raise FileNotFoundError(f"Task not found: {task_id}")
 
     task = read_json(tpath)
-    existing = task.get("checkpoint_commit") or {}
-    if existing.get("created"):
-        return {
-            "created": False,
-            "reason": "already_created",
-            "commit_hash": existing.get("commit_hash"),
-            "message": existing.get("message"),
-            "paths": existing.get("paths", []),
-        }
-
-    if task.get("verification_status") != "passed":
-        return _record_checkpoint_commit_result(
-            root,
-            task_id,
-            {"created": False, "reason": "verification_not_passed", "paths": []},
-        )
 
     repo_check = _run_git(root, "rev-parse", "--is-inside-work-tree")
     if repo_check.returncode != 0 or repo_check.stdout.strip() != "true":
@@ -846,24 +839,30 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
             {"created": False, "reason": "git_status_failed", "paths": []},
         )
 
+    all_changed = _parse_git_status_paths(status_result.stdout)
     impact_scope = [
         _normalize_repo_path(entry)
         for entry in task.get("impact", [])
         if isinstance(entry, str) and _normalize_repo_path(entry)
     ]
-    if not impact_scope:
-        return _record_checkpoint_commit_result(
-            root,
-            task_id,
-            {"created": False, "reason": "impact_scope_missing", "paths": []},
-        )
 
-    candidate_paths = [
-        path
-        for path in _parse_git_status_paths(status_result.stdout)
-        if any(_path_matches_scope(path, scope) for scope in impact_scope)
-        and not _is_disallowed_checkpoint_path(path)
-    ]
+    if impact_scope:
+        candidate_paths = [
+            path
+            for path in all_changed
+            if any(_path_matches_scope(path, scope) for scope in impact_scope)
+            and not _is_disallowed_checkpoint_path(path)
+        ]
+        fallback_note = None
+    else:
+        # No impact scope set: commit all non-disallowed changes.
+        candidate_paths = [
+            path
+            for path in all_changed
+            if not _is_disallowed_checkpoint_path(path)
+        ]
+        fallback_note = "no impact scope set, committed all non-disallowed changes"
+
     candidate_paths = list(dict.fromkeys(candidate_paths))
     if not candidate_paths:
         return _record_checkpoint_commit_result(
@@ -872,12 +871,17 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
             {"created": False, "reason": "no_task_scoped_changes", "paths": []},
         )
 
+    def _with_fallback(d: dict[str, Any]) -> dict[str, Any]:
+        if fallback_note:
+            d["fallback_note"] = fallback_note
+        return d
+
     diff_result = _run_git(root, "diff", "--", *candidate_paths)
     if diff_result.returncode != 0:
         return _record_checkpoint_commit_result(
             root,
             task_id,
-            {"created": False, "reason": "git_diff_failed", "paths": candidate_paths},
+            _with_fallback({"created": False, "reason": "git_diff_failed", "paths": candidate_paths}),
         )
 
     log_result = _run_git(root, "log", "--oneline", "-10")
@@ -885,7 +889,7 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         return _record_checkpoint_commit_result(
             root,
             task_id,
-            {"created": False, "reason": "git_log_failed", "paths": candidate_paths},
+            _with_fallback({"created": False, "reason": "git_log_failed", "paths": candidate_paths}),
         )
 
     add_result = _run_git(root, "add", "--", *candidate_paths)
@@ -893,7 +897,7 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         return _record_checkpoint_commit_result(
             root,
             task_id,
-            {"created": False, "reason": "git_add_failed", "paths": candidate_paths},
+            _with_fallback({"created": False, "reason": "git_add_failed", "paths": candidate_paths}),
         )
 
     message = _checkpoint_commit_message(task)
@@ -906,7 +910,7 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         return _record_checkpoint_commit_result(
             root,
             task_id,
-            {"created": False, "reason": reason, "message": message, "paths": candidate_paths},
+            _with_fallback({"created": False, "reason": reason, "message": message, "paths": candidate_paths}),
         )
 
     head_result = _run_git(root, "rev-parse", "HEAD")
@@ -914,13 +918,13 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
     return _record_checkpoint_commit_result(
         root,
         task_id,
-        {
+        _with_fallback({
             "created": True,
             "reason": None,
             "commit_hash": commit_hash,
             "message": message,
             "paths": candidate_paths,
-        },
+        }),
     )
 
 

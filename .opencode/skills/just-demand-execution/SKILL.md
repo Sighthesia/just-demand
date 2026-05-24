@@ -115,54 +115,76 @@ Before dispatching any implementation subagent, verify that the task is sufficie
 
 ## Checkpoint Commit Policy
 
-A clean `just-demand-check` result (no findings or only fixed low-risk local issues) authorizes an automatic local checkpoint commit. The commit represents "this verified slice passed engineering checks", not permanent product finality. Positive user acceptance remains a valid commit trigger but is secondary.
+Every clean verification result should produce a checkpoint commit. The commit represents "this verified slice passed engineering checks", not permanent product finality. **Commits are the default, not the exception.** The script handles most of the work; the agent just needs to make sure the conditions are met and call the right command.
 
-### When to commit automatically
+### Primary commit path: via `complete-verification`
 
-- After `just-demand-check` passes with no unresolved findings.
-- After fixing low-risk local issues identified by `just-demand-check` and re-verifying.
-- Positive user acceptance phrases (e.g., `effective`, `good`, `OK`, `LGTM`, `works`, `looks good`, `valid`, `不错`, `有效`, `可以`, `没问题`, `达成`, `就这样`) still authorize commit, but are not required.
-
-Use the script-owned closure command for passed verification:
+When verification passes, the script-owned closure command creates the checkpoint commit automatically:
 
 ```text
 python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed "<summary>"
 ```
 
-That command records verification, runs the checkpoint-commit safety gate, and archives the task. Use `--no-checkpoint-commit` only when the user explicitly asked to avoid committing.
+That command records verification, runs the checkpoint-commit safety gate, and archives the task. Pass `--no-checkpoint-commit` only when the user explicitly asked to avoid committing.
 
-### Non-trigger cases
+### Standalone commit path: mid-task checkpoints
 
-- The phrase occurs during planning or discussion, not after a change was made.
+After any clean `just-demand-check` result, create a mid-task checkpoint without closing the task:
+
+```text
+python3 .just-demand/scripts/task.py --root . checkpoint-commit <task-id>
+```
+
+This is useful for:
+- Long tasks with multiple independently verified slices.
+- After fixing issues found by `just-demand-check` before moving to the next phase.
+- Any time a safe, scoped commit would reduce risk.
+
+### When to commit — proactively
+
+Commit after **every** meaningful clean verification:
+
+- After `just-demand-check` passes with no unresolved findings.
+- After fixing low-risk local issues and re-verifying.
+- After the user expresses positive acceptance (e.g., `effective`, `good`, `OK`, `LGTM`, `works`, `looks good`, `valid`, `不错`, `有效`, `可以`, `没问题`, `达成`, `就这样`).
+- Before ending a multi-step implementation turn, even if the full task is not done yet.
+
+Do not wait for perfect conditions. If the verified slice is clean, commit it.
+
+### Impact scope recommendation (not a gate)
+
+Setting `impact` via `mark --impact PATH` scopes the commit to only task-related files. If impact is not set, the script commits all non-generated changed files automatically. Impact scoping is **recommended** for precision but **not required** for the commit to proceed.
+
+### When NOT to commit
+
 - The user explicitly says to avoid committing.
-- The active task has no recent agent-made changes.
-- Repeated unstable feedback or task in `debugging`/`tweaking` status (pause auto-commit until next clean check).
+- No agent-made changes exist yet (planning/discussion phase only).
+- The task is in `debugging` or `tweaking` status with repeated unstable feedback (pause auto-commit until next clean check).
+- Tests fail and the user has not overridden.
 
 ### Correction commits
 
 - Small corrections: use follow-up commits on the same branch.
 - Fundamentally wrong direction: use a revert commit.
-- Do not rewrite history by default; prefer follow-up or revert commits.
-- Repeated correction feedback/unstable task: mark task `debugging` or `tweaking` and pause automatic commits until another clean check passes.
+- Do not rewrite history; prefer follow-up or revert commits.
 
-### Pre-commit safety gate (mandatory)
+### Pre-commit safety gate (script-owned, no manual steps needed)
 
-Before staging or committing:
+The `create_checkpoint_commit` function in `workflow_core.py` handles the entire safety gate:
 
-1. Run `git status`.
-2. Inspect `git diff`.
-3. Inspect recent commit style with `git log --oneline -10`.
-4. Stage only files related to the active task.
-5. Do not stage unrelated user changes, generated caches, `__pycache__/`, `.pyc`, `.pytest_cache/`, `.opencode/node_modules/`, secrets, or local-only artifacts.
-6. Run relevant tests when feasible, or state why they were not run.
+1. Reads git status and diffs the candidate paths.
+2. Verifies the task directory exists and changes are scoped.
+3. Stages only non-generated files (`__pycache__/`, `.pyc`, `.pytest_cache/`, `.opencode/node_modules/` are excluded automatically).
+4. Creates a conventional commit message with the task title and type prefix.
+5. Records the commit result in the task's `checkpoint_commit` field and emits events.
+
+No manual `git status` / `git diff` / `git add` inspection is needed. The script owns the entire safety gate. Just call `complete-verification` or `checkpoint-commit` and the script handles it.
 
 ### Commit rules
 
-- Create a local commit with a concise message matching repository style.
-- Never push automatically.
-- If boundaries are unclear, ask one short question instead of committing.
-- If tests fail, do not commit unless the user explicitly overrides.
-- Prefer multi-point commits for independently checked slices.
+- Creates a local commit with a conventional message (`feat:`/`fix:`/`chore:` prefix matching task type).
+- Never pushes automatically.
+- Multiple commits per task are supported — each clean verification checkpoint creates a new commit.
 
 ## Debugging and Lesson Capture
 

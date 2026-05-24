@@ -1329,5 +1329,141 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(task["clarification"]["approval"], "Approved by user.")
 
 
+    def test_checkpoint_commit_works_without_impact_scope(self):
+        """Checkpoint commit should fall back to all changes when impact is not set."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "No impact commit", "Test commit without impact", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "No impact", "Test", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "No impact.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-implement"])
+
+            # Do NOT set impact — commit should fall back to all changes
+            (root / "tracked.txt").write_text("updated content\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertIn("tracked.txt", result["checkpoint_commit"]["paths"])
+            self.assertIsNone(result["checkpoint_commit"].get("reason"))
+
+            latest_log = git_stdout(root, "log", "--oneline", "-1")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint no impact")
+
+    def test_multiple_checkpoint_commits_per_task(self):
+        """Same task should support multiple checkpoint commits over its lifecycle."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "Multi commit", "Test multiple commits", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Multi commit", "Test", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Multi commit.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-implement"])
+
+            # First change + checkpoint
+            (root / "file_a.txt").write_text("first change\n", encoding="utf-8")
+            mark_task(root, task_id, "executing", impact=["file_a.txt"])
+            complete_verification(root, task_id, "passed", "First checkpoint", auto_archive=False)
+
+            task = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertTrue(task["checkpoint_commit"]["created"])
+            self.assertEqual(task["checkpoint_commit"]["paths"], ["file_a.txt"])
+
+            # Set task back to executing for second round
+            mark_task(root, task_id, "executing", impact=["file_b.txt"])
+            (root / "file_b.txt").write_text("second change\n", encoding="utf-8")
+
+            complete_verification(root, task_id, "passed", "Second checkpoint", auto_archive=False)
+
+            task = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertTrue(task["checkpoint_commit"]["created"])
+            self.assertEqual(task["checkpoint_commit"]["paths"], ["file_b.txt"])
+
+            # Both commits should be in git log
+            log_lines = git_stdout(root, "log", "--oneline", "-3").splitlines()
+            self.assertGreaterEqual(len(log_lines), 2)
+            first_msg = log_lines[-1] if len(log_lines) >= 2 else log_lines[0]
+            second_msg = log_lines[0]
+            self.assertIn("multi commit", second_msg.lower())
+
+    def test_standalone_checkpoint_commit_cli(self):
+        """Standalone checkpoint-commit CLI should create a commit without archiving."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "Standalone cp", "Test standalone", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Standalone cp", "Test", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Standalone.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-implement"])
+
+            # Mark verification as passed so the checkpoint-commit script doesn't fail
+            from workflow_core import update_task
+            update_task(root, task_id, {"verification_status": "passed"})
+
+            # Make a scoped change
+            (root / "tracked.txt").write_text("standalone change\n", encoding="utf-8")
+
+            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "checkpoint-commit", task_id],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+
+            self.assertTrue(payload["created"])
+            self.assertIn("tracked.txt", payload["paths"])
+
+            # Task should still be active (not archived)
+            active_dir = tasks_dir(root) / "active" / task_id
+            self.assertTrue(active_dir.is_dir())
+
+            latest_log = git_stdout(root, "log", "--oneline", "-1")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint standalone cp")
+
+    def test_checkpoint_commit_fallback_note_present_in_events(self):
+        """When no impact scope is set, the fallback_note should be recorded in events."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "Fallback test", "Test fallback note", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Fallback test", "Test", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Fallback.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-implement"])
+
+            # No impact set
+            (root / "tracked.txt").write_text("fallback change\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(
+                result["checkpoint_commit"].get("fallback_note"),
+                "no impact scope set, committed all non-disallowed changes",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

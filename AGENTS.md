@@ -11,7 +11,7 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 - Inject rich context only for the subagent actively executing a formal task.
 - Long-context-consumption work must be delegated to subagents. If a task needs broad code reading, multi-file implementation, extended verification, or any context that would bloat the main session, the main agent should shape and dispatch it instead of doing it inline.
 - Before modifying code, or before dispatching any subagent that may modify or verify code, there must be a current formal task and its required task context files must already exist.
-- Invisible closure: completed verified tasks should be archived, not left active. A clean `just-demand-check` authorizes an automatic local checkpoint commit (scoped staging, no auto-push); later corrections use follow-up or revert commits. Repeated unstable feedback pauses auto-commit until another clean check passes. Non-trivial debugging triggers automatic lesson capture into skills. The user judges product-level quality; the agent handles engineering closure.
+- Checkpoint commits are the default, not the exception. Every clean verified slice produces a local checkpoint commit via `complete-verification` or `checkpoint-commit`. Impact scoping is recommended but not required. Multiple commits per task are supported. Later corrections use follow-up or revert commits. Repeated unstable feedback pauses auto-commit until the next clean check passes. Non-trivial debugging triggers automatic lesson capture into skills. The user judges product-level quality; the agent handles engineering closure.
 
 ## Operating Principles
 
@@ -43,6 +43,8 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 - Promote intake manually: `python3 .just-demand/scripts/task.py --root . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
 - List unfinished tasks: `python3 .just-demand/scripts/task.py --root . list-active`
 - Mark task status/progress/impact: `python3 .just-demand/scripts/task.py --root . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
+- Complete verification + checkpoint commit + archive: `python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed "<summary>"`
+- Create standalone mid-task checkpoint commit: `python3 .just-demand/scripts/task.py --root . checkpoint-commit <task-id>`
 - Archive completed task: `python3 .just-demand/scripts/task.py --root . archive-task <task-id>`
 - Clean up completed task: `python3 .just-demand/scripts/task.py --root . cleanup-task <task-id>`
 

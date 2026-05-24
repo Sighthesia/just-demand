@@ -11,6 +11,7 @@ from workflow_core import (
     archive_task,
     cleanup_completed_task,
     complete_verification,
+    create_checkpoint_commit,
     create_intake,
     list_unfinished_tasks,
     mark_task,
@@ -52,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     mark.add_argument("--progress", type=int, default=None, help="Progress 0-100")
     mark.add_argument("--impact", action="append", default=None, help="Affected path/module (repeatable)")
     mark.add_argument("--note", default=None, help="Short note for current state")
+
+    checkpoint = sub.add_parser("checkpoint-commit", help="Create a checkpoint commit for a task (requires passed verification)")
+    checkpoint.add_argument("task_id", help="Task ID to create a checkpoint commit for")
 
     cleanup = sub.add_parser("cleanup-task", help="Clean up a completed task and remove its runtime references")
     cleanup.add_argument("task_id", help="Task ID to clean up (must be status 'done')")
@@ -100,6 +104,8 @@ def main() -> int:
     try:
         if args.command == "create-intake":
             result = create_intake(root, args.title, args.raw_request, args.session)
+        elif args.command == "checkpoint-commit":
+            result = create_checkpoint_commit(root, args.task_id)
         elif args.command == "promote":
             criteria = args.acceptance or ["The formal task package exists and can be executed."]
             result = promote_to_task(root, args.intake_id, args.title, args.goal, args.type, criteria)
