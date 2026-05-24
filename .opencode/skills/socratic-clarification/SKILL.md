@@ -248,16 +248,19 @@ Use the `question` tool for explicit approval at key checkpoints:
 - After capturing the final artifact.
 - When confirming scope or boundary decisions.
 
-Keep question text focused on user intent, expected effect, and scope. Do not embed implementation details into the question prompt. Implementation choices belong in the final artifact, not in the question tool text.
-
 Example approval pattern:
 
 ```text
-question: "Is this the effect you want?"
-options: ["Yes, proceed", "No, I want something different"]
+question: "Approach A is recommended for speed. Approve?"
+options: ["Approach A: direct implementation", "Approach B: staged implementation", "Approach C: different approach"]
 ```
 
-Do NOT use the question tool to present implementation details or ask about implementation methods. The question tool is for gathering user intent, expected effects, boundaries, scope, and approval. Implementation choices and plans are captured in the final artifact, not in question prompts.
+### Question prompt brevity
+
+Keep `question` tool prompt text short and scannable. Do NOT dump full implementation plans, long descriptions, or verbose context into the prompt text. The prompt should be a concise label or summary. Full details belong in the chat message preceding the question tool call, not inside the tool prompt itself.
+
+Bad: a 300-word plan pasted into the question prompt field.
+Good: a one-sentence summary in the prompt, with the full plan in the preceding chat message.
 
 ## Routing Rule
 
