@@ -226,6 +226,7 @@ class InstallCoreTests(unittest.TestCase):
         self.assertIn("just-demand-research.md", DEPLOYED_FILES["agents"])
         
         self.assertIn("using-just-demand", DEPLOYED_FILES["skills"])
+        self.assertIn("socratic-clarification", DEPLOYED_FILES["skills"])
         self.assertIn("just-demand-execution", DEPLOYED_FILES["skills"])
         self.assertIn("just-demand-intake", DEPLOYED_FILES["skills"])
         self.assertIn("just-demand-memory", DEPLOYED_FILES["skills"])

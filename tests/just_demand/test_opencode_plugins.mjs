@@ -302,9 +302,9 @@ test("subagent-context factory returns hooks object with tool.execute.before", a
 })
 
 // ---------------------------------------------------------------------------
-// session-start: no main-session bootstrap injection
+// session-start: no visible main-session injection
 // ---------------------------------------------------------------------------
-test("session-start returns hook without injecting bootstrap", async () => {
+test("session-start returns hook without injecting visible routing text", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
@@ -320,6 +320,25 @@ test("session-start skips injection for just-demand- agents", async () => {
   const output = { parts: [{ type: "text", text: "Hello" }] }
   await plugin["chat.message"]({ agent: "just-demand-implement", sessionID: "s-skip" }, output)
   assert.equal(output.parts[0].text, "Hello")
+})
+
+test("session-start leaves preexisting routing-like text unchanged", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const plugin = await sessionStartFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "[just-demand-skill-routing]\nExisting reminder\nHello" }] }
+  await plugin["chat.message"]({ sessionID: "s1" }, output)
+  assert.equal(output.parts[0].text, "[just-demand-skill-routing]\nExisting reminder\nHello")
+})
+
+test("session-start leaves non-text parts untouched", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const plugin = await sessionStartFactory({ directory: root })
+  const output = { parts: [{ type: "image", url: "data:image/png;base64,abc" }] }
+  await plugin["chat.message"]({ sessionID: "s1" }, output)
+  assert.equal(output.parts[0].type, "image")
+  assert.equal(output.parts[0].url, "data:image/png;base64,abc")
 })
 
 // ---------------------------------------------------------------------------

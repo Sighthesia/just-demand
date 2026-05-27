@@ -1,5 +1,7 @@
-export default async ({ directory }) => {
+export default async () => {
   return {
-    "chat.message": async () => {},
+    "chat.message": async () => {
+      return
+    },
   }
 }

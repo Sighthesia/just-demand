@@ -1,6 +1,6 @@
 ---
 name: just-demand-intake
-description: Use when the user proposes a new goal, feature, bugfix, design, refactor, research item, UI request, or any unclear work that may become a formal work item. Clarifies the user's need before task creation.
+description: Use when the user proposes a new goal, feature, bugfix, design, refactor, research item, UI request, or any unclear work that may become a formal work item. Shapes work into task-ready intake after socratic-clarification has handled requests, bugs, pivots from ordinary Q&A, and other material uncertainty.
 ---
 
 # Workflow Intake
@@ -11,6 +11,7 @@ Clarify the user's need before exposing workflow mechanics.
 
 - Focus on the user's described outcome, expected behavior, anti-outcomes, constraints, and tradeoffs.
 - Use `socratic-clarification` for progressive questioning before shaping new or ambiguous work.
+- Do not outrank `socratic-clarification`. Intake starts after clarification has established the intended effect and direction for the current turn.
 - Keep the turn user-understandable, but do not use brevity as a reason to skip material uncertainty.
 - Prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 - Do not discuss task packages, repo maps, JSONL, context injection, or subagent mechanics unless the user is explicitly designing those mechanisms.

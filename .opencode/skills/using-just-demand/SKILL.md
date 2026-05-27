@@ -3,6 +3,12 @@ name: using-just-demand
 description: Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions
 ---
 
+# Skill Priority
+
+1. `using-just-demand` - always loaded first for repo work.
+2. `socratic-clarification` - always loaded second for any request, bug report, correction, or mismatch, including follow-up turns that pivot from ordinary Q&A into concrete work.
+3. `just-demand-intake` and other workflow skills - loaded only after clarification has established the final expected effect and chosen direction.
+
 If you were dispatched as a subagent to execute a specific task, skip this skill. If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.
 
 IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
@@ -16,6 +22,8 @@ Use this repository as an OpenCode-first local agent workflow runtime.
 ## First Move
 
 Before shaping work, identify the current situation. If the user proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch, load `socratic-clarification` first, then continue with the workflow route below.
+
+Treat this as a routing reset on every turn. Do not stay on a generic Q&A path just because earlier turns were informational. As soon as a later turn pivots into concrete work, bug fixing, or correction feedback, `socratic-clarification` becomes the next required skill.
 
 ```text
 No active formal task -> use just-demand-intake.
@@ -35,6 +43,8 @@ When material uncertainty exists, clarification is not optional and not a nice-t
 - you can imagine a reasonable implementation, but a different reasonable interpretation would produce a user-visible mismatch
 
 Do not proceed just because you can guess a plausible path. Clarification is a hard gate: no task promotion, no subagent dispatch, no code edits until final expected effect and final implementation plan are approved.
+
+Do not rely on visible main-session reminder text to enforce this. The routing priority must live in the skill behavior itself: `using-just-demand` first, `socratic-clarification` second, then intake/execution/memory/verification only after that gate is satisfied.
 
 When clarifying, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 
@@ -65,9 +75,9 @@ Do not expose internal workflow mechanics to the user unless they are explicitly
 
 | Situation | Load |
 | --- | --- |
-| User proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch | `socratic-clarification` first (hard gate), then the applicable workflow skill |
-| User proposes or clarifies work before a formal task exists | `just-demand-intake` |
-| User reports a bug, regression, vague failure, or expected-vs-actual mismatch before direction is fully clear | `just-demand-intake` |
+| User proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch | `socratic-clarification` first (second-highest-priority skill after this one), then the applicable workflow skill |
+| User proposes or clarifies work before a formal task exists | `just-demand-intake`, but only after `socratic-clarification` when the turn contains new or ambiguous work |
+| User reports a bug, regression, vague failure, or expected-vs-actual mismatch before direction is fully clear | `socratic-clarification` first, then `just-demand-intake` |
 | A formal work item is ready for execution or subagent dispatch | `just-demand-execution` |
 | Reporting completion, failed verification, or correction feedback | `just-demand-verification` |
 | Recording durable decisions, preferences, facts, open questions, or deferred options | `just-demand-memory` |

@@ -1,11 +1,13 @@
 ---
 name: socratic-clarification
-description: Use when the user proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch before implementation.
+description: Use when the user proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch before implementation. This is the second-priority skill after using-just-demand, including when a conversation pivots from ordinary Q&A to a concrete request, bug, or correction.
 ---
 
 # Socratic Clarification
 
 Force progressive clarification and design approval before any implementation work begins. This is a hard gate, not optional guidance.
+
+This skill is the required second routing step after `using-just-demand`. If a turn changes from ordinary Q&A into concrete work, bug fixing, mismatch analysis, or correction feedback, this skill takes priority before intake, execution, or verification routing continues.
 
 <HARD-GATE>
 Do NOT promote a task, dispatch a subagent, edit files, or finalize an implementation plan until you have presented a final expected effect, compared 2-3 approaches, captured the chosen approach and final implementation plan, and received explicit user approval. This applies to EVERY request regardless of perceived simplicity.

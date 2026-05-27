@@ -31,6 +31,7 @@ DEPLOYED_FILES = {
     ],
     "skills": [
         "using-just-demand",
+        "socratic-clarification",
         "just-demand-execution",
         "just-demand-intake",
         "just-demand-memory",
