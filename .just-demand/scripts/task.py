@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -97,58 +98,61 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    args = build_parser().parse_args()
-    root = Path(args.root).resolve()
+def execute_command(root: Path, args: list[str]) -> int:
+    """Execute a single command with the given arguments."""
+    try:
+        parsed = build_parser().parse_args(args)
+    except SystemExit:
+        return 1
     
     try:
-        if args.command == "create-intake":
-            result = create_intake(root, args.title, args.raw_request, args.session)
-        elif args.command == "checkpoint-commit":
-            result = create_checkpoint_commit(root, args.task_id)
-        elif args.command == "promote":
-            criteria = args.acceptance or ["The formal task package exists and can be executed."]
-            result = promote_to_task(root, args.intake_id, args.title, args.goal, args.type, criteria)
-        elif args.command == "list-active":
-            result = {"tasks": list_unfinished_tasks(root, verbose=getattr(args, "verbose", False))}
-        elif args.command == "mark":
+        if parsed.command == "create-intake":
+            result = create_intake(root, parsed.title, parsed.raw_request, parsed.session)
+        elif parsed.command == "checkpoint-commit":
+            result = create_checkpoint_commit(root, parsed.task_id)
+        elif parsed.command == "promote":
+            criteria = parsed.acceptance or ["The formal task package exists and can be executed."]
+            result = promote_to_task(root, parsed.intake_id, parsed.title, parsed.goal, parsed.type, criteria)
+        elif parsed.command == "list-active":
+            result = {"tasks": list_unfinished_tasks(root, verbose=getattr(parsed, "verbose", False))}
+        elif parsed.command == "mark":
             result = mark_task(
                 root,
-                args.task_id,
-                args.status,
-                progress=args.progress,
-                impact=args.impact,
-                note=args.note,
+                parsed.task_id,
+                parsed.status,
+                progress=parsed.progress,
+                impact=parsed.impact,
+                note=parsed.note,
             )
-        elif args.command == "cleanup-task":
-            result = cleanup_completed_task(root, args.task_id)
-        elif args.command == "archive-task":
-            result = archive_task(root, args.task_id)
-        elif args.command == "complete-verification":
+        elif parsed.command == "cleanup-task":
+            result = cleanup_completed_task(root, parsed.task_id)
+        elif parsed.command == "archive-task":
+            result = archive_task(root, parsed.task_id)
+        elif parsed.command == "complete-verification":
             result = complete_verification(
                 root,
-                args.task_id,
-                args.result,
-                args.summary,
-                auto_archive=not args.no_auto_archive,
-                checkpoint_commit=not args.no_checkpoint_commit,
+                parsed.task_id,
+                parsed.result,
+                parsed.summary,
+                auto_archive=not parsed.no_auto_archive,
+                checkpoint_commit=not parsed.no_checkpoint_commit,
             )
-        elif args.command == "init":
+        elif parsed.command == "init":
             result = init_project(root)
-        elif args.command == "install":
-            if not args.opencode or not args.global_install:
+        elif parsed.command == "install":
+            if not parsed.opencode or not parsed.global_install:
                 result = {"status": "error", "message": "Install requires --opencode --global flags"}
             else:
-                config_root = Path(args.config_root) if args.config_root else None
+                config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = install_opencode_global(config_root)
-        elif args.command == "update":
-            if not args.opencode or not args.global_update:
+        elif parsed.command == "update":
+            if not parsed.opencode or not parsed.global_update:
                 result = {"status": "error", "message": "Update requires --opencode --global flags"}
             else:
-                config_root = Path(args.config_root) if args.config_root else None
+                config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = update_opencode_global(config_root)
-        elif args.command == "sync-workspaces":
-            search_roots = [Path(path) for path in args.search_root] if args.search_root else None
+        elif parsed.command == "sync-workspaces":
+            search_roots = [Path(path) for path in parsed.search_root] if parsed.search_root else None
             result = sync_initialized_workspaces(search_roots)
             # Format human-readable output for sync-workspaces
             if result.get("status") == "success":
@@ -160,7 +164,7 @@ def main() -> int:
                     # Shorten path for readability
                     path = ws["project_root"]
                     try:
-                        path = str(Path(path).relative_to(Path.cwd()))
+                        path = str(Path(path).relative_to(root))
                     except ValueError:
                         pass
                     print(f"  {status}{scripts}  {path}")
@@ -168,19 +172,20 @@ def main() -> int:
             else:
                 print(json.dumps(result, ensure_ascii=False))
             return 0 if result.get("status") == "success" else 1
-        elif args.command == "doctor":
-            config_root = Path(args.config_root) if args.config_root else None
+        elif parsed.command == "doctor":
+            config_root = Path(parsed.config_root) if parsed.config_root else None
             result = doctor_opencode_global(config_root, root)
-        elif args.command == "uninstall":
-            if not args.opencode or not args.global_uninstall:
+        elif parsed.command == "uninstall":
+            if not parsed.opencode or not parsed.global_uninstall:
                 result = {"status": "error", "message": "Uninstall requires --opencode --global flags"}
             else:
-                config_root = Path(args.config_root) if args.config_root else None
+                config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = uninstall_opencode_global(config_root)
         else:
-            raise RuntimeError(f"Unsupported command: {args.command}")
+            raise RuntimeError(f"Unsupported command: {parsed.command}")
     except Exception as exc:
         result = {"status": "error", "message": str(exc)}
+    
     print(json.dumps(result, ensure_ascii=False))
     # Return 0 for success, 1 for error status
     if isinstance(result, dict):
@@ -191,6 +196,87 @@ def main() -> int:
         # For other results (task operations), assume success
         return 0
     return 0
+
+
+def show_help():
+    """Show available commands in interactive mode."""
+    print("Available commands:")
+    print("  list-active [--verbose]           List unfinished tasks")
+    print("  create-intake <title> <request>   Create intake note")
+    print("  promote <id> <title> <goal>       Promote intake to task")
+    print("  mark <id> <status> [--progress N] Mark task status")
+    print("  complete-verification <id> ...    Record verification result")
+    print("  checkpoint-commit <id>            Create checkpoint commit")
+    print("  archive-task <id>                 Archive completed task")
+    print("  cleanup-task <id>                 Clean up completed task")
+    print("  init                              Initialize project")
+    print("  sync-workspaces                   Sync workflow scripts")
+    print("  doctor                            Check installation status")
+    print("  help                              Show this help")
+    print("  exit / quit                       Exit interactive mode")
+    print()
+
+
+def interactive_mode(root: Path):
+    """Run in interactive mode."""
+    print("Just Demand Task CLI (interactive mode)")
+    print(f"Working directory: {root}")
+    print("Type 'help' for available commands, 'exit' to quit.")
+    print()
+    
+    while True:
+        try:
+            line = input("just-demand> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        
+        if not line:
+            continue
+        
+        if line in ("exit", "quit"):
+            break
+        
+        if line == "help":
+            show_help()
+            continue
+        
+        try:
+            args = shlex.split(line)
+        except ValueError as e:
+            print(f"Error parsing command: {e}")
+            continue
+        
+        execute_command(root, args)
+
+
+def main() -> int:
+    # If no arguments provided, enter interactive mode
+    if len(sys.argv) == 1:
+        root = Path(".").resolve()
+        interactive_mode(root)
+        return 0
+    
+    # Otherwise, parse arguments and execute single command
+    parser = build_parser()
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    
+    # Reconstruct command args (without --root) for execute_command
+    cmd_args = []
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == "--root":
+            i += 2  # Skip --root and its value
+            continue
+        elif arg.startswith("--root="):
+            i += 1  # Skip --root=value
+            continue
+        cmd_args.append(arg)
+        i += 1
+    
+    return execute_command(root, cmd_args)
 
 
 if __name__ == "__main__":
