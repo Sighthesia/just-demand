@@ -190,6 +190,24 @@ def execute_command(root: Path, args: list[str]) -> int:
                     print(json.dumps(result, ensure_ascii=False))
                 return 0 if result.get("status") == "success" else 1
         elif parsed.command == "sync-workspaces":
+            # First update global installation to ensure latest scripts/plugins
+            print("Updating global installation...")
+            update_result = update_opencode_global()
+            if update_result.get("status") == "success":
+                results = update_result.get("results", {})
+                total = results.get("total_deployed", 0)
+                if total > 0:
+                    print(f"✓ Updated {total} global files")
+                else:
+                    print("· Global installation already current")
+                if results.get("warnings"):
+                    for warning in results["warnings"]:
+                        print(f"  ⚠ {warning}")
+            else:
+                print(f"⚠ Global update failed: {update_result.get('message', 'Unknown error')}")
+            print()
+            
+            # Then sync workspaces
             search_roots = [Path(path) for path in parsed.search_root] if parsed.search_root else None
             result = sync_initialized_workspaces(search_roots)
             # Format human-readable output for sync-workspaces
