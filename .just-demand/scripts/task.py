@@ -160,14 +160,21 @@ def execute_command(root: Path, args: list[str]) -> int:
                 print()
                 for ws in result["workspaces"]:
                     status = "✓ updated" if ws["updated"] else "· current"
-                    scripts = f" ({ws['scripts_deployed']} scripts deployed)" if ws["scripts_deployed"] > 0 else ""
+                    details = []
+                    if ws["scripts_deployed"] > 0:
+                        details.append(f"{ws['scripts_deployed']} scripts")
+                    if ws["files_moved"]:
+                        details.append(f"{len(ws['files_moved'])} files migrated")
+                    if ws["gitignore_updated"]:
+                        details.append("gitignore updated")
+                    detail_str = f" ({', '.join(details)})" if details else ""
                     # Shorten path for readability
                     path = ws["project_root"]
                     try:
                         path = str(Path(path).relative_to(root))
                     except ValueError:
                         pass
-                    print(f"  {status}{scripts}  {path}")
+                    print(f"  {status}{detail_str}  {path}")
                 print()
             else:
                 print(json.dumps(result, ensure_ascii=False))

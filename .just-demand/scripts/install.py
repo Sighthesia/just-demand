@@ -370,6 +370,78 @@ def sync_project_scripts(project_root: Path) -> int:
     return deploy_directory(source_scripts, target_scripts, manifest, workflow_root, exclude=["__pycache__"])
 
 
+def migrate_workspace(project_root: Path) -> dict[str, Any]:
+    """Migrate workspace structure to latest layout.
+    
+    Handles:
+    - Creating knowledge/ directory
+    - Moving knowledge files from workspace/ to knowledge/
+    - Updating .gitignore with correct entries
+    
+    Returns migration result with details of what was migrated.
+    """
+    workflow_root = project_root / ".just-demand"
+    workspace_dir = workflow_root / "workspace"
+    knowledge_dir = workflow_root / "knowledge"
+    
+    result = {
+        "knowledge_dir_created": False,
+        "files_moved": [],
+        "gitignore_updated": False,
+    }
+    
+    # 1. Create knowledge directory if it doesn't exist
+    if not knowledge_dir.exists():
+        knowledge_dir.mkdir(parents=True, exist_ok=True)
+        result["knowledge_dir_created"] = True
+    
+    # 2. Move knowledge files from workspace/ to knowledge/ if they exist
+    knowledge_files = [
+        "decisions.md",
+        "deferred_options.md",
+        "facts.md",
+        "open_questions.md",
+        "preferences.md",
+    ]
+    
+    for filename in knowledge_files:
+        source = workspace_dir / filename
+        target = knowledge_dir / filename
+        if source.exists() and not target.exists():
+            shutil.move(str(source), str(target))
+            result["files_moved"].append(filename)
+    
+    # 3. Update .gitignore
+    gitignore_path = project_root / ".gitignore"
+    gitignore_entries = [
+        "# Workflow runtime state and task files",
+        ".just-demand/tasks/",
+        ".just-demand/workspace/",
+        "",
+        "# Auto-generated placeholder files",
+        ".just-demand/global/architecture.md",
+        ".just-demand/global/glossary.md",
+    ]
+    gitignore_content = "\n".join(gitignore_entries) + "\n"
+    
+    if gitignore_path.exists():
+        existing_content = gitignore_path.read_text(encoding="utf-8")
+        # Check if .just-demand/workspace/ is already in .gitignore
+        if ".just-demand/workspace/" not in existing_content:
+            # Append just-demand entries
+            if not existing_content.endswith("\n"):
+                existing_content += "\n"
+            existing_content += "\n" + gitignore_content
+            gitignore_path.write_text(existing_content, encoding="utf-8")
+            result["gitignore_updated"] = True
+    else:
+        # Create new .gitignore
+        gitignore_path.write_text(gitignore_content, encoding="utf-8")
+        result["gitignore_updated"] = True
+    
+    return result
+
+
 def discover_initialized_workspaces(search_root: Path) -> list[Path]:
     """Find initialized project roots beneath a search root."""
     resolved_root = search_root.resolve()
@@ -395,11 +467,14 @@ def sync_initialized_workspaces(search_roots: Optional[list[Path]] = None) -> di
                 continue
             seen_projects.add(project_root)
             scripts_deployed = sync_project_scripts(project_root)
+            migration = migrate_workspace(project_root)
             workspaces.append(
                 {
                     "project_root": str(project_root),
                     "scripts_deployed": scripts_deployed,
-                    "updated": scripts_deployed > 0,
+                    "files_moved": migration["files_moved"],
+                    "gitignore_updated": migration["gitignore_updated"],
+                    "updated": scripts_deployed > 0 or migration["files_moved"] or migration["gitignore_updated"],
                 }
             )
 
