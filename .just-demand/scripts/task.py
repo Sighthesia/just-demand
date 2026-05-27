@@ -150,6 +150,24 @@ def main() -> int:
         elif args.command == "sync-workspaces":
             search_roots = [Path(path) for path in args.search_root] if args.search_root else None
             result = sync_initialized_workspaces(search_roots)
+            # Format human-readable output for sync-workspaces
+            if result.get("status") == "success":
+                print(f"✓ {result['message']}")
+                print()
+                for ws in result["workspaces"]:
+                    status = "✓ updated" if ws["updated"] else "· current"
+                    scripts = f" ({ws['scripts_deployed']} scripts deployed)" if ws["scripts_deployed"] > 0 else ""
+                    # Shorten path for readability
+                    path = ws["project_root"]
+                    try:
+                        path = str(Path(path).relative_to(Path.cwd()))
+                    except ValueError:
+                        pass
+                    print(f"  {status}{scripts}  {path}")
+                print()
+            else:
+                print(json.dumps(result, ensure_ascii=False))
+            return 0 if result.get("status") == "success" else 1
         elif args.command == "doctor":
             config_root = Path(args.config_root) if args.config_root else None
             result = doctor_opencode_global(config_root, root)
