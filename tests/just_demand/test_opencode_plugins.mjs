@@ -22,13 +22,14 @@ function makeRoot() {
 function scaffoldWorkflow(root) {
   const base = join(root, ".just-demand")
   mkdirSync(join(base, "workspace"), { recursive: true })
+  mkdirSync(join(base, "knowledge"), { recursive: true })
   mkdirSync(join(base, "global"), { recursive: true })
   mkdirSync(join(base, "tasks", "active"), { recursive: true })
   writeFileSync(join(base, "workspace", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
   writeFileSync(join(base, "global", "rules.md"), "# Rules\n\nBe concise.")
-  writeFileSync(join(base, "workspace", "facts.md"), "# Facts\n\nKey fact: system uses JSONL.")
-  writeFileSync(join(base, "workspace", "decisions.md"), "# Decisions\n\nChose approach A.")
-  writeFileSync(join(base, "workspace", "deferred_options.md"), "# Deferred\n\nOption X deferred.")
+  writeFileSync(join(base, "knowledge", "facts.md"), "# Facts\n\nKey fact: system uses JSONL.")
+  writeFileSync(join(base, "knowledge", "decisions.md"), "# Decisions\n\nChose approach A.")
+  writeFileSync(join(base, "knowledge", "deferred_options.md"), "# Deferred\n\nOption X deferred.")
 }
 
 // ---------------------------------------------------------------------------

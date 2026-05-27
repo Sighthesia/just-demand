@@ -62,7 +62,8 @@ Run Python and Node tests after changing `.just-demand/scripts/`, `.opencode/plu
 ## Repository Structure
 
 - `.just-demand/scripts/`: Python state-changing workflow core and CLI. This is the write path for workflow machine state.
-- `.just-demand/workspace/`: durable preferences, decisions, deferred options, facts, open questions, state, events, and locks.
+- `.just-demand/workspace/`: runtime state (state.json, events.jsonl, locks.json, intake/, sessions/). Ignored by git.
+- `.just-demand/knowledge/`: durable preferences, decisions, deferred options, facts, open questions. Version-controlled.
 - `.just-demand/tasks/`: formal task packages under `active/` and archived work under `archive/`.
 - `.opencode/plugins/`: OpenCode plugin adapters. These should read workflow state and mutate OpenCode messages/prompts only.
 - `.opencode/agent/`: workflow subagent definitions.

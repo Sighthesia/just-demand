@@ -35,7 +35,7 @@ class InstallCoreTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertTrue((root / ".just-demand").exists())
             self.assertTrue((root / ".just-demand" / "workspace" / "state.json").exists())
-            self.assertTrue((root / ".just-demand" / "workspace" / "preferences.md").exists())
+            self.assertTrue((root / ".just-demand" / "knowledge" / "preferences.md").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "task.py").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "install.py").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())

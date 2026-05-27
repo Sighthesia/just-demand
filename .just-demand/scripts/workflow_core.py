@@ -31,6 +31,10 @@ def workspace_dir(root: Path) -> Path:
     return workflow_dir(root) / "workspace"
 
 
+def knowledge_dir(root: Path) -> Path:
+    return workflow_dir(root) / "knowledge"
+
+
 def tasks_dir(root: Path) -> Path:
     return workflow_dir(root) / "tasks"
 
@@ -67,6 +71,7 @@ def ensure_workspace(root: Path) -> None:
         base / "global",
         base / "workspace" / "intake",
         base / "workspace" / "sessions",
+        base / "knowledge",
         base / "tasks" / "active",
         base / "tasks" / "archive",
         base / "scripts",
@@ -77,11 +82,11 @@ def ensure_workspace(root: Path) -> None:
         base / "global" / "rules.md": "# Just Demand Workflow Rules\n\n",
         base / "global" / "architecture.md": "# Just Demand Workflow Architecture\n\n",
         base / "global" / "glossary.md": "# Just Demand Workflow Glossary\n\n",
-        base / "workspace" / "preferences.md": "# Preferences\n\n",
-        base / "workspace" / "decisions.md": "# Decisions\n\n",
-        base / "workspace" / "deferred_options.md": "# Deferred Options\n\n",
-        base / "workspace" / "facts.md": "# Facts\n\n",
-        base / "workspace" / "open_questions.md": "# Open Questions\n\n",
+        base / "knowledge" / "preferences.md": "# Preferences\n\n",
+        base / "knowledge" / "decisions.md": "# Decisions\n\n",
+        base / "knowledge" / "deferred_options.md": "# Deferred Options\n\n",
+        base / "knowledge" / "facts.md": "# Facts\n\n",
+        base / "knowledge" / "open_questions.md": "# Open Questions\n\n",
         base / "workspace" / "events.jsonl": "",
         base / "workspace" / "locks.json": json.dumps({"schema_version": SCHEMA_VERSION, "locks": []}, indent=2) + "\n",
     }
@@ -1123,8 +1128,8 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
     try:
         decisions_content = _extract_task_decisions(root, task_dir)
         if decisions_content:
-            workspace_decisions = workspace_dir(root) / "decisions.md"
-            with workspace_decisions.open("a", encoding="utf-8") as f:
+            knowledge_decisions = knowledge_dir(root) / "decisions.md"
+            with knowledge_decisions.open("a", encoding="utf-8") as f:
                 f.write(f"\n\n## From Task: {task_id}\n\n{decisions_content}\n")
     except Exception as e:
         extraction_errors.append(f"decisions extraction failed: {e}")
@@ -1133,8 +1138,8 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
     try:
         facts_content = _extract_task_facts(root, task_dir)
         if facts_content:
-            workspace_facts = workspace_dir(root) / "facts.md"
-            with workspace_facts.open("a", encoding="utf-8") as f:
+            knowledge_facts = knowledge_dir(root) / "facts.md"
+            with knowledge_facts.open("a", encoding="utf-8") as f:
                 f.write(f"\n{facts_content}\n")
     except Exception as e:
         extraction_errors.append(f"facts extraction failed: {e}")

@@ -80,7 +80,7 @@ export const listUnfinishedTasks = (directory) => {
 
 export const readTaskContext = (directory, taskId, agentName) => {
   const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
-  const workspaceDir = join(workflowRoot(directory), "workspace")
+  const knowledgeDir = join(workflowRoot(directory), "knowledge")
   const parts = []
   const task = readTaskJson(directory, taskId)
 
@@ -117,7 +117,7 @@ export const readTaskContext = (directory, taskId, agentName) => {
       break
     }
     case "just-demand-research": {
-      const facts = readTextIfExists(join(workspaceDir, "facts.md"))
+      const facts = readTextIfExists(join(knowledgeDir, "facts.md"))
       if (facts) parts.push(`# Workspace Facts\n\n${facts}`)
       const researchDir = join(taskDir, "research")
       if (existsSync(researchDir)) {
@@ -126,9 +126,9 @@ export const readTaskContext = (directory, taskId, agentName) => {
       break
     }
     case "just-demand-docs": {
-      const wsDecisions = readTextIfExists(join(workspaceDir, "decisions.md"))
+      const wsDecisions = readTextIfExists(join(knowledgeDir, "decisions.md"))
       if (wsDecisions) parts.push(`# Workspace Decisions\n\n${wsDecisions}`)
-      const deferred = readTextIfExists(join(workspaceDir, "deferred_options.md"))
+      const deferred = readTextIfExists(join(knowledgeDir, "deferred_options.md"))
       if (deferred) parts.push(`# Deferred Options\n\n${deferred}`)
       break
     }

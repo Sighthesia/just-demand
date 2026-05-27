@@ -13,11 +13,7 @@ __pycache__/
 
 # Workflow runtime state and task files
 .just-demand/tasks/
-.just-demand/workspace/state.json
-.just-demand/workspace/events.jsonl
-.just-demand/workspace/locks.json
-.just-demand/workspace/intake/
-.just-demand/workspace/sessions/
+.just-demand/workspace/
 
 # Auto-generated placeholder files
 .just-demand/global/architecture.md

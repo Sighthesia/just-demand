@@ -20,6 +20,7 @@ from workflow_core import (
     create_intake,
     create_validation_revision,
     ensure_workspace,
+    knowledge_dir,
     list_unfinished_tasks,
     locks_path,
     mark_task,
@@ -97,9 +98,9 @@ class WorkflowCoreTests(unittest.TestCase):
 
             workflow = root / ".just-demand"
             self.assertTrue((workflow / "workspace" / "state.json").is_file())
-            self.assertTrue((workflow / "workspace" / "preferences.md").is_file())
-            self.assertTrue((workflow / "workspace" / "decisions.md").is_file())
-            self.assertTrue((workflow / "workspace" / "deferred_options.md").is_file())
+            self.assertTrue((workflow / "knowledge" / "preferences.md").is_file())
+            self.assertTrue((workflow / "knowledge" / "decisions.md").is_file())
+            self.assertTrue((workflow / "knowledge" / "deferred_options.md").is_file())
             self.assertTrue((workflow / "workspace" / "events.jsonl").is_file())
             state = read_json(workflow / "workspace" / "state.json")
             self.assertEqual(state["schema_version"], "1.0")
@@ -613,9 +614,9 @@ class WorkflowCoreTests(unittest.TestCase):
             # Archive the task
             archive_task(root, task_id)
 
-            # Verify decisions were extracted to workspace
-            workspace_decisions = workspace_dir(root) / "decisions.md"
-            content = workspace_decisions.read_text(encoding="utf-8")
+            # Verify decisions were extracted to knowledge
+            knowledge_decisions = knowledge_dir(root) / "decisions.md"
+            content = knowledge_decisions.read_text(encoding="utf-8")
             self.assertIn(f"## From Task: {task_id}", content)
             self.assertIn("Use atomic writes", content)
 
@@ -635,9 +636,9 @@ class WorkflowCoreTests(unittest.TestCase):
             # Archive the task
             archive_task(root, task_id)
 
-            # Verify facts were extracted to workspace
-            workspace_facts = workspace_dir(root) / "facts.md"
-            content = workspace_facts.read_text(encoding="utf-8")
+            # Verify facts were extracted to knowledge
+            knowledge_facts = knowledge_dir(root) / "facts.md"
+            content = knowledge_facts.read_text(encoding="utf-8")
             self.assertIn(task_id, content)
             self.assertIn("Fact extraction", content)
 
@@ -713,8 +714,8 @@ class WorkflowCoreTests(unittest.TestCase):
                 archive_task(root, task_id)
 
             self.assertTrue((tasks_dir(root) / "active" / task_id).is_dir())
-            workspace_decisions = (workspace_dir(root) / "decisions.md").read_text(encoding="utf-8")
-            self.assertNotIn("Collision guard", workspace_decisions)
+            knowledge_decisions = (knowledge_dir(root) / "decisions.md").read_text(encoding="utf-8")
+            self.assertNotIn("Collision guard", knowledge_decisions)
 
     def test_complete_verification_auto_archives_on_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
