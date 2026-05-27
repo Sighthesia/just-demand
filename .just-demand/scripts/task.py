@@ -145,12 +145,50 @@ def execute_command(root: Path, args: list[str]) -> int:
             else:
                 config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = install_opencode_global(config_root)
+                # Format human-readable output for install
+                if result.get("status") == "success":
+                    print(f"✓ {result['message']}")
+                    results = result.get("results", {})
+                    print()
+                    print(f"  Config root: {result['config_root']}")
+                    print(f"  Plugins deployed: {results.get('plugins_deployed', 0)}")
+                    print(f"  Agents deployed: {results.get('agents_deployed', 0)}")
+                    print(f"  Skills deployed: {results.get('skills_deployed', 0)}")
+                    print(f"  Config deployed: {results.get('config_deployed', 0)}")
+                    if results.get("warnings"):
+                        print()
+                        print("  Warnings:")
+                        for warning in results["warnings"]:
+                            print(f"    ⚠ {warning}")
+                    print()
+                else:
+                    print(json.dumps(result, ensure_ascii=False))
+                return 0 if result.get("status") == "success" else 1
         elif parsed.command == "update":
             if not parsed.opencode or not parsed.global_update:
                 result = {"status": "error", "message": "Update requires --opencode --global flags"}
             else:
                 config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = update_opencode_global(config_root)
+                # Format human-readable output for update
+                if result.get("status") == "success":
+                    print(f"✓ {result['message']}")
+                    results = result.get("results", {})
+                    print()
+                    print(f"  Config root: {result['config_root']}")
+                    print(f"  Plugins deployed: {results.get('plugins_deployed', 0)}")
+                    print(f"  Agents deployed: {results.get('agents_deployed', 0)}")
+                    print(f"  Skills deployed: {results.get('skills_deployed', 0)}")
+                    print(f"  Config deployed: {results.get('config_deployed', 0)}")
+                    if results.get("warnings"):
+                        print()
+                        print("  Warnings:")
+                        for warning in results["warnings"]:
+                            print(f"    ⚠ {warning}")
+                    print()
+                else:
+                    print(json.dumps(result, ensure_ascii=False))
+                return 0 if result.get("status") == "success" else 1
         elif parsed.command == "sync-workspaces":
             search_roots = [Path(path) for path in parsed.search_root] if parsed.search_root else None
             result = sync_initialized_workspaces(search_roots)
