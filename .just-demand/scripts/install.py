@@ -630,19 +630,24 @@ def sync_workspace(project_root: Path) -> dict[str, Any]:
     
     if gitignore_path.exists():
         existing_content = gitignore_path.read_text(encoding="utf-8")
-        # Remove old entries
-        import re
-        existing_content = re.sub(
-            r"\n?# (?:Workflow runtime state and task files|Auto-generated placeholder files)\n\.just-demand/[^\n]*\n(?:\.just-demand/[^\n]*\n)*",
-            "\n",
-            existing_content,
-        )
-        # Add new entries
-        if not existing_content.endswith("\n"):
-            existing_content += "\n"
-        existing_content += "\n" + gitignore_content
-        gitignore_path.write_text(existing_content, encoding="utf-8")
-        result["gitignore_updated"] = True
+        # Check if our entries already exist
+        if ".just-demand/state/" in existing_content:
+            # Already has our entries, no update needed
+            result["gitignore_updated"] = False
+        else:
+            # Remove old entries
+            import re
+            existing_content = re.sub(
+                r"\n?# (?:Workflow runtime state and task files|Workflow runtime state \(ignore all runtime state\)|Auto-generated placeholder files)\n\.just-demand/[^\n]*\n(?:\.just-demand/[^\n]*\n)*",
+                "\n",
+                existing_content,
+            )
+            # Add new entries
+            if not existing_content.endswith("\n"):
+                existing_content += "\n"
+            existing_content += "\n" + gitignore_content
+            gitignore_path.write_text(existing_content, encoding="utf-8")
+            result["gitignore_updated"] = True
     else:
         gitignore_path.write_text(gitignore_content, encoding="utf-8")
         result["gitignore_updated"] = True
