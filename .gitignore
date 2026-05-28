@@ -6,17 +6,12 @@ __pycache__/
 *.pyc
 
 # Python test cache
-.pytest_cache/
+.pypytest_cache/
 
 # OpenCode local dependencies
 .opencode/node_modules/
 
-# Workflow runtime state and task files
-.just-demand/tasks/
-.just-demand/workspace/
-
-# Auto-generated placeholder files
-.just-demand/global/architecture.md
-.just-demand/global/glossary.md
+# Workflow runtime state (ignore all runtime state)
+.just-demand/state/
 
 packages/

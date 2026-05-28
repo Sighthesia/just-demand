@@ -27,9 +27,9 @@ from workflow_core import (
     promote_to_task,
     read_json,
     start_execution,
+    state_dir,
     tasks_dir,
     task_event_path,
-    workspace_dir,
     write_json_atomic,
 )
 
@@ -48,7 +48,7 @@ def replace_intake_section(path: Path, heading: str, body: str) -> None:
 
 def set_intake_scope(root: Path, intake_id: str, scope: str = "Confirmed implementation scope.") -> None:
     replace_intake_section(
-        root / ".just-demand" / "workspace" / "intake" / f"{intake_id}.md",
+        root / ".just-demand" / "state" / "intake" / f"{intake_id}.md",
         "Scope",
         scope,
     )
@@ -65,7 +65,7 @@ def set_intake_design_artifact(
     validation: str = "Run relevant tests.",
     approval: str = "Approved by user.",
 ) -> None:
-    intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake_id}.md"
+    intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
     replace_intake_section(intake_path, "Final Expected Effect", final_expected_effect)
     replace_intake_section(intake_path, "Approach Options", approach_options)
     replace_intake_section(intake_path, "Chosen Approach", chosen_approach)
@@ -97,12 +97,10 @@ class WorkflowCoreTests(unittest.TestCase):
             ensure_workspace(root)
 
             workflow = root / ".just-demand"
-            self.assertTrue((workflow / "workspace" / "state.json").is_file())
-            self.assertTrue((workflow / "knowledge" / "preferences.md").is_file())
-            self.assertTrue((workflow / "knowledge" / "decisions.md").is_file())
-            self.assertTrue((workflow / "knowledge" / "deferred_options.md").is_file())
-            self.assertTrue((workflow / "workspace" / "events.jsonl").is_file())
-            state = read_json(workflow / "workspace" / "state.json")
+            self.assertTrue((workflow / "state" / "state.json").is_file())
+            self.assertTrue((workflow / "knowledge" / "memory.md").is_file())
+            self.assertTrue((workflow / "state" / "events.jsonl").is_file())
+            state = read_json(workflow / "state" / "state.json")
             self.assertEqual(state["schema_version"], "1.0")
             self.assertIsNone(state["current_intake_id"])
             self.assertEqual(state["active_task_ids"], [])
@@ -118,17 +116,17 @@ class WorkflowCoreTests(unittest.TestCase):
             )
 
             workflow = root / ".just-demand"
-            intake_path = workflow / "workspace" / "intake" / f"{result['intake_id']}.md"
+            intake_path = workflow / "state" / "intake" / f"{result['intake_id']}.md"
             self.assertTrue(intake_path.is_file())
             intake_text = intake_path.read_text(encoding="utf-8")
             self.assertIn("Build an OpenCode-first agent workflow.", intake_text)
             self.assertIn("Status: clarifying", intake_text)
 
-            state = read_json(workflow / "workspace" / "state.json")
+            state = read_json(workflow / "state" / "state.json")
             self.assertEqual(state["current_intake_id"], result["intake_id"])
             self.assertEqual(state["active_sessions"]["session-main"]["current_intake_id"], result["intake_id"])
 
-            events = (workflow / "workspace" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            events = (workflow / "state" / "events.jsonl").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(events), 1)
             event = json.loads(events[0])
             self.assertEqual(event["type"], "intake_created")
@@ -138,7 +136,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             result = create_intake(root, "Bug report", "Feature breaks on save", "session-main")
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{result['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{result['intake_id']}.md"
             intake_text = intake_path.read_text(encoding="utf-8")
             self.assertIn("## Expected Behavior", intake_text)
             self.assertIn("## Actual Behavior", intake_text)
@@ -151,7 +149,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             result = create_intake(root, "Feature request", "Add a keyboard shortcut", "session-main")
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{result['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{result['intake_id']}.md"
             intake_text = intake_path.read_text(encoding="utf-8")
             self.assertRegex(intake_text, r"## Scope\n\n## Anti-Outcome")
 
@@ -179,7 +177,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 acceptance_criteria=["Workspace intake can be promoted to a formal task."],
             )
 
-            task_dir = root / ".just-demand" / "tasks" / "active" / result["task_id"]
+            task_dir = root / ".just-demand" / "state" / "active" / result["task_id"]
             self.assertTrue((task_dir / "task.json").is_file())
             self.assertTrue((task_dir / "context.md").is_file())
             self.assertTrue((task_dir / "decisions.md").is_file())
@@ -197,7 +195,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(task["clarification"]["scope"], "Build the initial OpenCode-first workflow runtime.")
             self.assertEqual(task["clarification"]["blocking_questions"], [])
 
-            state = read_json(root / ".just-demand" / "workspace" / "state.json")
+            state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNone(state["current_intake_id"])
             self.assertEqual(state["current_task_id"], result["task_id"])
             self.assertIn(result["task_id"], state["active_task_ids"])
@@ -216,7 +214,7 @@ class WorkflowCoreTests(unittest.TestCase):
             intake = create_intake(root, "Workflow", "Build workflow", "session-main")
             set_intake_scope(root, intake["intake_id"])
             set_intake_design_artifact(root, intake["intake_id"])
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Blocking Questions", "- Should this affect archived tasks?")
 
             with self.assertRaisesRegex(RuntimeError, "Blocking Questions"):
@@ -234,7 +232,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Mismatch", "Bug: expected success toast but got silent failure", "session-main")
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Scope", "Investigate save feedback and toast behavior.")
             replace_intake_section(intake_path, "Expected Behavior", "User sees a success toast after save.")
             replace_intake_section(intake_path, "Actual Behavior", "Save fails silently.")
@@ -242,7 +240,7 @@ class WorkflowCoreTests(unittest.TestCase):
             replace_intake_section(intake_path, "Non-Blocking Questions", "- Should the toast include the item name?")
 
             promoted = promote_to_task(root, intake["intake_id"], "Mismatch", "Fix save feedback", "bugfix", ["Save feedback matches behavior"])
-            task_dir = root / ".just-demand" / "tasks" / "active" / promoted["task_id"]
+            task_dir = root / ".just-demand" / "state" / "active" / promoted["task_id"]
             task = read_json(task_dir / "task.json")
             self.assertEqual(task["clarification"]["expected_behavior"], "User sees a success toast after save.")
             self.assertEqual(task["clarification"]["actual_behavior"], "Save fails silently.")
@@ -272,7 +270,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 ["Labels are clearer in settings."],
             )
 
-            task = read_json(root / ".just-demand" / "tasks" / "active" / promoted["task_id"] / "task.json")
+            task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
             self.assertFalse(task["clarification"]["needs_bug_clarification"])
 
 
@@ -289,7 +287,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 acquire_lock(root, scope="task", entity_id="task-a", owner="other-session", purpose="test")
 
             release_lock(root, lock_id=lock["id"], owner="session-main")
-            locks = read_json(root / ".just-demand" / "workspace" / "locks.json")
+            locks = read_json(root / ".just-demand" / "state" / "locks.json")
             self.assertEqual(locks["locks"], [])
 
     def test_lifecycle_and_validation_revision(self):
@@ -313,7 +311,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(revision["revision"], "r001")
 
             start_execution(root, task_id=task_id, subagents=["just-demand-implement"])
-            task_path = root / ".just-demand" / "tasks" / "active" / task_id / "task.json"
+            task_path = root / ".just-demand" / "state" / "active" / task_id / "task.json"
             task = read_json(task_path)
             self.assertEqual(task["status"], "executing")
             self.assertEqual(task["validation_revision"], "r001")
@@ -394,7 +392,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 check=True,
             )
             self.assertIn("intake_id", result.stdout)
-            state = read_json(root / ".just-demand" / "workspace" / "state.json")
+            state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNotNone(state["current_intake_id"])
 
     def test_cli_promote_reports_readiness_errors(self):
@@ -459,7 +457,7 @@ class WorkflowCoreTests(unittest.TestCase):
             start_execution(root, task_id, ["just-demand-implement"])
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
-            state = read_json(workspace_dir(root) / "state.json")
+            state = read_json(state_dir(root) / "state.json")
             self.assertIn(task_id, state["active_task_ids"])
             self.assertEqual(state["current_task_id"], task_id)
 
@@ -471,17 +469,17 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(result["cleaned"])
             self.assertEqual(result["task_id"], task_id)
 
-            task_dir = root / ".just-demand" / "tasks" / "active" / task_id
+            task_dir = root / ".just-demand" / "state" / "active" / task_id
             self.assertFalse(task_dir.exists())
 
-            state = read_json(workspace_dir(root) / "state.json")
+            state = read_json(state_dir(root) / "state.json")
             self.assertNotIn(task_id, state["active_task_ids"])
             self.assertIsNone(state["current_task_id"])
 
             locks_data = read_json(locks_path(root))
             self.assertFalse(any(lk["entity_id"] == task_id for lk in locks_data["locks"]))
 
-            events = (workspace_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
             event_types = [json.loads(e)["type"] for e in events if e]
             self.assertIn("task_cleaned_up", event_types)
 
@@ -497,7 +495,7 @@ class WorkflowCoreTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 cleanup_completed_task(root, task_id)
 
-            task_dir = root / ".just-demand" / "tasks" / "active" / task_id
+            task_dir = root / ".just-demand" / "state" / "active" / task_id
             self.assertTrue(task_dir.exists())
 
     def test_cleanup_task_cli_success(self):
@@ -559,7 +557,7 @@ class WorkflowCoreTests(unittest.TestCase):
             complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             # Verify task is still active before archive
-            state = read_json(workspace_dir(root) / "state.json")
+            state = read_json(state_dir(root) / "state.json")
             self.assertIn(task_id, state["active_task_ids"])
 
             # Archive the task
@@ -578,7 +576,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertFalse(active_dir.exists())
 
             # Verify state cleaned up
-            state = read_json(workspace_dir(root) / "state.json")
+            state = read_json(state_dir(root) / "state.json")
             self.assertNotIn(task_id, state["active_task_ids"])
             self.assertIsNone(state["current_task_id"])
 
@@ -587,7 +585,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertFalse(any(lk["entity_id"] == task_id for lk in locks_data["locks"]))
 
             # Verify event emitted
-            events = (workspace_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
             event_types = [json.loads(e)["type"] for e in events if e]
             self.assertIn("task_archived", event_types)
 
@@ -615,9 +613,9 @@ class WorkflowCoreTests(unittest.TestCase):
             archive_task(root, task_id)
 
             # Verify decisions were extracted to knowledge
-            knowledge_decisions = knowledge_dir(root) / "decisions.md"
-            content = knowledge_decisions.read_text(encoding="utf-8")
-            self.assertIn(f"## From Task: {task_id}", content)
+            knowledge_memory = knowledge_dir(root) / "memory.md"
+            content = knowledge_memory.read_text(encoding="utf-8")
+            self.assertIn(f"### From Task: {task_id}", content)
             self.assertIn("Use atomic writes", content)
 
     def test_archive_task_extracts_facts(self):
@@ -637,8 +635,8 @@ class WorkflowCoreTests(unittest.TestCase):
             archive_task(root, task_id)
 
             # Verify facts were extracted to knowledge
-            knowledge_facts = knowledge_dir(root) / "facts.md"
-            content = knowledge_facts.read_text(encoding="utf-8")
+            knowledge_memory = knowledge_dir(root) / "memory.md"
+            content = knowledge_memory.read_text(encoding="utf-8")
             self.assertIn(task_id, content)
             self.assertIn("Fact extraction", content)
 
@@ -714,8 +712,8 @@ class WorkflowCoreTests(unittest.TestCase):
                 archive_task(root, task_id)
 
             self.assertTrue((tasks_dir(root) / "active" / task_id).is_dir())
-            knowledge_decisions = (knowledge_dir(root) / "decisions.md").read_text(encoding="utf-8")
-            self.assertNotIn("Collision guard", knowledge_decisions)
+            knowledge_memory = (knowledge_dir(root) / "memory.md").read_text(encoding="utf-8")
+            self.assertNotIn("Collision guard", knowledge_memory)
 
     def test_complete_verification_auto_archives_on_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -831,7 +829,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("archive_error", result)
             self.assertTrue((tasks_dir(root) / "active" / task_id).is_dir())
 
-            events = (workspace_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
             event_types = [json.loads(e)["type"] for e in events if e]
             self.assertIn("task_archive_failed", event_types)
 
@@ -947,7 +945,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(task["impact"], [".just-demand/scripts/"])
             self.assertEqual(task["last_note"], "Diagnosing state issue")
 
-            state = read_json(root / ".just-demand" / "workspace" / "state.json")
+            state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertEqual(state["current_task_id"], task_id)
             self.assertIsNone(state["current_intake_id"])
 
@@ -963,7 +961,7 @@ class WorkflowCoreTests(unittest.TestCase):
             mark_task(root, task_id, "executing")
             mark_task(root, task_id, "paused")
 
-            state = read_json(root / ".just-demand" / "workspace" / "state.json")
+            state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNone(state["current_task_id"])
 
     def test_start_execution_sets_current_task(self):
@@ -977,11 +975,11 @@ class WorkflowCoreTests(unittest.TestCase):
             set_intake_design_artifact(root, intake_b["intake_id"])
             task_a = promote_to_task(root, intake_a["intake_id"], "Task A", "Goal A", "design", ["A"])["task_id"]
             task_b = promote_to_task(root, intake_b["intake_id"], "Task B", "Goal B", "design", ["B"])["task_id"]
-            self.assertEqual(read_json(root / ".just-demand" / "workspace" / "state.json")["current_task_id"], task_b)
+            self.assertEqual(read_json(root / ".just-demand" / "state" / "state.json")["current_task_id"], task_b)
 
             start_execution(root, task_a, ["just-demand-implement"])
 
-            state = read_json(root / ".just-demand" / "workspace" / "state.json")
+            state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertEqual(state["current_task_id"], task_a)
 
     def test_mark_task_invalid_status_raises(self):
@@ -1061,7 +1059,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(mark_events[0]["before_status"], "planning")
             self.assertEqual(mark_events[0]["after_status"], "tweaking")
 
-            ws_events = [json.loads(line) for line in (workspace_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines() if line]
+            ws_events = [json.loads(line) for line in (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines() if line]
             ws_mark = [e for e in ws_events if e["type"] == "task_marked"]
             self.assertEqual(len(ws_mark), 1)
 
@@ -1218,7 +1216,7 @@ class WorkflowCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             result = create_intake(root, "Design work", "Build a new feature", "session-main")
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{result['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{result['intake_id']}.md"
             intake_text = intake_path.read_text(encoding="utf-8")
             self.assertIn("## Final Expected Effect", intake_text)
             self.assertIn("## Approach Options", intake_text)
@@ -1233,7 +1231,7 @@ class WorkflowCoreTests(unittest.TestCase):
             intake = create_intake(root, "Design work", "Build a new feature", "session-main")
             set_intake_scope(root, intake["intake_id"])
             # Set chosen approach and plan but leave final expected effect empty
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Chosen Approach", "Approach A")
             replace_intake_section(intake_path, "Final Implementation Plan", "1. Implement\n2. Verify")
             replace_intake_section(intake_path, "Approval", "Approved")
@@ -1246,7 +1244,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Design work", "Build a new feature", "session-main")
             set_intake_scope(root, intake["intake_id"])
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Final Expected Effect", "User sees the feature.")
             replace_intake_section(intake_path, "Final Implementation Plan", "1. Implement\n2. Verify")
             replace_intake_section(intake_path, "Approval", "Approved")
@@ -1259,7 +1257,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Design work", "Build a new feature", "session-main")
             set_intake_scope(root, intake["intake_id"])
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Final Expected Effect", "User sees the feature.")
             replace_intake_section(intake_path, "Chosen Approach", "Approach A")
             replace_intake_section(intake_path, "Approval", "Approved")
@@ -1272,7 +1270,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Design work", "Build a new feature", "session-main")
             set_intake_scope(root, intake["intake_id"])
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Final Expected Effect", "User sees the feature.")
             replace_intake_section(intake_path, "Chosen Approach", "Approach A")
             replace_intake_section(intake_path, "Final Implementation Plan", "1. Implement\n2. Verify")
@@ -1294,7 +1292,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             intake = create_intake(root, "Bug fix", "Fix the broken save", "session-main")
             set_intake_scope(root, intake["intake_id"])
-            intake_path = root / ".just-demand" / "workspace" / "intake" / f"{intake['intake_id']}.md"
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Expected Behavior", "Save succeeds.")
             replace_intake_section(intake_path, "Actual Behavior", "Save fails silently.")
             replace_intake_section(intake_path, "Reproduction", "1. Click save")
@@ -1320,7 +1318,7 @@ class WorkflowCoreTests(unittest.TestCase):
             )
 
             promoted = promote_to_task(root, intake["intake_id"], "Design carry", "Build design carry", "design", ["Carry works"])
-            task_dir = root / ".just-demand" / "tasks" / "active" / promoted["task_id"]
+            task_dir = root / ".just-demand" / "state" / "active" / promoted["task_id"]
             task = read_json(task_dir / "task.json")
             self.assertEqual(task["clarification"]["final_expected_effect"], "User sees the feature working.")
             self.assertEqual(task["clarification"]["approach_options"], "Approach A: direct.\nApproach B: event-driven.")

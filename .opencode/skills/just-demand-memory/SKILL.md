@@ -41,7 +41,7 @@ When extracting durable knowledge from debugging or exploration, choose the righ
 | Tier | Use when | Destination |
 | --- | --- | --- |
 | Global reusable skill | Pattern applies across modules, projects, or repos; triggers `capture-lessons` conditions (>=3 attempts, architectural trap, reusable methodology) | `.agents/skills/<pattern-name>/SKILL.md` via `capture-lessons` |
-| Workspace memory | Durable but project-local: this repo's conventions, scripts, architecture decisions, verified local facts | `.just-demand/workspace/decisions.md` or `.just-demand/workspace/facts.md` |
+| Workspace memory | Durable but project-local: this repo's conventions, scripts, architecture decisions, verified local facts | `.just-demand/knowledge/memory.md` |
 | Task decisions | Task-only or one-off: not reusable beyond the current work item | Task `decisions.md` |
 
 Do not promote a lesson to global skill tier unless it is clearly pattern-based and portable. When in doubt, keep it workspace-local.

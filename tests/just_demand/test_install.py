@@ -34,8 +34,8 @@ class InstallCoreTests(unittest.TestCase):
             
             self.assertEqual(result["status"], "success")
             self.assertTrue((root / ".just-demand").exists())
-            self.assertTrue((root / ".just-demand" / "workspace" / "state.json").exists())
-            self.assertTrue((root / ".just-demand" / "knowledge" / "preferences.md").exists())
+            self.assertTrue((root / ".just-demand" / "state" / "state.json").exists())
+            self.assertTrue((root / ".just-demand" / "knowledge" / "memory.md").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "task.py").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "install.py").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())
@@ -417,8 +417,8 @@ class InstallCLITests(unittest.TestCase):
                 capture_output=True,
                 check=True,
             )
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["status"], "success")
+            # Check for success indicators in human-readable output
+            self.assertIn("✓", result.stdout)
             self.assertTrue((config_root / "plugins" / "just-demand-lib.js").exists())
     
     def test_cli_update_opencode_global(self):
@@ -443,8 +443,8 @@ class InstallCLITests(unittest.TestCase):
                 capture_output=True,
                 check=True,
             )
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["status"], "success")
+            # Check for success indicators in human-readable output
+            self.assertIn("✓", result.stdout)
 
     def test_cli_sync_workspaces(self):
         import subprocess
@@ -466,12 +466,9 @@ class InstallCLITests(unittest.TestCase):
                 capture_output=True,
                 check=True,
             )
-            payload = json.loads(result.stdout)
-
-            self.assertEqual(payload["status"], "success")
-            self.assertEqual(payload["workspaces_found"], 1)
-            self.assertEqual(payload["workspaces_updated"], 1)
-            self.assertGreater(payload["total_scripts_deployed"], 0)
+            # Check for success indicators in human-readable output
+            self.assertIn("✓", result.stdout)
+            self.assertIn("Synchronized", result.stdout)
             self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
     
     def test_cli_doctor(self):

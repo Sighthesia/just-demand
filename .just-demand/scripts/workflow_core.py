@@ -27,8 +27,8 @@ def workflow_dir(root: Path) -> Path:
     return root / ".just-demand"
 
 
-def workspace_dir(root: Path) -> Path:
-    return workflow_dir(root) / "workspace"
+def state_dir(root: Path) -> Path:
+    return workflow_dir(root) / "state"
 
 
 def knowledge_dir(root: Path) -> Path:
@@ -36,7 +36,7 @@ def knowledge_dir(root: Path) -> Path:
 
 
 def tasks_dir(root: Path) -> Path:
-    return workflow_dir(root) / "tasks"
+    return state_dir(root)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -68,39 +68,31 @@ def default_workspace_state() -> dict[str, Any]:
 def ensure_workspace(root: Path) -> None:
     base = workflow_dir(root)
     for directory in [
-        base / "global",
-        base / "workspace" / "intake",
-        base / "workspace" / "sessions",
+        base / "state" / "intake",
+        base / "state" / "sessions",
+        base / "state" / "active",
+        base / "state" / "archive",
         base / "knowledge",
-        base / "tasks" / "active",
-        base / "tasks" / "archive",
         base / "scripts",
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 
     memory_files = {
-        base / "global" / "rules.md": "# Just Demand Workflow Rules\n\n",
-        base / "global" / "architecture.md": "# Just Demand Workflow Architecture\n\n",
-        base / "global" / "glossary.md": "# Just Demand Workflow Glossary\n\n",
-        base / "knowledge" / "preferences.md": "# Preferences\n\n",
-        base / "knowledge" / "decisions.md": "# Decisions\n\n",
-        base / "knowledge" / "deferred_options.md": "# Deferred Options\n\n",
-        base / "knowledge" / "facts.md": "# Facts\n\n",
-        base / "knowledge" / "open_questions.md": "# Open Questions\n\n",
-        base / "workspace" / "events.jsonl": "",
-        base / "workspace" / "locks.json": json.dumps({"schema_version": SCHEMA_VERSION, "locks": []}, indent=2) + "\n",
+        base / "knowledge" / "memory.md": "# Just Demand Memory\n\n## Decisions\n\n## Facts\n\n## Preferences\n\n## Deferred Options\n\n## Open Questions\n\n",
+        base / "state" / "events.jsonl": "",
+        base / "state" / "locks.json": json.dumps({"schema_version": SCHEMA_VERSION, "locks": []}, indent=2) + "\n",
     }
     for path, content in memory_files.items():
         if not path.exists():
             path.write_text(content, encoding="utf-8")
 
-    state_path = base / "workspace" / "state.json"
+    state_path = base / "state" / "state.json"
     if not state_path.exists():
         write_json_atomic(state_path, default_workspace_state())
 
 
 def next_event_seq(root: Path) -> int:
-    state_path = workspace_dir(root) / "state.json"
+    state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
     next_seq = int(state.get("last_event_seq", 0)) + 1
     state["last_event_seq"] = next_seq
@@ -126,7 +118,7 @@ def append_workspace_event(root: Path, event_type: str, entity_type: str, entity
         "summary": summary,
     }
     event.update(extra)
-    events_path = workspace_dir(root) / "events.jsonl"
+    events_path = state_dir(root) / "events.jsonl"
     with events_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event, ensure_ascii=False) + "\n")
     return event
@@ -273,7 +265,7 @@ def parse_question_block(text: str) -> list[str]:
 
 
 def read_intake_sections(root: Path, intake_id: str) -> dict[str, str]:
-    intake_md = workspace_dir(root) / "intake" / f"{intake_id}.md"
+    intake_md = state_dir(root) / "intake" / f"{intake_id}.md"
     if not intake_md.is_file():
         return {}
     return parse_markdown_sections(intake_md.read_text(encoding="utf-8"))
@@ -387,7 +379,7 @@ def promote_to_task(
 
     task_data = default_task_json(task_id, intake_id, title, goal, task_type, acceptance_criteria)
     task_data["clarification"] = build_clarification_payload(root, intake_id, task_type)
-    state_path = workspace_dir(root) / "state.json"
+    state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
 
     task_data["last_event_seq"] = int(state.get("last_event_seq", 0))
@@ -440,7 +432,7 @@ def promote_to_task(
     )
 
     # Update intake markdown status if it exists
-    intake_md = workspace_dir(root) / "intake" / f"{intake_id}.md"
+    intake_md = state_dir(root) / "intake" / f"{intake_id}.md"
     if intake_md.is_file():
         lines = intake_md.read_text(encoding="utf-8").splitlines(keepends=True)
         lines = [
@@ -458,7 +450,7 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
     ensure_workspace(root)
     date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     intake_id = f"{date_prefix}-{slugify(title)}-intake"
-    intake_path = workspace_dir(root) / "intake" / f"{intake_id}.md"
+    intake_path = state_dir(root) / "intake" / f"{intake_id}.md"
     now = utc_now()
     intake_path.write_text(
         "\n".join(
@@ -515,7 +507,7 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
         encoding="utf-8",
     )
 
-    state_path = workspace_dir(root) / "state.json"
+    state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
     state["current_intake_id"] = intake_id
     state.setdefault("active_sessions", {})[session_id] = {
@@ -543,7 +535,7 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
 
 
 def locks_path(root: Path) -> Path:
-    return workspace_dir(root) / "locks.json"
+    return state_dir(root) / "locks.json"
 
 
 def acquire_lock(
@@ -682,7 +674,7 @@ def mark_task(
 
     task = update_task(root, task_id, updates)
 
-    state_path = workspace_dir(root) / "state.json"
+    state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
     if status in {"planning", "executing", "verifying", "changes_requested", "tweaking", "debugging"}:
         state["current_intake_id"] = None
@@ -783,11 +775,7 @@ def _is_disallowed_checkpoint_path(path: str) -> bool:
     # Internal workflow runtime state — churns on every operation, not meaningful checkpoints
     if normalized == ".just-demand":
         return True
-    if normalized.startswith(".just-demand/tasks/"):
-        return True
-    if normalized.startswith(".just-demand/workspace/") and normalized.endswith(".json"):
-        return True
-    if normalized.startswith(".just-demand/workspace/") and normalized.endswith(".jsonl"):
+    if normalized.startswith(".just-demand/state/") and normalized.endswith((".json", ".jsonl")):
         return True
     return normalized.startswith(".pytest_cache/") or normalized.startswith(".opencode/node_modules/")
 
@@ -969,7 +957,7 @@ def cleanup_completed_task(root: Path, task_id: str) -> dict[str, Any]:
     shutil.rmtree(task_dir)
 
     # 2. Remove from workspace state
-    state_path = workspace_dir(root) / "state.json"
+    state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
 
     active_ids = state.get("active_task_ids", [])
@@ -1047,7 +1035,7 @@ def _extract_task_decisions(root: Path, task_dir: Path) -> Optional[str]:
 def _extract_task_facts(root: Path, task_dir: Path) -> Optional[str]:
     """Extract verification summary and task info as facts.
 
-    Returns a formatted string suitable for workspace facts.md,
+    Returns a formatted string suitable for knowledge memory.md,
     or None if there's nothing useful to extract.
     """
     task_json_path = task_dir / "task.json"
@@ -1095,10 +1083,10 @@ def _extract_task_facts(root: Path, task_dir: Path) -> Optional[str]:
 
 
 def archive_task(root: Path, task_id: str) -> dict[str, Any]:
-    """Archive a completed task by moving it to tasks/archive/.
+    """Archive a completed task by moving it to state/archive/.
 
     This preserves the full task directory while removing it from active state.
-    Durable decisions and facts are extracted to workspace before archival.
+    Durable decisions and facts are extracted to knowledge/memory.md before archival.
     """
     ensure_workspace(root)
 
@@ -1128,9 +1116,9 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
     try:
         decisions_content = _extract_task_decisions(root, task_dir)
         if decisions_content:
-            knowledge_decisions = knowledge_dir(root) / "decisions.md"
-            with knowledge_decisions.open("a", encoding="utf-8") as f:
-                f.write(f"\n\n## From Task: {task_id}\n\n{decisions_content}\n")
+            knowledge_memory = knowledge_dir(root) / "memory.md"
+            with knowledge_memory.open("a", encoding="utf-8") as f:
+                f.write(f"\n\n### From Task: {task_id}\n\n{decisions_content}\n")
     except Exception as e:
         extraction_errors.append(f"decisions extraction failed: {e}")
 
@@ -1138,8 +1126,8 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
     try:
         facts_content = _extract_task_facts(root, task_dir)
         if facts_content:
-            knowledge_facts = knowledge_dir(root) / "facts.md"
-            with knowledge_facts.open("a", encoding="utf-8") as f:
+            knowledge_memory = knowledge_dir(root) / "memory.md"
+            with knowledge_memory.open("a", encoding="utf-8") as f:
                 f.write(f"\n{facts_content}\n")
     except Exception as e:
         extraction_errors.append(f"facts extraction failed: {e}")
@@ -1152,7 +1140,7 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
         raise RuntimeError(f"Failed to archive task {task_id}: {e}")
 
     # 3. Update workspace state
-    state_path = workspace_dir(root) / "state.json"
+    state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
 
     active_ids = state.get("active_task_ids", [])
@@ -1264,7 +1252,7 @@ def start_execution(root: Path, task_id: str, subagents: list[str]) -> dict[str,
 
     task = update_task(root, task_id, updates)
 
-    state_path = workspace_dir(root) / "state.json"
+    state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
     state["current_intake_id"] = None
     state["current_task_id"] = task_id

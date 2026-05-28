@@ -21,15 +21,11 @@ function makeRoot() {
 
 function scaffoldWorkflow(root) {
   const base = join(root, ".just-demand")
-  mkdirSync(join(base, "workspace"), { recursive: true })
+  mkdirSync(join(base, "state"), { recursive: true })
   mkdirSync(join(base, "knowledge"), { recursive: true })
-  mkdirSync(join(base, "global"), { recursive: true })
-  mkdirSync(join(base, "tasks", "active"), { recursive: true })
-  writeFileSync(join(base, "workspace", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
-  writeFileSync(join(base, "global", "rules.md"), "# Rules\n\nBe concise.")
-  writeFileSync(join(base, "knowledge", "facts.md"), "# Facts\n\nKey fact: system uses JSONL.")
-  writeFileSync(join(base, "knowledge", "decisions.md"), "# Decisions\n\nChose approach A.")
-  writeFileSync(join(base, "knowledge", "deferred_options.md"), "# Deferred\n\nOption X deferred.")
+  mkdirSync(join(base, "state", "active"), { recursive: true })
+  writeFileSync(join(base, "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
+  writeFileSync(join(base, "knowledge", "memory.md"), "# Just Demand Memory\n\n## Facts\n\nKey fact: system uses JSONL.\n\n## Decisions\n\nChose approach A.\n\n## Deferred Options\n\nOption X deferred.\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -37,14 +33,14 @@ function scaffoldWorkflow(root) {
 // ---------------------------------------------------------------------------
 test("getActiveTask reads current task from workspace state", () => {
   const root = makeRoot()
-  mkdirSync(join(root, ".just-demand", "workspace"), { recursive: true })
-  writeFileSync(join(root, ".just-demand", "workspace", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
   assert.equal(getActiveTask(root), "task-a")
 })
 
 test("getActiveTask returns null when state.json missing", () => {
   const root = makeRoot()
-  mkdirSync(join(root, ".just-demand", "workspace"), { recursive: true })
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   assert.equal(getActiveTask(root), null)
 })
 
@@ -68,7 +64,7 @@ test("readJson returns null for missing file", () => {
 test("listUnfinishedTasks returns only unfinished tasks", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const activeDir = join(root, ".just-demand", "tasks", "active")
+  const activeDir = join(root, ".just-demand", "state", "active")
   mkdirSync(join(activeDir, "task-done"), { recursive: true })
   writeFileSync(join(activeDir, "task-done", "task.json"), JSON.stringify({ id: "task-done", title: "Done task", status: "done" }))
   mkdirSync(join(activeDir, "task-active"), { recursive: true })
@@ -86,7 +82,7 @@ test("listUnfinishedTasks returns only unfinished tasks", () => {
 test("listUnfinishedTasks skips directories with missing task.json", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const activeDir = join(root, ".just-demand", "tasks", "active")
+  const activeDir = join(root, ".just-demand", "state", "active")
   mkdirSync(join(activeDir, "task-nojson"), { recursive: true })
   mkdirSync(join(activeDir, "task-ok"), { recursive: true })
   writeFileSync(join(activeDir, "task-ok", "task.json"), JSON.stringify({ id: "task-ok", status: "implementing" }))
@@ -99,7 +95,7 @@ test("listUnfinishedTasks skips directories with missing task.json", () => {
 test("listUnfinishedTasks skips directories with corrupt task.json", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const activeDir = join(root, ".just-demand", "tasks", "active")
+  const activeDir = join(root, ".just-demand", "state", "active")
   mkdirSync(join(activeDir, "task-bad"), { recursive: true })
   writeFileSync(join(activeDir, "task-bad", "task.json"), "{not valid json")
   mkdirSync(join(activeDir, "task-ok"), { recursive: true })
@@ -112,7 +108,7 @@ test("listUnfinishedTasks skips directories with corrupt task.json", () => {
 
 test("listUnfinishedTasks returns empty array when active dir missing", () => {
   const root = makeRoot()
-  mkdirSync(join(root, ".just-demand", "workspace"), { recursive: true })
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   const result = listUnfinishedTasks(root)
   assert.deepEqual(result, [])
 })
@@ -124,7 +120,7 @@ test("listUnfinishedTasks returns empty array when active dir missing", () => {
 // ---------------------------------------------------------------------------
 test("readTaskContext combines context and implement brief", () => {
   const root = makeRoot()
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
@@ -144,7 +140,7 @@ test("readTaskContext combines context and implement brief", () => {
 
 test("readTaskContext includes open questions for just-demand-check", () => {
   const root = makeRoot()
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
@@ -160,7 +156,7 @@ test("readTaskContext includes open questions for just-demand-check", () => {
 
 test("readTaskContext includes final design artifact for implement and check", () => {
   const root = makeRoot()
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
@@ -194,7 +190,7 @@ test("readTaskContext includes final design artifact for implement and check", (
 
 test("readTaskContext falls back to task clarification questions when open_questions is just a header", () => {
   const root = makeRoot()
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
@@ -211,7 +207,7 @@ test("readTaskContext falls back to task clarification questions when open_quest
 test("readTaskContext for just-demand-research includes workspace facts", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   const context = readTaskContext(root, "task-a", "just-demand-research")
@@ -223,7 +219,7 @@ test("readTaskContext for just-demand-research includes workspace facts", () => 
 test("readTaskContext for just-demand-research avoids absolute research path leakage", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   mkdirSync(join(taskDir, "research"), { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
@@ -239,7 +235,7 @@ test("readTaskContext for just-demand-research avoids absolute research path lea
 test("readTaskContext for just-demand-docs includes workspace decisions", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   const context = readTaskContext(root, "task-a", "just-demand-docs")
@@ -251,7 +247,7 @@ test("readTaskContext for just-demand-docs includes workspace decisions", () => 
 test("readTaskContext for just-demand-docs includes deferred options", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   const context = readTaskContext(root, "task-a", "just-demand-docs")
@@ -262,7 +258,7 @@ test("readTaskContext for just-demand-docs includes deferred options", () => {
 test("getMissingRequiredContextFiles reports missing implement context files", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   const missing = getMissingRequiredContextFiles(root, "task-a", "just-demand-implement")
@@ -348,7 +344,7 @@ test("session-start leaves non-text parts untouched", async () => {
 test("state does not inject workflow state into main-session messages", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
   const plugin = await stateFactory({ directory: root })
@@ -359,8 +355,8 @@ test("state does not inject workflow state into main-session messages", async ()
 
 test("state does not inject when no active task", async () => {
   const root = makeRoot()
-  mkdirSync(join(root, ".just-demand", "workspace"), { recursive: true })
-  writeFileSync(join(root, ".just-demand", "workspace", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
   const plugin = await stateFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
   await plugin["chat.message"]({}, output)
@@ -370,7 +366,7 @@ test("state does not inject when no active task", async () => {
 test("state does not inject when active task is done", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "done" }))
   const plugin = await stateFactory({ directory: root })
@@ -385,7 +381,7 @@ test("state does not inject when active task is done", async () => {
 test("subagent-context injects context for supported subagent type", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
@@ -411,7 +407,7 @@ test("subagent-context injects context for supported subagent type", async () =>
 test("subagent-context avoids absolute path leakage for just-demand-research", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   mkdirSync(join(taskDir, "research"), { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: research topic")
@@ -427,7 +423,7 @@ test("subagent-context avoids absolute path leakage for just-demand-research", a
 test("subagent-context blocks supported subagent when required context files are missing", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   const plugin = await subagentContextFactory({ directory: root })
@@ -441,7 +437,7 @@ test("subagent-context blocks supported subagent when required context files are
 test("subagent-context skips non-supported subagent type", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   const plugin = await subagentContextFactory({ directory: root })
@@ -453,8 +449,8 @@ test("subagent-context skips non-supported subagent type", async () => {
 
 test("subagent-context skips when no active task", async () => {
   const root = makeRoot()
-  mkdirSync(join(root, ".just-demand", "workspace"), { recursive: true })
-  writeFileSync(join(root, ".just-demand", "workspace", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { subagent_type: "just-demand-implement", prompt: "Do work" } }
@@ -488,7 +484,7 @@ test("subagent-context skips when tool is not Task", async () => {
 test("subagent-context avoids duplicate injection when prompt already contains workflow context", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "tasks", "active", "task-a")
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")

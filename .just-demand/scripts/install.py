@@ -333,13 +333,13 @@ def doctor_opencode_global(config_root: Optional[Path] = None, project_root: Opt
     project_status = {
         "project_root": str(project_root),
         "just_demand_dir_exists": (project_root / ".just-demand").exists(),
-        "workspace_state_exists": (project_root / ".just-demand" / "workspace" / "state.json").exists(),
+        "workspace_state_exists": (project_root / ".just-demand" / "state" / "state.json").exists(),
         "active_tasks_count": 0,
     }
     
     if project_status["workspace_state_exists"]:
         try:
-            state_path = project_root / ".just-demand" / "workspace" / "state.json"
+            state_path = project_root / ".just-demand" / "state" / "state.json"
             state = json.loads(state_path.read_text(encoding="utf-8"))
             project_status["active_tasks_count"] = len(state.get("active_task_ids", []))
             project_status["current_task_id"] = state.get("current_task_id")
@@ -374,61 +374,159 @@ def migrate_workspace(project_root: Path) -> dict[str, Any]:
     """Migrate workspace structure to latest layout.
     
     Handles:
-    - Creating knowledge/ directory
-    - Moving knowledge files from workspace/ to knowledge/
+    - Creating state/ directory
+    - Moving state files from workspace/ to state/
+    - Moving tasks from tasks/ to state/
+    - Merging knowledge files into memory.md
     - Updating .gitignore with correct entries
     
     Returns migration result with details of what was migrated.
     """
     workflow_root = project_root / ".just-demand"
-    workspace_dir = workflow_root / "workspace"
+    old_workspace_dir = workflow_root / "workspace"
+    old_tasks_dir = workflow_root / "tasks"
+    state_dir = workflow_root / "state"
     knowledge_dir = workflow_root / "knowledge"
     
     result = {
-        "knowledge_dir_created": False,
+        "state_dir_created": False,
         "files_moved": [],
+        "knowledge_merged": False,
         "gitignore_updated": False,
     }
     
-    # 1. Create knowledge directory if it doesn't exist
-    if not knowledge_dir.exists():
-        knowledge_dir.mkdir(parents=True, exist_ok=True)
-        result["knowledge_dir_created"] = True
+    # 1. Create state directory if it doesn't exist
+    if not state_dir.exists():
+        state_dir.mkdir(parents=True, exist_ok=True)
+        result["state_dir_created"] = True
     
-    # 2. Move knowledge files from workspace/ to knowledge/ if they exist
-    knowledge_files = [
-        "decisions.md",
-        "deferred_options.md",
-        "facts.md",
-        "open_questions.md",
-        "preferences.md",
-    ]
+    # Ensure state subdirectories exist
+    for subdir in ["active", "archive", "intake", "sessions"]:
+        (state_dir / subdir).mkdir(parents=True, exist_ok=True)
     
-    for filename in knowledge_files:
-        source = workspace_dir / filename
-        target = knowledge_dir / filename
-        if source.exists() and not target.exists():
-            shutil.move(str(source), str(target))
-            result["files_moved"].append(filename)
+    # 2. Move state files from workspace/ to state/ if old workspace exists
+    if old_workspace_dir.exists():
+        state_files = ["state.json", "events.jsonl", "locks.json"]
+        for filename in state_files:
+            source = old_workspace_dir / filename
+            target = state_dir / filename
+            if source.exists() and not target.exists():
+                shutil.move(str(source), str(target))
+                result["files_moved"].append(filename)
+        
+        # Move intake and sessions directories
+        for dirname in ["intake", "sessions"]:
+            source = old_workspace_dir / dirname
+            target = state_dir / dirname
+            if source.exists():
+                if target.exists():
+                    # Merge contents
+                    for item in source.iterdir():
+                        item_target = target / item.name
+                        if not item_target.exists():
+                            shutil.move(str(item), str(item_target))
+                            result["files_moved"].append(f"{dirname}/{item.name}")
+                else:
+                    shutil.move(str(source), str(target))
+                    result["files_moved"].append(dirname + "/")
+        
+        # Remove old workspace directory if empty
+        try:
+            if old_workspace_dir.exists() and not any(old_workspace_dir.iterdir()):
+                old_workspace_dir.rmdir()
+        except OSError:
+            pass
     
-    # 3. Update .gitignore
+    # 3. Move tasks from tasks/ to state/ if old tasks dir exists
+    if old_tasks_dir.exists():
+        for subdir_name in ["active", "archive"]:
+            source_subdir = old_tasks_dir / subdir_name
+            target_subdir = state_dir / subdir_name
+            if source_subdir.exists():
+                for item in source_subdir.iterdir():
+                    item_target = target_subdir / item.name
+                    if not item_target.exists():
+                        shutil.move(str(item), str(item_target))
+                        result["files_moved"].append(f"tasks/{subdir_name}/{item.name}")
+        
+        # Remove old tasks directory if empty
+        try:
+            if old_tasks_dir.exists() and not any(old_tasks_dir.iterdir()):
+                old_tasks_dir.rmdir()
+        except OSError:
+            pass
+    
+    # 4. Merge knowledge files into memory.md if old files exist
+    if knowledge_dir.exists():
+        old_knowledge_files = [
+            "decisions.md",
+            "deferred_options.md",
+            "facts.md",
+            "open_questions.md",
+            "preferences.md",
+        ]
+        memory_path = knowledge_dir / "memory.md"
+        has_old_files = any((knowledge_dir / f).exists() for f in old_knowledge_files)
+        
+        if has_old_files and not memory_path.exists():
+            # Create memory.md from old files
+            sections = []
+            for filename in old_knowledge_files:
+                source = knowledge_dir / filename
+                if source.exists():
+                    content = source.read_text(encoding="utf-8").strip()
+                    if content:
+                        sections.append(content)
+            
+            if sections:
+                memory_path.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
+                result["knowledge_merged"] = True
+            
+            # Remove old files
+            for filename in old_knowledge_files:
+                source = knowledge_dir / filename
+                if source.exists():
+                    source.unlink()
+    
+    # 5. Remove old global directory if it exists
+    old_global_dir = workflow_root / "global"
+    if old_global_dir.exists():
+        try:
+            shutil.rmtree(old_global_dir)
+        except OSError:
+            pass
+    
+    # 6. Update .gitignore
     gitignore_path = project_root / ".gitignore"
     gitignore_entries = [
-        "# Workflow runtime state and task files",
-        ".just-demand/tasks/",
-        ".just-demand/workspace/",
+        "# Workflow runtime state (ignore all runtime state)",
+        ".just-demand/state/",
         "",
         "# Auto-generated placeholder files",
-        ".just-demand/global/architecture.md",
-        ".just-demand/global/glossary.md",
     ]
     gitignore_content = "\n".join(gitignore_entries) + "\n"
     
     if gitignore_path.exists():
         existing_content = gitignore_path.read_text(encoding="utf-8")
-        # Check if .just-demand/workspace/ is already in .gitignore
-        if ".just-demand/workspace/" not in existing_content:
-            # Append just-demand entries
+        # Check if old entries need updating
+        has_old_entries = ".just-demand/workspace/" in existing_content or ".just-demand/tasks/" in existing_content
+        has_new_entries = ".just-demand/state/" in existing_content
+        
+        if has_old_entries or not has_new_entries:
+            # Replace old entries with new ones
+            import re
+            # Remove old just-demand entries
+            existing_content = re.sub(
+                r"\n?# Workflow runtime state.*?\n\.just-demand/(?:workspace|tasks)/[^\n]*\n?",
+                "\n",
+                existing_content,
+            )
+            existing_content = re.sub(
+                r"\n?# Auto-generated placeholder files\n\.just-demand/global/[^\n]*\n(?:\.just-demand/global/[^\n]*\n)?",
+                "\n",
+                existing_content,
+            )
+            # Add new entries
             if not existing_content.endswith("\n"):
                 existing_content += "\n"
             existing_content += "\n" + gitignore_content
@@ -449,7 +547,7 @@ def discover_initialized_workspaces(search_root: Path) -> list[Path]:
         raise FileNotFoundError(f"Search root not found: {resolved_root}")
 
     discovered: set[Path] = set()
-    for state_path in resolved_root.rglob(".just-demand/workspace/state.json"):
+    for state_path in resolved_root.rglob(".just-demand/state/state.json"):
         discovered.add(state_path.parents[2].resolve())
     return sorted(discovered)
 

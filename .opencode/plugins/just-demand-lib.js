@@ -39,7 +39,7 @@ const renderClarificationContext = (task) => {
 }
 
 export const getActiveTask = (directory) => {
-  const statePath = join(workflowRoot(directory), "workspace", "state.json")
+  const statePath = join(workflowRoot(directory), "state", "state.json")
   if (!existsSync(statePath)) return null
   const state = readJson(statePath)
   if (!state) return null
@@ -47,12 +47,12 @@ export const getActiveTask = (directory) => {
 }
 
 export const readTaskJson = (directory, taskId) => {
-  const path = join(workflowRoot(directory), "tasks", "active", taskId, "task.json")
+  const path = join(workflowRoot(directory), "state", "active", taskId, "task.json")
   return existsSync(path) ? readJson(path) : null
 }
 
 export const listUnfinishedTasks = (directory) => {
-  const activeDir = join(workflowRoot(directory), "tasks", "active")
+  const activeDir = join(workflowRoot(directory), "state", "active")
   if (!existsSync(activeDir)) return []
   try {
     const entries = readdirSync(activeDir, { withFileTypes: true })
@@ -79,7 +79,7 @@ export const listUnfinishedTasks = (directory) => {
 
 
 export const readTaskContext = (directory, taskId, agentName) => {
-  const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
   const knowledgeDir = join(workflowRoot(directory), "knowledge")
   const parts = []
   const task = readTaskJson(directory, taskId)
@@ -117,7 +117,7 @@ export const readTaskContext = (directory, taskId, agentName) => {
       break
     }
     case "just-demand-research": {
-      const facts = readTextIfExists(join(knowledgeDir, "facts.md"))
+      const facts = readTextIfExists(join(knowledgeDir, "memory.md"))
       if (facts) parts.push(`# Workspace Facts\n\n${facts}`)
       const researchDir = join(taskDir, "research")
       if (existsSync(researchDir)) {
@@ -126,10 +126,8 @@ export const readTaskContext = (directory, taskId, agentName) => {
       break
     }
     case "just-demand-docs": {
-      const wsDecisions = readTextIfExists(join(knowledgeDir, "decisions.md"))
+      const wsDecisions = readTextIfExists(join(knowledgeDir, "memory.md"))
       if (wsDecisions) parts.push(`# Workspace Decisions\n\n${wsDecisions}`)
-      const deferred = readTextIfExists(join(knowledgeDir, "deferred_options.md"))
-      if (deferred) parts.push(`# Deferred Options\n\n${deferred}`)
       break
     }
   }
@@ -153,6 +151,6 @@ export const getRequiredContextFiles = (agentName) => {
 }
 
 export const getMissingRequiredContextFiles = (directory, taskId, agentName) => {
-  const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
   return getRequiredContextFiles(agentName).filter((file) => !existsSync(join(taskDir, file)))
 }

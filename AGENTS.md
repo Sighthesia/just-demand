@@ -25,7 +25,7 @@ This repo is an OpenCode-first local agent workflow runtime: Python scripts own 
 
 1. User proposes a goal or problem.
 2. Main agent clarifies the need in user language and records durable decisions or deferred options when needed.
-3. Once direction is confirmed, promote intake to a formal task package under `.just-demand/tasks/active/`.
+3. Once direction is confirmed, promote intake to a formal task package under `.just-demand/state/active/`.
 4. Before execution, inspect all unfinished formal tasks to avoid cross-task conflicts.
 5. Ensure the current task package has the required context files for the intended subagent.
 6. Main agent dispatches focused `just-demand-*` subagents with injected task context. Long-context implementation, research, and verification should happen here, not inline in the main session.
@@ -62,9 +62,8 @@ Run Python and Node tests after changing `.just-demand/scripts/`, `.opencode/plu
 ## Repository Structure
 
 - `.just-demand/scripts/`: Python state-changing workflow core and CLI. This is the write path for workflow machine state.
-- `.just-demand/workspace/`: runtime state (state.json, events.jsonl, locks.json, intake/, sessions/). Ignored by git.
-- `.just-demand/knowledge/`: durable preferences, decisions, deferred options, facts, open questions. Version-controlled.
-- `.just-demand/tasks/`: formal task packages under `active/` and archived work under `archive/`.
+- `.just-demand/knowledge/`: durable memory (decisions, facts, preferences, deferred options, open questions). Version-controlled.
+- `.just-demand/state/`: all runtime state (state.json, events.jsonl, locks.json, intake/, sessions/, active/, archive/). Ignored by git.
 - `.opencode/plugins/`: OpenCode plugin adapters. These should read workflow state and mutate OpenCode messages/prompts only.
 - `.opencode/agent/`: workflow subagent definitions.
 - `.opencode/skills/`: on-demand workflow rules; keep detailed behavior here rather than injecting long prompts every turn.
@@ -73,7 +72,7 @@ Run Python and Node tests after changing `.just-demand/scripts/`, `.opencode/plu
 
 ## Workflow State Rules
 
-- Do not hand-edit `.just-demand/workspace/state.json`, `locks.json`, or event logs except through `.just-demand/scripts/` code.
+- Do not hand-edit `.just-demand/state/state.json`, `locks.json`, or event logs except through `.just-demand/scripts/` code.
 - Main-session plugins should not inject anything when there is no active unfinished formal task.
 - `just-demand-state.js` does not inject any `<workflow-state>` into main-session messages. Tasks should be inspected explicitly via list-active scripts.
 - `just-demand-subagent-context.js` injects task context only when dispatching supported `just-demand-*` subagents.
@@ -97,7 +96,7 @@ Run Python and Node tests after changing `.just-demand/scripts/`, `.opencode/plu
 ## Subagent Boundaries
 
 - `just-demand-research`: research only; `edit: deny`, `bash: deny`.
-- `just-demand-implement`: scoped implementation only; no commits; do not modify `.just-demand/workspace/` except through designated workflow scripts.
+- `just-demand-implement`: scoped implementation only; no commits; do not modify `.just-demand/state/` except through designated workflow scripts.
 - `just-demand-check`: verify against the task brief; may fix only low-risk local issues related to the current task.
 - `just-demand-docs`: docs and durable notes only; no business-code changes; no commits.
 
