@@ -358,16 +358,20 @@ def doctor_opencode_global(config_root: Optional[Path] = None, project_root: Opt
 
 
 def sync_project_scripts(project_root: Path) -> int:
-    """Copy the repo's project-local workflow scripts into a workspace.
+    """Copy only workflow_core.py into a workspace.
 
-    `init` is the workspace-level sync entrypoint, so rerunning it refreshes any
-    managed script copies from the currently invoked repository checkout.
+    task.py and install.py are used from global installation.
+    Only the core state machine (workflow_core.py) is needed locally.
     """
     workflow_root = project_root / ".just-demand"
-    source_scripts = get_repo_scripts_dir()
-    target_scripts = workflow_root / "scripts"
-    manifest = {"installed_files": {}, "version": "1.0"}
-    return deploy_directory(source_scripts, target_scripts, manifest, workflow_root, exclude=["__pycache__"])
+    source = get_repo_scripts_dir() / "workflow_core.py"
+    target = workflow_root / "scripts" / "workflow_core.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    
+    if not target.exists() or source.read_text(encoding="utf-8") != target.read_text(encoding="utf-8"):
+        shutil.copy2(str(source), str(target))
+        return 1
+    return 0
 
 
 def migrate_workspace(project_root: Path) -> dict[str, Any]:

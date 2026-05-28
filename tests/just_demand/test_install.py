@@ -36,9 +36,8 @@ class InstallCoreTests(unittest.TestCase):
             self.assertTrue((root / ".just-demand").exists())
             self.assertTrue((root / ".just-demand" / "state" / "state.json").exists())
             self.assertTrue((root / ".just-demand" / "knowledge" / "memory.md").exists())
-            self.assertTrue((root / ".just-demand" / "scripts" / "task.py").exists())
-            self.assertTrue((root / ".just-demand" / "scripts" / "install.py").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())
+            # task.py and install.py are not copied, they use global installation
 
     def test_init_project_creates_only_project_workflow_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -60,10 +59,10 @@ class InstallCoreTests(unittest.TestCase):
     def test_init_project_refreshes_changed_local_script(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            source = SCRIPT_DIR / "task.py"
+            source = SCRIPT_DIR / "workflow_core.py"
 
             init_project(root)
-            target = root / ".just-demand" / "scripts" / "task.py"
+            target = root / ".just-demand" / "scripts" / "workflow_core.py"
             target.write_text("stale\n", encoding="utf-8")
 
             result = init_project(root)
@@ -82,12 +81,11 @@ class InstallCoreTests(unittest.TestCase):
             init_project(project_a)
             init_project(project_b)
 
-            source_task = SCRIPT_DIR / "task.py"
             source_core = SCRIPT_DIR / "workflow_core.py"
-            target_task = project_a / ".just-demand" / "scripts" / "task.py"
-            target_core = project_b / ".just-demand" / "scripts" / "workflow_core.py"
-            target_task.write_text("stale task\n", encoding="utf-8")
-            target_core.write_text("stale core\n", encoding="utf-8")
+            target_core_a = project_a / ".just-demand" / "scripts" / "workflow_core.py"
+            target_core_b = project_b / ".just-demand" / "scripts" / "workflow_core.py"
+            target_core_a.write_text("stale core\n", encoding="utf-8")
+            target_core_b.write_text("stale core\n", encoding="utf-8")
 
             result = sync_initialized_workspaces([search_root])
 
@@ -95,8 +93,8 @@ class InstallCoreTests(unittest.TestCase):
             self.assertEqual(result["workspaces_found"], 2)
             self.assertEqual(result["workspaces_updated"], 2)
             self.assertGreaterEqual(result["total_scripts_deployed"], 2)
-            self.assertEqual(target_task.read_text(encoding="utf-8"), source_task.read_text(encoding="utf-8"))
-            self.assertEqual(target_core.read_text(encoding="utf-8"), source_core.read_text(encoding="utf-8"))
+            self.assertEqual(target_core_a.read_text(encoding="utf-8"), source_core.read_text(encoding="utf-8"))
+            self.assertEqual(target_core_b.read_text(encoding="utf-8"), source_core.read_text(encoding="utf-8"))
 
     def test_sync_initialized_workspaces_returns_empty_result_when_none_found(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -387,10 +385,10 @@ class InstallCLITests(unittest.TestCase):
                 capture_output=True,
                 check=True,
             )
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["status"], "success")
+            # Check for success indicators in human-readable output
+            self.assertIn("✓", result.stdout)
             self.assertTrue((root / ".just-demand").exists())
-            self.assertTrue((root / ".just-demand" / "scripts" / "task.py").exists())
+            self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())
     
     def test_cli_install_requires_flags(self):
         import subprocess
@@ -455,8 +453,8 @@ class InstallCLITests(unittest.TestCase):
             project_root.mkdir()
             init_project(project_root)
 
-            source = SCRIPT_DIR / "task.py"
-            target = project_root / ".just-demand" / "scripts" / "task.py"
+            source = SCRIPT_DIR / "workflow_core.py"
+            target = project_root / ".just-demand" / "scripts" / "workflow_core.py"
             target.write_text("stale\n", encoding="utf-8")
 
             script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
