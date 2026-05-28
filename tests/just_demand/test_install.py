@@ -44,7 +44,10 @@ class InstallCoreTests(unittest.TestCase):
             root = Path(tmp)
             init_project(root)
 
-            self.assertEqual([path.name for path in root.iterdir()], [".just-demand"])
+            # init creates .just-demand and .gitignore
+            files = [path.name for path in root.iterdir()]
+            self.assertIn(".just-demand", files)
+            self.assertIn(".gitignore", files)
     
     def test_init_project_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -68,7 +71,7 @@ class InstallCoreTests(unittest.TestCase):
             result = init_project(root)
 
             self.assertEqual(result["status"], "success")
-            self.assertGreater(result["scripts_deployed"], 0)
+            self.assertGreater(result["scripts_synced"], 0)
             self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
 
     def test_sync_initialized_workspaces_refreshes_all_discovered_projects(self):
@@ -92,7 +95,7 @@ class InstallCoreTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["workspaces_found"], 2)
             self.assertEqual(result["workspaces_updated"], 2)
-            self.assertGreaterEqual(result["total_scripts_deployed"], 2)
+            self.assertGreaterEqual(result["total_scripts_synced"], 2)
             self.assertEqual(target_core_a.read_text(encoding="utf-8"), source_core.read_text(encoding="utf-8"))
             self.assertEqual(target_core_b.read_text(encoding="utf-8"), source_core.read_text(encoding="utf-8"))
 
@@ -105,7 +108,7 @@ class InstallCoreTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["workspaces_found"], 0)
             self.assertEqual(result["workspaces_updated"], 0)
-            self.assertEqual(result["total_scripts_deployed"], 0)
+            self.assertEqual(result["total_scripts_synced"], 0)
     
     def test_get_repo_root_returns_path(self):
         repo_root = get_repo_root()
