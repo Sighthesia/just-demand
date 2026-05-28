@@ -139,6 +139,16 @@ def execute_command(root: Path, args: list[str]) -> int:
             )
         elif parsed.command == "init":
             result = init_project(root)
+            # Format human-readable output for init
+            if result.get("status") == "success":
+                print(f"✓ {result['message']}")
+                print()
+                print(f"  Project root: {result['project_root']}")
+                print(f"  Scripts deployed: {result.get('scripts_deployed', 0)}")
+                print()
+            else:
+                print(json.dumps(result, ensure_ascii=False))
+            return 0 if result.get("status") == "success" else 1
         elif parsed.command == "install":
             if not parsed.opencode or not parsed.global_install:
                 result = {"status": "error", "message": "Install requires --opencode --global flags"}
