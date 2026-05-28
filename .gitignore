@@ -15,3 +15,6 @@ __pycache__/
 .just-demand/state/
 
 packages/
+
+# Workflow runtime state (ignore all runtime state)
+.just-demand/state/
