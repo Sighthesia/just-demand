@@ -268,12 +268,12 @@ test("getMissingRequiredContextFiles reports missing implement context files", (
 // ---------------------------------------------------------------------------
 // plugin factory: session-start returns hooks object
 // ---------------------------------------------------------------------------
-test("session-start factory returns hooks object with chat.message", async () => {
+test("session-start factory returns hooks object with experimental.chat.system.transform", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
   assert.ok(plugin)
-  assert.equal(typeof plugin["chat.message"], "function")
+  assert.equal(typeof plugin["experimental.chat.system.transform"], "function")
 })
 
 // ---------------------------------------------------------------------------
@@ -301,41 +301,33 @@ test("subagent-context factory returns hooks object with tool.execute.before", a
 // ---------------------------------------------------------------------------
 // session-start: no visible main-session injection
 // ---------------------------------------------------------------------------
-test("session-start returns hook without injecting visible routing text", async () => {
+test("session-start injects workflow skills into system prompt", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
-  const output = { parts: [{ type: "text", text: "Hello" }] }
-  await plugin["chat.message"]({ sessionID: "s1" }, output)
-  assert.equal(output.parts[0].text, "Hello")
+  const output = { text: "You are a helpful assistant." }
+  await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
+  assert.ok(output.text.includes("JUST_DEMAND_WORKFLOW"))
+  assert.ok(output.text.includes("using-just-demand"))
 })
 
-test("session-start skips injection for just-demand- agents", async () => {
+test("session-start avoids duplicate injection", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
-  const output = { parts: [{ type: "text", text: "Hello" }] }
-  await plugin["chat.message"]({ agent: "just-demand-implement", sessionID: "s-skip" }, output)
-  assert.equal(output.parts[0].text, "Hello")
+  const output = { text: "Existing <JUST_DEMAND_WORKFLOW>content</JUST_DEMAND_WORKFLOW>" }
+  await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
+  assert.equal(output.text, "Existing <JUST_DEMAND_WORKFLOW>content</JUST_DEMAND_WORKFLOW>")
 })
 
-test("session-start leaves preexisting routing-like text unchanged", async () => {
+test("session-start preserves existing system prompt content", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
-  const output = { parts: [{ type: "text", text: "[just-demand-skill-routing]\nExisting reminder\nHello" }] }
-  await plugin["chat.message"]({ sessionID: "s1" }, output)
-  assert.equal(output.parts[0].text, "[just-demand-skill-routing]\nExisting reminder\nHello")
-})
-
-test("session-start leaves non-text parts untouched", async () => {
-  const root = makeRoot()
-  scaffoldWorkflow(root)
-  const plugin = await sessionStartFactory({ directory: root })
-  const output = { parts: [{ type: "image", url: "data:image/png;base64,abc" }] }
-  await plugin["chat.message"]({ sessionID: "s1" }, output)
-  assert.equal(output.parts[0].type, "image")
-  assert.equal(output.parts[0].url, "data:image/png;base64,abc")
+  const output = { text: "Original system prompt." }
+  await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
+  assert.ok(output.text.startsWith("Original system prompt."))
+  assert.ok(output.text.includes("JUST_DEMAND_WORKFLOW"))
 })
 
 // ---------------------------------------------------------------------------
