@@ -272,6 +272,7 @@ class InstallIntegrationTests(unittest.TestCase):
             implement_agent = (config_root / "agents" / "just-demand-implement.md").read_text(encoding="utf-8")
             check_agent = (config_root / "agents" / "just-demand-check.md").read_text(encoding="utf-8")
             docs_agent = (config_root / "agents" / "just-demand-docs.md").read_text(encoding="utf-8")
+            research_agent = (config_root / "agents" / "just-demand-research.md").read_text(encoding="utf-8")
 
             for content in (implement_agent, check_agent):
                 self.assertIn('"*": ask', content)
@@ -285,6 +286,9 @@ class InstallIntegrationTests(unittest.TestCase):
                 self.assertIn('"python3 -m json.tool .opencode/package.json": allow', content)
 
             self.assertIn('bash: deny', docs_agent)
+            self.assertIn('write: deny', research_agent)
+            self.assertIn('edit: deny', research_agent)
+            self.assertIn('bash: deny', research_agent)
     
     def test_install_opencode_global_creates_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:

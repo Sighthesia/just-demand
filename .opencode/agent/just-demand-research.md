@@ -3,9 +3,9 @@ description: Researches a focused just-demand question and writes findings witho
 mode: subagent
 permission:
   read: allow
-  write: allow
-  edit: allow
-  bash: allow
+  write: deny
+  edit: deny
+  bash: deny
   glob: allow
   grep: allow
   task: deny

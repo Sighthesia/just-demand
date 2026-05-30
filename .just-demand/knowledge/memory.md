@@ -99,3 +99,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-05-28-just-demand-task (重构 .just-demand 目录结构) completed with status 'done'.
   Verification summary: 目录结构重构完成，所有测试通过
+
+- Task 2026-05-30-align-workflow-implementation-with-design-philosophy-task (Align workflow implementation with design philosophy) completed with status 'done'.
+  Verification summary: Phase 1 remediation passed: removed main-session bootstrap injection, aligned research permissions, and hardened missing-context blocking.

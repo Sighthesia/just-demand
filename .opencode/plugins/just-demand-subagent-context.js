@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflowRoot } from "./just-demand-lib.js"
 
 const SUPPORTED = new Set(["just-demand-research", "just-demand-implement", "just-demand-check", "just-demand-docs"])
+const WRITABLE_SUBAGENTS = new Set(["just-demand-implement", "just-demand-check", "just-demand-docs"])
 
 // Markers to detect if prompt has already been injected with workflow context.
 // Keep the legacy header to avoid duplicate injection across old prompts.
@@ -24,7 +25,12 @@ export default async ({ directory }) => {
       if (!taskId) return
       const missing = getMissingRequiredContextFiles(directory, taskId, args.subagent_type)
       if (missing.length > 0) {
-        args.prompt = `Active task: ${taskId}\n\n# BLOCKED\n\nMissing required task context files: ${missing.join(", ")}. Do not implement or modify code until the main agent creates the required task context package files for this task.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
+        if (WRITABLE_SUBAGENTS.has(args.subagent_type)) {
+          throw new Error(
+            `Blocked ${args.subagent_type}: missing required task context files for active task ${taskId}: ${missing.join(", ")}`,
+          )
+        }
+        args.prompt = `Active task: ${taskId}\n\n# BLOCKED\n\nMissing required task context files: ${missing.join(", ")}. Do not proceed until the main agent creates the required task context package files for this task.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
         return
       }
       const context = readTaskContext(directory, taskId, args.subagent_type)

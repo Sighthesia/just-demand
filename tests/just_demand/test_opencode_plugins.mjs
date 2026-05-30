@@ -301,17 +301,16 @@ test("subagent-context factory returns hooks object with tool.execute.before", a
 // ---------------------------------------------------------------------------
 // session-start: no visible main-session injection
 // ---------------------------------------------------------------------------
-test("session-start injects workflow skills into system prompt", async () => {
+test("session-start does not inject workflow bootstrap into system prompt", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
   const output = { text: "You are a helpful assistant." }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.ok(output.text.includes("JUST_DEMAND_WORKFLOW"))
-  assert.ok(output.text.includes("using-just-demand"))
+  assert.equal(output.text, "You are a helpful assistant.")
 })
 
-test("session-start avoids duplicate injection", async () => {
+test("session-start leaves existing workflow marker text untouched", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
@@ -326,8 +325,7 @@ test("session-start preserves existing system prompt content", async () => {
   const plugin = await sessionStartFactory({ directory: root })
   const output = { text: "Original system prompt." }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.ok(output.text.startsWith("Original system prompt."))
-  assert.ok(output.text.includes("JUST_DEMAND_WORKFLOW"))
+  assert.equal(output.text, "Original system prompt.")
 })
 
 // ---------------------------------------------------------------------------
@@ -412,7 +410,7 @@ test("subagent-context avoids absolute path leakage for just-demand-research", a
   assert.equal(output.args.prompt.includes(root), false)
 })
 
-test("subagent-context blocks supported subagent when required context files are missing", async () => {
+test("subagent-context throws when writable subagent required context files are missing", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -421,9 +419,24 @@ test("subagent-context blocks supported subagent when required context files are
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
+  await assert.rejects(
+    plugin["tool.execute.before"](input, output),
+    /Blocked just-demand-implement: missing required task context files.*implement\.md/,
+  )
+  assert.equal(output.args.prompt, "Do the work")
+})
+
+test("subagent-context still annotates read-only research subagent when required context files are missing", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task" }
+  const output = { args: { subagent_type: "just-demand-research", prompt: "Investigate this" } }
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /# BLOCKED/)
-  assert.match(output.args.prompt, /implement\.md/)
+  assert.match(output.args.prompt, /context\.md/)
 })
 
 test("subagent-context skips non-supported subagent type", async () => {
