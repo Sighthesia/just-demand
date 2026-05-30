@@ -275,20 +275,19 @@ class InstallIntegrationTests(unittest.TestCase):
             research_agent = (config_root / "agents" / "just-demand-research.md").read_text(encoding="utf-8")
 
             for content in (implement_agent, check_agent):
-                self.assertIn('"*": ask', content)
-                self.assertIn('"git status": allow', content)
-                self.assertIn('"git diff *": allow', content)
-                self.assertIn('"git log *": allow', content)
-                self.assertIn('"python3 .just-demand/scripts/task.py --root . list-active": allow', content)
-                self.assertIn('"python3 -m unittest tests.just_demand.test_workflow_core -v": allow', content)
-                self.assertIn('"python3 -m unittest tests.just_demand.test_install -v": allow', content)
-                self.assertIn('"node --test tests/just_demand/test_opencode_plugins.mjs": allow', content)
-                self.assertIn('"python3 -m json.tool .opencode/package.json": allow', content)
+                self.assertIn('bash: allow', content)
+                self.assertIn('Prefer dedicated tools first', content)
+                self.assertIn('task: deny', content)
 
+            self.assertIn('read: allow', docs_agent)
+            self.assertIn('glob: allow', docs_agent)
+            self.assertIn('grep: allow', docs_agent)
             self.assertIn('bash: deny', docs_agent)
+            self.assertIn('Do not use shell.', docs_agent)
             self.assertIn('write: deny', research_agent)
             self.assertIn('edit: deny', research_agent)
             self.assertIn('bash: deny', research_agent)
+            self.assertIn('Prefer dedicated read-only tools first', research_agent)
     
     def test_install_opencode_global_creates_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:

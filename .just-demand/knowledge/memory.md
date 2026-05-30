@@ -102,3 +102,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-05-30-align-workflow-implementation-with-design-philosophy-task (Align workflow implementation with design philosophy) completed with status 'done'.
   Verification summary: Phase 1 remediation passed: removed main-session bootstrap injection, aligned research permissions, and hardened missing-context blocking.
+
+- Task 2026-05-30-broaden-subagent-permissions-by-responsibility-task (Broaden subagent permissions by responsibility) completed with status 'done'.
+  Verification summary: Role-based subagent permissions and tool guidance verified; install and plugin tests passed
