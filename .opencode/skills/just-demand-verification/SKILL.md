@@ -124,7 +124,7 @@ The following items must be COVERED, but coverage means a scannable mention, not
 
 ### Default Final Report
 
-Users skim; output past ~300 characters is usually not read closely. Write the final report bottom-line-up-front (BLUF) and scannable:
+This is the task-closure specialization of the global Output Style rule in `using-just-demand`. Users skim; output past ~300 characters is usually not read closely. Write the final report bottom-line-up-front (BLUF) and scannable:
 
 1. **First line is the conclusion.** State the outcome in one sentence before any context. The user should get the result from line one alone.
 2. **Then a few terse bullets**: what changed, verification result, remaining risk or next decision. Lead each bullet with the information-carrying word.

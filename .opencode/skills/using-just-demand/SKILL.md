@@ -71,6 +71,17 @@ Do not expose internal workflow mechanics to the user unless they are explicitly
 - Evidence over stale memory when information may be outdated or uncertain.
 - Stability and maintainability over short-term speed.
 
+## Output Style
+
+Users skim. Output past ~300 characters is usually not read closely, so every main-session reply must be bottom-line-up-front and scannable by default:
+
+- **Lead with the conclusion.** The first line states the result or answer before any context. The user should get the point from line one alone.
+- **Then terse, scannable bullets**, each starting with the information-carrying word. One idea per bullet.
+- **Default target: keep the reply under ~300 characters.** This is a target for the main body, not a hard cut. Never drop a safety-relevant item (risk, unverified area, blocker, destructive action) to hit the length -- move overflow into an optional expand section after the bullets, clearly marked so the user can stop reading once the bullets end.
+- Surface deep detail (root cause, tradeoffs, full transcripts, analogy) inline only for debugging, architecture changes, new mechanisms, or when the user explicitly asks.
+
+`just-demand-verification`'s Default Final Report is the task-closure specialization of this rule; keep the two consistent.
+
 ## Skill Routing
 
 | Situation | Load |

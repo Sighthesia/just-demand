@@ -108,3 +108,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-05-31-work-item-task (主动偏差选项澄清) completed with status 'done'.
   Verification summary: 三个技能(socratic-clarification/just-demand-verification/just-demand-intake)在偏差与纠偏场景下改为 AI 主动两段式抛选项(维度定位+目标状态对比)为硬性默认,保留 free-text 逃逸口;未动脚本/插件/优先级路由;plugin 35 pass、install 32 ok;部署副本已同步
+
+- Task 2026-05-31-bluf-task (最终报告 BLUF 优化) completed with status 'done'.
+  Verification summary: just-demand-verification 的 Default Final Report 改为 BLUF 首句结论+极简要点+可选展开段,约300字默认目标,关键安全信息不因字数删除;Required Report 必报项改为一行/折叠呈现;plugin 35 pass、install 32 ok;部署副本已同步
