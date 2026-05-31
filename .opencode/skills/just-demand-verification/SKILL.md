@@ -112,7 +112,7 @@ This command records the verification result, applies the checkpoint-commit safe
 
 ## Required Report
 
-When reporting verification, include:
+The following items must be COVERED, but coverage means a scannable mention, not a paragraph each. Most collapse to a single line or fold into the optional expand section:
 
 - Commands run.
 - Pass/fail result.
@@ -124,10 +124,10 @@ When reporting verification, include:
 
 ### Default Final Report
 
-Unless the task involved debugging, architecture changes, new mechanisms, or explicit analysis is requested, keep the final report brief:
+Users skim; output past ~300 characters is usually not read closely. Write the final report bottom-line-up-front (BLUF) and scannable:
 
-1. **What changed**
-2. **Verification result**
-3. **Remaining risk or next decision** (if any)
+1. **First line is the conclusion.** State the outcome in one sentence before any context. The user should get the result from line one alone.
+2. **Then a few terse bullets**: what changed, verification result, remaining risk or next decision. Lead each bullet with the information-carrying word.
+3. **Default target: keep the whole report under ~300 characters.** This is a target for the main body, not a hard cut. If a required item does not fit, move it into the optional expand section below -- never drop a safety-relevant item (remaining risk, unverified area, checkpoint-commit status) just to hit the length.
 
-Only include root cause, detailed tradeoffs, Minimum Viable Knowledge, or analogy when the task involved debugging, architecture changes, new mechanisms, or the user explicitly asks for deeper analysis.
+Put non-essential detail (root cause, detailed tradeoffs, Minimum Viable Knowledge, analogy, full command transcripts) in an optional expand section AFTER the bullets, clearly marked so the user can stop reading once the bullets are done. Only surface that detail inline when the task involved debugging, architecture changes, new mechanisms, or the user explicitly asks for deeper analysis.

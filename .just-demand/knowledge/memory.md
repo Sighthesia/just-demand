@@ -105,3 +105,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-05-30-broaden-subagent-permissions-by-responsibility-task (Broaden subagent permissions by responsibility) completed with status 'done'.
   Verification summary: Role-based subagent permissions and tool guidance verified; install and plugin tests passed
+
+- Task 2026-05-31-work-item-task (主动偏差选项澄清) completed with status 'done'.
+  Verification summary: 三个技能(socratic-clarification/just-demand-verification/just-demand-intake)在偏差与纠偏场景下改为 AI 主动两段式抛选项(维度定位+目标状态对比)为硬性默认,保留 free-text 逃逸口;未动脚本/插件/优先级路由;plugin 35 pass、install 32 ok;部署副本已同步
