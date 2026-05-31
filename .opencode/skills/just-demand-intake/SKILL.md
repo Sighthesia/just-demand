@@ -109,6 +109,8 @@ Preferred prompts:
 - "Is this isolated or does it affect multiple paths/users/environments?"
 - "Which missing detail would make us likely fix the wrong thing?"
 
+For expected-vs-actual mismatches, do not make the user compose the deviation description. Default to leading with the two-stage option flow from `socratic-clarification` (Proactive Deviation Options): Stage 1 options to locate the deviation dimension, Stage 2 "currently X, want Y or Z" contrast options to pin the target state. Reserve free-text for reproduction and other open-ended phenomena.
+
 ### Feature, workflow, or implementation request
 
 Drive toward this shape:

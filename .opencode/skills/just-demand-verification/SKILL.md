@@ -39,6 +39,8 @@ I want it to feel more like [target feeling].
 
 Translate clear correction feedback internally into implementation changes. If the correction feedback is vague, conflicting, or could point to multiple fixes, stop and route back to `socratic-clarification` before implementing.
 
+Do not wait for the user to write a full description of the deviation. The default is for YOU to lead with options: proactively infer the likely mismatch and present the two-stage option flow from `socratic-clarification` (Proactive Deviation Options) -- Stage 1 locates the deviation dimension, Stage 2 pins the target state via an "currently X, want Y or Z" contrast. The user should be able to click through rather than compose prose; only ask for free-text when no option fits or the phenomenon is open-ended.
+
 When correction feedback is vague, conflicting, or shows behavior drift without enough detail to act safely, load `socratic-clarification` before more execution. The next validation revision must be based on the clarified final expected effect and final implementation plan, not a guessed fix. Re-establish:
 
 - expected behavior
@@ -48,7 +50,7 @@ When correction feedback is vague, conflicting, or shows behavior drift without 
 - final expected effect and final implementation plan (updated for the correction)
 - which questions are blocking versus non-blocking
 
-Use `socratic-clarification` for the questioning cadence. When clarifying the mismatch, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
+Use `socratic-clarification` for the questioning cadence. For deviation and correction scenarios, leading with proactively inferred options is the default (see Proactive Deviation Options); use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 
 If the user says the result is "not quite right," "still off," or otherwise reports drift, do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
 

@@ -167,6 +167,24 @@ Open questions:
 - <any remaining non-blocking questions, or "none">
 ```
 
+## Proactive Deviation Options
+
+When the work shows a deviation between actual and expected effect -- a bug, regression, mismatch, low fidelity, or any correction feedback (vague or detailed) -- the DEFAULT is for YOU to lead with options, not to wait for the user to write a description. This applies to both first-pass clarification and post-implementation correction.
+
+This is a hard default, not a conditional. Do NOT fall back to "let the user describe the deviation first" just because the deviation is hard to express. Infer the likely deviation from the implementation and the expected effect, then present it as a two-stage option flow:
+
+1. **Stage 1 - Locate the deviation dimension.** Use the `question` tool to offer the dimensions the deviation likely lives in (e.g., color, spacing, motion/timing, copy, layout, logic, scope, data). The user picks the dimension instead of composing a description.
+2. **Stage 2 - Pin the target state.** For the chosen dimension, present a contrast: "Currently it is X; do you want Y or Z?" The user selects the target state instead of articulating it from scratch.
+
+Rules:
+
+- Base the dimension options on a real inference from the implementation and expected effect, not random guesses. Bad options add reading cost.
+- Keep each stage to 2-5 scannable options.
+- Always include a free-text escape hatch for when no option fits.
+- Do NOT force option form onto open-ended phenomena (reproduction steps, environmental conditions, how something feels). Those stay free-text per the patterns below.
+
+The goal is to minimize what the user has to type: most of the time they should be able to click through Stage 1 and Stage 2 rather than write prose.
+
 ## Questioning Patterns
 
 ### Bug, Regression, or Expected-vs-Actual Mismatch
@@ -195,11 +213,11 @@ Non-blocking questions: polish or preference details that can remain open.
 
 ### Vague Correction Feedback
 
-When correction feedback is vague, contrastive, or could point to multiple fixes:
+When correction feedback is vague, contrastive, or could point to multiple fixes, do NOT push the user to write a fuller description. Lead with the two-stage option flow from Proactive Deviation Options:
 
 1. Restate the correction feedback in your own words
-2. Ask for clarification on the specific mismatch
-3. Explore the expected vs. actual behavior
+2. Proactively present Stage 1 dimension options to locate the deviation, then Stage 2 contrast options to pin the target state
+3. Use those answers to fix the expected vs. actual gap; only ask for free-text when no option fits
 4. Determine blocking vs. non-blocking questions
 5. Summarize the correction scope before proceeding
 
@@ -217,6 +235,8 @@ Do not ask about implementation details that are purely engineering preferences 
 ## Question Tool Preference
 
 Use the `question` tool proactively for structured clarification when the answer can be expressed as concise options, choices, or approvals. Prefer grouped question rounds over one-question-at-a-time text prompting.
+
+For deviation and correction scenarios specifically, leading with options is the default, not a conditional: proactively infer and present options (see Proactive Deviation Options) instead of waiting for the user to describe the mismatch. Falling back to "let the user describe it first" is only acceptable for the open-ended phenomena listed under "When to use free-text".
 
 ### When to use the question tool
 
