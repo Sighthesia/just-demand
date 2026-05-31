@@ -28,6 +28,18 @@ from install import (
 )
 
 
+def print_numstat(numstat: list[dict[str, object]]) -> None:
+    if not numstat:
+        return
+    print()
+    print("  Diff summary:")
+    for entry in numstat:
+        additions = entry.get("additions", 0)
+        deletions = entry.get("deletions", 0)
+        path = entry.get("path", "")
+        print(f"    {additions}\t{deletions}\t{path}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Agent workflow task tools")
     parser.add_argument("--root", default=".", help="Workspace root")
@@ -145,6 +157,7 @@ def execute_command(root: Path, args: list[str]) -> int:
                 print()
                 print(f"  Project root: {result['project_root']}")
                 print(f"  Scripts deployed: {result.get('scripts_deployed', 0)}")
+                print_numstat(result.get("numstat", []))
                 print()
             else:
                 print(json.dumps(result, ensure_ascii=False))
@@ -165,6 +178,7 @@ def execute_command(root: Path, args: list[str]) -> int:
                     print(f"  Agents deployed: {results.get('agents_deployed', 0)}")
                     print(f"  Skills deployed: {results.get('skills_deployed', 0)}")
                     print(f"  Config deployed: {results.get('config_deployed', 0)}")
+                    print_numstat(results.get("numstat", []))
                     if results.get("warnings"):
                         print()
                         print("  Warnings:")
@@ -190,6 +204,7 @@ def execute_command(root: Path, args: list[str]) -> int:
                     print(f"  Agents deployed: {results.get('agents_deployed', 0)}")
                     print(f"  Skills deployed: {results.get('skills_deployed', 0)}")
                     print(f"  Config deployed: {results.get('config_deployed', 0)}")
+                    print_numstat(results.get("numstat", []))
                     if results.get("warnings"):
                         print()
                         print("  Warnings:")
@@ -210,6 +225,7 @@ def execute_command(root: Path, args: list[str]) -> int:
                     print(f"✓ Updated {total} global files")
                 else:
                     print("· Global installation already current")
+                print_numstat(results.get("numstat", []))
                 if results.get("warnings"):
                     for warning in results["warnings"]:
                         print(f"  ⚠ {warning}")
@@ -243,6 +259,7 @@ def execute_command(root: Path, args: list[str]) -> int:
                     except ValueError:
                         pass
                     print(f"  {status}{detail_str}  {path}")
+                print_numstat(result.get("numstat", []))
                 print()
             else:
                 print(json.dumps(result, ensure_ascii=False))

@@ -202,10 +202,11 @@ class InstallCoreTests(unittest.TestCase):
             target.write_text('{"dependencies":{"keep":"1.0.0"}}\n', encoding="utf-8")
             manifest = {"installed_files": {}, "version": "1.0"}
 
-            copied, warning = deploy_config_file(source, target, manifest, config_root)
+            copied, warning, entry = deploy_config_file(source, target, manifest, config_root)
 
             self.assertFalse(copied)
             self.assertIn("package.json", warning)
+            self.assertIsNone(entry)
             self.assertEqual(target.read_text(encoding="utf-8"), '{"dependencies":{"keep":"1.0.0"}}\n')
             self.assertNotIn("package.json", manifest["installed_files"])
     
@@ -393,6 +394,7 @@ class InstallCLITests(unittest.TestCase):
             )
             # Check for success indicators in human-readable output
             self.assertIn("✓", result.stdout)
+            self.assertIn("Diff summary:", result.stdout)
             self.assertTrue((root / ".just-demand").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())
     
@@ -423,6 +425,7 @@ class InstallCLITests(unittest.TestCase):
             )
             # Check for success indicators in human-readable output
             self.assertIn("✓", result.stdout)
+            self.assertIn("Diff summary:", result.stdout)
             self.assertTrue((config_root / "plugins" / "just-demand-lib.js").exists())
     
     def test_cli_update_opencode_global(self):
@@ -439,6 +442,10 @@ class InstallCLITests(unittest.TestCase):
                 capture_output=True,
                 check=True,
             )
+
+            # Change a managed file so update produces diff stats
+            managed = config_root / "plugins" / "just-demand-lib.js"
+            managed.write_text("stale\n", encoding="utf-8")
             
             # Update
             result = subprocess.run(
@@ -449,6 +456,7 @@ class InstallCLITests(unittest.TestCase):
             )
             # Check for success indicators in human-readable output
             self.assertIn("✓", result.stdout)
+            self.assertIn("Diff summary:", result.stdout)
 
     def test_cli_sync_workspaces(self):
         import subprocess
@@ -473,6 +481,7 @@ class InstallCLITests(unittest.TestCase):
             # Check for success indicators in human-readable output
             self.assertIn("✓", result.stdout)
             self.assertIn("Synchronized", result.stdout)
+            self.assertIn("Diff summary:", result.stdout)
             self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
     
     def test_cli_doctor(self):

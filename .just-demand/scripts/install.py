@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import difflib
 import shutil
 import sys
 from pathlib import Path
@@ -66,6 +67,26 @@ def get_config_root(config_root: Optional[Path] = None) -> Path:
     return config_root or DEFAULT_CONFIG_ROOT
 
 
+def line_numstat(before: Optional[str], after: str) -> tuple[int, int]:
+    """Count line additions and deletions between two text versions."""
+    matcher = difflib.SequenceMatcher(a=[] if before is None else before.splitlines(), b=after.splitlines())
+    additions = 0
+    deletions = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "insert":
+            additions += j2 - j1
+        elif tag == "delete":
+            deletions += i2 - i1
+        elif tag == "replace":
+            additions += j2 - j1
+            deletions += i2 - i1
+    return additions, deletions
+
+
+def make_numstat(path: str, additions: int, deletions: int) -> dict[str, Any]:
+    return {"path": path, "additions": additions, "deletions": deletions}
+
+
 def load_manifest(config_root: Path) -> dict[str, Any]:
     """Load the installation manifest."""
     manifest_path = config_root / MANIFEST_FILE
@@ -85,7 +106,7 @@ def save_manifest(config_root: Path, manifest: dict[str, Any]) -> None:
     manifest_path.write_text(encoded, encoding="utf-8")
 
 
-def deploy_file(source: Path, target: Path, manifest: dict[str, Any], config_root: Path) -> bool:
+def deploy_file(source: Path, target: Path, manifest: dict[str, Any], config_root: Path) -> tuple[bool, Optional[dict[str, Any]]]:
     """Deploy a file from source to target, tracking in manifest.
     
     Returns True if file was actually copied (new or updated).
@@ -94,6 +115,8 @@ def deploy_file(source: Path, target: Path, manifest: dict[str, Any], config_roo
         raise FileNotFoundError(f"Source file not found: {source}")
     
     target.parent.mkdir(parents=True, exist_ok=True)
+    before_text = target.read_text(encoding="utf-8") if target.exists() else None
+    after_text = source.read_text(encoding="utf-8")
     
     # Check if file needs updating
     if target.exists():
@@ -107,7 +130,7 @@ def deploy_file(source: Path, target: Path, manifest: dict[str, Any], config_roo
                 "source": str(source),
                 "checksum": str(source.stat().st_mtime),
             }
-            return False
+            return False, None
     
     shutil.copy2(str(source), str(target))
     try:
@@ -118,30 +141,33 @@ def deploy_file(source: Path, target: Path, manifest: dict[str, Any], config_roo
         "source": str(source),
         "checksum": str(source.stat().st_mtime),
     }
-    return True
+    additions, deletions = line_numstat(before_text, after_text)
+    return True, make_numstat(relative_target, additions, deletions)
 
 
-def deploy_config_file(source: Path, target: Path, manifest: dict[str, Any], config_root: Path) -> tuple[bool, Optional[str]]:
+def deploy_config_file(source: Path, target: Path, manifest: dict[str, Any], config_root: Path) -> tuple[bool, Optional[str], Optional[dict[str, Any]]]:
     """Deploy a config file without taking ownership of an existing user file."""
     relative_target = str(target.relative_to(config_root))
     managed_files = manifest.setdefault("installed_files", {})
 
     if target.exists() and relative_target not in managed_files:
-        return False, f"Skipped existing unmanaged config file: {relative_target}"
+        return False, f"Skipped existing unmanaged config file: {relative_target}", None
 
-    return deploy_file(source, target, manifest, config_root), None
+    copied, entry = deploy_file(source, target, manifest, config_root)
+    return copied, None, entry
 
 
-def deploy_directory(source_dir: Path, target_dir: Path, manifest: dict[str, Any], config_root: Path, exclude: list[str] | None = None) -> int:
+def deploy_directory(source_dir: Path, target_dir: Path, manifest: dict[str, Any], config_root: Path, exclude: list[str] | None = None) -> tuple[int, list[dict[str, Any]]]:
     """Deploy all files from source directory to target directory.
     
     Returns number of files actually copied.
     """
     exclude = exclude or []
     copied_count = 0
+    numstat_entries: list[dict[str, Any]] = []
     
     if not source_dir.exists():
-        return copied_count
+        return copied_count, numstat_entries
     
     for item in source_dir.iterdir():
         if item.name in exclude:
@@ -149,13 +175,18 @@ def deploy_directory(source_dir: Path, target_dir: Path, manifest: dict[str, Any
         
         if item.is_file():
             target_file = target_dir / item.name
-            if deploy_file(item, target_file, manifest, config_root):
+            copied, entry = deploy_file(item, target_file, manifest, config_root)
+            if copied:
                 copied_count += 1
+                if entry:
+                    numstat_entries.append(entry)
         elif item.is_dir():
             target_subdir = target_dir / item.name
-            copied_count += deploy_directory(item, target_subdir, manifest, config_root, exclude)
+            child_count, child_entries = deploy_directory(item, target_subdir, manifest, config_root, exclude)
+            copied_count += child_count
+            numstat_entries.extend(child_entries)
     
-    return copied_count
+    return copied_count, numstat_entries
 
 
 def install_opencode_global(config_root: Optional[Path] = None) -> dict[str, Any]:
@@ -176,23 +207,27 @@ def install_opencode_global(config_root: Optional[Path] = None) -> dict[str, Any
         "skills_deployed": 0,
         "config_deployed": 0,
         "total_deployed": 0,
+        "numstat": [],
         "warnings": [],
     }
     
     # Deploy plugins
     plugins_dir = repo_opencode / "plugins"
     target_plugins = config_root / "plugins"
-    results["plugins_deployed"] = deploy_directory(plugins_dir, target_plugins, manifest, config_root)
+    results["plugins_deployed"], plugin_stats = deploy_directory(plugins_dir, target_plugins, manifest, config_root)
+    results["numstat"].extend(plugin_stats)
     
     # Deploy agents
     agents_dir = repo_opencode / "agent"
     target_agents = config_root / "agents"  # Use agents (plural) for global
-    results["agents_deployed"] = deploy_directory(agents_dir, target_agents, manifest, config_root)
+    results["agents_deployed"], agent_stats = deploy_directory(agents_dir, target_agents, manifest, config_root)
+    results["numstat"].extend(agent_stats)
     
     # Deploy skills
     skills_dir = repo_opencode / "skills"
     target_skills = config_root / "skills"
-    results["skills_deployed"] = deploy_directory(skills_dir, target_skills, manifest, config_root)
+    results["skills_deployed"], skill_stats = deploy_directory(skills_dir, target_skills, manifest, config_root)
+    results["numstat"].extend(skill_stats)
     
     # Deploy config files (package.json)
     config_dir = repo_opencode
@@ -200,9 +235,11 @@ def install_opencode_global(config_root: Optional[Path] = None) -> dict[str, Any
         source = config_dir / config_file
         if source.exists():
             target = config_root / config_file
-            copied, warning = deploy_config_file(source, target, manifest, config_root)
+            copied, warning, entry = deploy_config_file(source, target, manifest, config_root)
             if copied:
                 results["config_deployed"] += 1
+            if entry:
+                results["numstat"].append(entry)
             if warning:
                 results["warnings"].append(warning)
     
@@ -567,6 +604,7 @@ def sync_workspace(project_root: Path) -> dict[str, Any]:
         "legacy_removed": [],
         "state_created": False,
         "gitignore_updated": False,
+        "numstat": [],
     }
     
     # 1. Sync scripts/ directory
@@ -578,15 +616,21 @@ def sync_workspace(project_root: Path) -> dict[str, Any]:
         for old_file in ["task.py", "install.py"]:
             old_path = scripts_dir / old_file
             if old_path.exists():
+                removed_lines = len(old_path.read_text(encoding="utf-8").splitlines())
                 old_path.unlink()
                 result["legacy_removed"].append(f"scripts/{old_file}")
+                result["numstat"].append(make_numstat(f".just-demand/scripts/{old_file}", 0, removed_lines))
     
     # Copy workflow_core.py if changed
     source = repo_scripts / "workflow_core.py"
     target = scripts_dir / "workflow_core.py"
     if not target.exists() or source.read_text(encoding="utf-8") != target.read_text(encoding="utf-8"):
+        before_text = target.read_text(encoding="utf-8") if target.exists() else None
+        after_text = source.read_text(encoding="utf-8")
         shutil.copy2(str(source), str(target))
         result["scripts_synced"] += 1
+        additions, deletions = line_numstat(before_text, after_text)
+        result["numstat"].append(make_numstat(".just-demand/scripts/workflow_core.py", additions, deletions))
     
     # 2. Create state/ directory structure
     state_dir = workflow_root / "state"
@@ -694,6 +738,7 @@ def sync_initialized_workspaces(search_roots: Optional[list[Path]] = None) -> di
                 "state_created": sync_result["state_created"],
                 "gitignore_updated": sync_result["gitignore_updated"],
                 "updated": sync_result["updated"],
+                "numstat": sync_result["numstat"],
             })
 
     total_scripts_synced = sum(item["scripts_synced"] for item in workspaces)
@@ -704,6 +749,7 @@ def sync_initialized_workspaces(search_roots: Optional[list[Path]] = None) -> di
         "workspaces_found": len(workspaces),
         "workspaces_updated": updated_count,
         "total_scripts_synced": total_scripts_synced,
+        "numstat": [entry for workspace in workspaces for entry in workspace["numstat"]],
         "workspaces": workspaces,
         "message": f"Synchronized {updated_count} of {len(workspaces)} workspaces",
     }
@@ -725,6 +771,7 @@ def init_project(project_root: Optional[Path] = None) -> dict[str, Any]:
             "just_demand_dir": str(project_root / ".just-demand"),
             "scripts_synced": sync_result["scripts_synced"],
             "legacy_removed": sync_result["legacy_removed"],
+            "numstat": sync_result["numstat"],
             "message": f"Initialized project workspace in {project_root / '.just-demand'}",
         }
     except Exception as e:
