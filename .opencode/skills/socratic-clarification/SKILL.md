@@ -120,33 +120,42 @@ Explore boundaries and risks:
 
 After gathering enough context, propose 2-3 different approaches with trade-offs. Present your recommendation and explain why.
 
+This proposal is the highest-information moment of the turn, so it MUST follow the Output Style rules in `using-just-demand` (BLUF, scannable, user language). The user is the product manager and architect, not the implementer.
+
+- **Lead with effect, not implementation.** The first line of the proposal states what the user will be able to do, in user language. Do NOT open with an internal concern, file name, type, or dependency.
+- **Subject is the user or the system's observable behavior**, never the implementation artifact. Write "you get X" / "the system does Y", not "the CLI module calls Z".
+- **Trade-offs describe user-facing consequences** (speed, safety, cost, what could go wrong, what it feels like), not raw technical attributes. "Smaller change, but if it crashes mid-run it may stay in auto mode" beats "reuses global Arc<Mutex> mode".
+- **Implementation detail (files, dependencies, internal structure, symbol names) does not belong in the main proposal.** Fold it into an optional expand section the user can skip, or omit entirely.
+
 ```text
 Approach A: <name>
-  - What it does: <description>
-  - Trade-offs: <pros/cons>
+  - What you get: <user-visible effect in user language>
+  - Trade-offs: <user-facing pros/cons: speed, safety, cost, failure mode>
   - Recommended: <yes/no with reasoning>
 
 Approach B: <name>
-  - What it does: <description>
-  - Trade-offs: <pros/cons>
+  - What you get: <user-visible effect>
+  - Trade-offs: <user-facing pros/cons>
 
 Approach C: <name> (optional)
-  - What it does: <description>
-  - Trade-offs: <pros/cons>
+  - What you get: <user-visible effect>
+  - Trade-offs: <user-facing pros/cons>
 ```
 
 Wait for the user to choose or approve your recommendation before proceeding.
 
 ## Final Artifact Shape
 
-Before execution, capture this artifact and get explicit user approval:
+Before execution, capture this artifact and get explicit user approval.
+
+Present it under the same Output Style rules as the approach comparison: BLUF, user language, effect first. The `Final implementation plan` is the only section that names steps; keep even those at the level of observable behavior plus referenced files/symbols by name, not line-by-line code. Push internal mechanics into an optional expand section.
 
 ```text
 Final expected effect:
 - <user-visible outcome in user language>
 
 Scope:
-- In: <what is included>
+- In: <what is included, described as user-facing capability>
 - Out: <what is explicitly excluded>
 
 Anti-outcomes:
@@ -156,7 +165,7 @@ Chosen approach:
 - <selected approach with brief rationale>
 
 Final implementation plan:
-1. <step>
+1. <step, stated as effect or named file/symbol, not code>
 2. <step>
 3. <verification step>
 
@@ -166,6 +175,27 @@ Validation:
 Open questions:
 - <any remaining non-blocking questions, or "none">
 ```
+
+## Minimum Viable Knowledge
+
+A proposal the user cannot read is a failed proposal, even if it is technically complete. When the proposal contains any term, concept, or mechanism the user may not know, give the minimum knowledge needed to evaluate it.
+
+- **Every unfamiliar term gets one plain-language sentence** inline or in a short glossary block. Example: "continuous tuning = the system finds its own control parameters so you don't hand-tune them."
+- **Drop pure-symbol jargon entirely.** Symbols like `Ku`, `Tu`, `Kp/Ki/Kd`, raw type names, or internal field names carry no decision value for the user. Omit them from the main proposal.
+- **Explain a tradeoff's stakes, not just its name.** If an option is "less safe", say what unsafe looks like in practice.
+- Keep MVK proportional: one sentence per term, not a tutorial. If the user already demonstrated the knowledge, skip it.
+
+## Question Filtering Gate
+
+Not every uncertainty you hold is a user decision. Before presenting open questions or a `question` call, run each candidate through the Question Threshold below. A candidate reaches the user ONLY if guessing wrong would change product behavior, architecture/module boundaries, compatibility, or security/cost/long-term maintenance.
+
+Everything else is engineering uncertainty that YOU resolve:
+
+- If reading code, docs, or running a command would answer it, resolve it yourself before proposing. Do not outsource discoverable facts to the user.
+- If it is a pure implementation preference with no user-visible effect, decide it, and at most note the decision in one line.
+- Do not pad the open-questions list with engineering choices to look thorough. Each extra question raises reading cost and dilutes the real decision.
+
+When in doubt, ask: "Would a wrong guess here produce a user-visible mismatch or an irreversible/expensive consequence?" If no, do not ask.
 
 ## Proactive Deviation Options
 
@@ -231,6 +261,8 @@ Ask implementation questions only when they affect:
 - Security, cost, or long-term maintenance
 
 Do not ask about implementation details that are purely engineering preferences when they do not affect the above categories.
+
+This threshold is enforced by the Question Filtering Gate (near the Final Artifact Shape): run every candidate open question through these four categories before it reaches the user, and resolve discoverable engineering facts yourself instead of asking.
 
 ## Question Tool Preference
 
