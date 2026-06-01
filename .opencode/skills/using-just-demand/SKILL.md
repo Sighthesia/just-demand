@@ -79,6 +79,7 @@ Users skim. Output past ~300 characters is usually not read closely, so every ma
 - **Then terse, scannable bullets**, each starting with the information-carrying word. One idea per bullet.
 - **Default target: keep the reply under ~300 characters.** This is a target for the main body, not a hard cut. Never drop a safety-relevant item (risk, unverified area, blocker, destructive action) to hit the length -- move overflow into an optional expand section after the bullets, clearly marked so the user can stop reading once the bullets end.
 - Surface deep detail (root cause, tradeoffs, full transcripts, analogy) inline only for debugging, architecture changes, new mechanisms, or when the user explicitly asks.
+- **Focus on expected effect, observed phenomenon, and design -- not line-by-line code.** The user is product manager and architect; do not narrate or restate implementation code line by line. Reference changed files/symbols by name and describe what changed and why, not how each line works. Show code only when the user asks, or when a specific snippet is needed to decide a design or behavior question.
 
 `just-demand-verification`'s Default Final Report is the task-closure specialization of this rule; keep the two consistent.
 

@@ -111,3 +111,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-05-31-bluf-task (最终报告 BLUF 优化) completed with status 'done'.
   Verification summary: just-demand-verification 的 Default Final Report 改为 BLUF 首句结论+极简要点+可选展开段,约300字默认目标,关键安全信息不因字数删除;Required Report 必报项改为一行/折叠呈现;plugin 35 pass、install 32 ok;部署副本已同步
+
+- Task 2026-05-31-diff-task (脚本更新显示 diff 行数) completed with status 'done'.
+  Verification summary: CLI 更新输出已显示按文件增删行统计，并且相关测试通过。
