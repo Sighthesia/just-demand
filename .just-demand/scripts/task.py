@@ -238,7 +238,7 @@ def execute_command(root: Path, args: list[str]) -> int:
             result = sync_initialized_workspaces(search_roots)
             # Format human-readable output for sync-workspaces
             if result.get("status") == "success":
-                print(f"✓ {result['message']}")
+                print(f"✓ {result['message']}  (workflow {result['workflow_version']})")
                 print()
                 for ws in result["workspaces"]:
                     status = "✓ updated" if ws["updated"] else "· current"

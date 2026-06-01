@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import difflib
+import hashlib
 import shutil
 import sys
 from pathlib import Path
@@ -85,6 +86,12 @@ def line_numstat(before: Optional[str], after: str) -> tuple[int, int]:
 
 def make_numstat(path: str, additions: int, deletions: int) -> dict[str, Any]:
     return {"path": path, "additions": additions, "deletions": deletions}
+
+
+def workflow_version() -> str:
+    """Short content hash of the synced workflow file, used as a sync version id."""
+    content = (get_repo_scripts_dir() / "workflow_core.py").read_bytes()
+    return hashlib.sha256(content).hexdigest()[:12]
 
 
 def load_manifest(config_root: Path) -> dict[str, Any]:
@@ -745,6 +752,7 @@ def sync_initialized_workspaces(search_roots: Optional[list[Path]] = None) -> di
     updated_count = sum(1 for item in workspaces if item["updated"])
     return {
         "status": "success",
+        "workflow_version": workflow_version(),
         "search_roots": [str(root) for root in resolved_search_roots],
         "workspaces_found": len(workspaces),
         "workspaces_updated": updated_count,
