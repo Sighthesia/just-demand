@@ -114,3 +114,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-05-31-diff-task (脚本更新显示 diff 行数) completed with status 'done'.
   Verification summary: CLI 更新输出已显示按文件增删行统计，并且相关测试通过。
+
+- Task 2026-06-02-zero-touch-bootstrap-and-half-migration-repair-task (Zero-touch bootstrap and half-migration repair) completed with status 'done'.
+  Verification summary: Add where subcommand to task.py; print invocation hint after init (stdout) and after doctor (stderr to keep JSON clean); 5 new tests cover where / init-hint / doctor-hint / no-hint-when-uninitialized. workflow_core 68/68, install 32/32, package.json valid. in-flight 2026-05-23-fix-init-script-deployment-task verified untouched (task.json hash 3ea0d7e0a2c9cc553db1ae3f6a3b51ed3c068009 unchanged).

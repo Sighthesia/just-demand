@@ -144,6 +144,18 @@ Approach C: <name> (optional)
 
 Wait for the user to choose or approve your recommendation before proceeding.
 
+### Visual And Interaction Drift
+
+For UI, animation, layout, reveal, overflow, clipping, masking, or "quality/feel" problems, do not collapse the symptom into the first containment fix. The approach comparison must distinguish user-visible solution shapes when they would feel different:
+
+- **Containment**: clip, hide, mask, or delay drawing so the bad state is not visible. Good for strict bounds; risky when it feels like hard cutting.
+- **Synchronized entrance**: make foreground content follow the same expansion, anchor, timing, or direction as its background. Good when the issue is content arriving before its container.
+- **Layout/reflow**: change spacing, anchoring, available size, or row reveal so the content naturally fits. Good when clipping would make text or controls feel broken.
+
+If the user's anti-outcome mentions hard cuts, visible clipping, premature content, jank, mismatch between foreground/background, or "not good quality", treat the approach choice as blocking. Ask the user to approve the intended feel before implementing.
+
+Do not present a containment fix as the default just because it is easiest to verify. If containment remains as a safety boundary, name the primary user-visible behavior separately, such as "slide in from the tray anchor with clip only as a guardrail".
+
 ## Final Artifact Shape
 
 Before execution, capture this artifact and get explicit user approval.
@@ -250,6 +262,8 @@ When correction feedback is vague, contrastive, or could point to multiple fixes
 3. Use those answers to fix the expected vs. actual gap; only ask for free-text when no option fits
 4. Determine blocking vs. non-blocking questions
 5. Summarize the correction scope before proceeding
+
+For visual quality corrections like "still overflows", "裁剪效果不好", "feels clipped", "janky", "foreground arrives early", or "not synchronized", stop patching the existing technique. Re-open the approach comparison and offer containment, synchronized entrance, and layout/reflow options when relevant.
 
 ## Question Threshold
 

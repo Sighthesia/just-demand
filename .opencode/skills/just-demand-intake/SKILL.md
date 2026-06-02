@@ -41,7 +41,7 @@ Treat blocking questions as promotion blockers. Non-blocking questions may stay 
 For design and implementation work, the intake must include the final artifact before promotion:
 
 - **Final Expected Effect**: user-visible outcome in user language
-- **Approach Options**: 2-3 approaches with trade-offs (informational, does not block promotion)
+- **Approach Options**: 2-3 approaches with trade-offs; for UI/interaction work these must be meaningful user-visible alternatives, not placeholders
 - **Chosen Approach**: selected approach with brief rationale
 - **Final Implementation Plan**: ordered steps including verification
 - **Validation**: how we will verify the result matches the expected effect
@@ -111,6 +111,14 @@ Preferred prompts:
 
 For expected-vs-actual mismatches, do not make the user compose the deviation description. Default to leading with the two-stage option flow from `socratic-clarification` (Proactive Deviation Options): Stage 1 options to locate the deviation dimension, Stage 2 "currently X, want Y or Z" contrast options to pin the target state. Reserve free-text for reproduction and other open-ended phenomena.
 
+For visual or interaction mismatches, record the solution shape explicitly when it affects the user-visible result. At minimum, consider:
+
+- containment: clip, hide, mask, or delay drawing
+- synchronized entrance: foreground follows the container's expansion, anchor, direction, or timing
+- layout/reflow: spacing, anchoring, available size, or row reveal changes so content naturally fits
+
+If the user objects to the feel of a fix, such as "裁剪效果不好" or "not synchronized", treat that as approach drift. The next intake/update should choose a new solution shape instead of continuing the same patch family.
+
 ### Feature, workflow, or implementation request
 
 Drive toward this shape:
@@ -164,3 +172,5 @@ Before implementation, provide a low-reading-cost validation summary:
 - One-sentence intent.
 - Five-point quick check.
 - Effect validation card when the request is visual or interaction-heavy.
+
+For visual or interaction work, the validation card should include the intended motion/layout feel, the rejected anti-outcome, and whether any clipping/masking is a primary effect or only a safety guardrail.

@@ -54,6 +54,18 @@ Use `socratic-clarification` for the questioning cadence. For deviation and corr
 
 If the user says the result is "not quite right," "still off," or otherwise reports drift, do not guess at the next implementation step. Clarify the mismatch first, then create or update the next validation revision.
 
+### Visual Quality Corrections
+
+For UI, animation, layout, reveal, overflow, clipping, masking, or quality/feel feedback, treat "works but feels bad" as a validation failure of the chosen approach, not as a routine polish tweak. Examples include "裁剪效果不好", "still clips", "foreground appears before the glass/background", "janky", "not synchronized", or "hard cut".
+
+When this happens, stop extending the same technique. Re-open the solution-shape choice through `socratic-clarification` and compare the relevant user-visible alternatives:
+
+- containment: keep content hidden outside bounds
+- synchronized entrance: make foreground move/reveal with the container
+- layout/reflow: change spacing, anchoring, or available size so clipping is not the visible effect
+
+Only continue implementation after the next expected effect and final implementation plan name the chosen feel. If a clip remains, verify whether it is the intended primary effect or only a safety guardrail.
+
 ## Progressive Clarification Routing
 
 When correction feedback is vague, conflicting, or shows behavior drift without enough detail to act safely, load `socratic-clarification` before more implementation. The next validation revision must be based on the clarified final expected effect and final implementation plan, not a guessed fix.

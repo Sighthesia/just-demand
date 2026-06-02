@@ -103,6 +103,14 @@ Before dispatching any implementation subagent, verify that the task is sufficie
 5. Do not guess what the user wants to fill in missing fields. Ask.
 6. When clarifying gaps, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options.
 
+### Visual Interaction Execution Gate
+
+Before dispatching UI, animation, layout, reveal, overflow, clipping, or quality/feel work, check that the task context names the intended user-visible solution shape. If containment, synchronized entrance, and layout/reflow would feel different, the chosen approach must say which one is primary.
+
+Do not dispatch implementation when the plan only says "fix overflow" or "clip it" but the user's feedback is about foreground/background timing, entrance choreography, layout feel, hard cuts, or visual quality. Route back to `socratic-clarification` and present the relevant options.
+
+If clipping, masking, opacity, or delayed drawing is used only as a safety guardrail, record the primary behavior separately so subagents do not mistake the guardrail for the design.
+
 ## Execution Loop
 
 1. Confirm active formal work item.
