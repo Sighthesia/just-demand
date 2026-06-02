@@ -40,6 +40,29 @@ def print_numstat(numstat: list[dict[str, object]]) -> None:
         print(f"    {additions}\t{deletions}\t{path}")
 
 
+def script_path() -> Path:
+    """Return the absolute path of the running task.py script."""
+    return Path(__file__).resolve()
+
+
+def repo_root() -> Path:
+    """Return the just-demand source repo root (parent of .just-demand/)."""
+    return script_path().parents[2]
+
+
+def invocation_hint(project_root: Path, command: str = "<cmd>") -> str:
+    """Return a one-line invocation example for the given project root."""
+    return f"  python3 {script_path()} --root {project_root} {command}"
+
+
+def print_invocation_hint(project_root: Path, stream=None) -> None:
+    """Print a 'how to invoke' hint to the given stream (default stdout)."""
+    out = stream if stream is not None else sys.stdout
+    out.write("\nProject invocation:\n")
+    out.write(invocation_hint(project_root, "list-active") + "\n")
+    out.write(f"  python3 {script_path()} where           # to find this script's path\n")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Agent workflow task tools")
     parser.add_argument("--root", default=".", help="Workspace root")
@@ -104,8 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
     
     uninstall = sub.add_parser("uninstall", help="Remove global Just Demand installation")
     uninstall.add_argument("--opencode", action="store_true", help="Uninstall OpenCode runtime assets")
-    uninstall.add_argument("--global", action="store_true", dest="global_uninstall", help="Uninstall global installation")
+    uninstall.add_argument("--global", action="store_true", dest="global_uninstall", help="Uninstall globally")
     uninstall.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
+
+    where = sub.add_parser("where", help="Print the path of this task.py and a one-line invocation example")
+    where.add_argument("--project", default=None, help="Optional project root to include in the invocation example")
 
     return parser
 
@@ -158,6 +184,7 @@ def execute_command(root: Path, args: list[str]) -> int:
                 print(f"  Project root: {result['project_root']}")
                 print(f"  Scripts deployed: {result.get('scripts_deployed', 0)}")
                 print_numstat(result.get("numstat", []))
+                print_invocation_hint(root)
                 print()
             else:
                 print(json.dumps(result, ensure_ascii=False))
@@ -267,6 +294,25 @@ def execute_command(root: Path, args: list[str]) -> int:
         elif parsed.command == "doctor":
             config_root = Path(parsed.config_root) if parsed.config_root else None
             result = doctor_opencode_global(config_root, root)
+            print(json.dumps(result, ensure_ascii=False))
+            if isinstance(result, dict) and result.get("project", {}).get("just_demand_dir_exists"):
+                print_invocation_hint(root, stream=sys.stderr)
+            return 0 if (isinstance(result, dict) and result.get("status") != "error") else 1
+        elif parsed.command == "where":
+            target = Path(parsed.project).resolve() if parsed.project else None
+            print(f"task.py path: {script_path()}")
+            print(f"repo root:    {repo_root()}")
+            if target is not None:
+                print()
+                print("To invoke against the project:")
+                print(invocation_hint(target, "list-active"))
+            else:
+                print()
+                print("To invoke against any project:")
+                print(f"  python3 {script_path()} --root <project> <cmd>")
+                print()
+                print("Run with --project <path> to see a project-specific example.")
+            return 0
         elif parsed.command == "uninstall":
             if not parsed.opencode or not parsed.global_uninstall:
                 result = {"status": "error", "message": "Uninstall requires --opencode --global flags"}
@@ -304,6 +350,7 @@ def show_help():
     print("  init                              Initialize project")
     print("  sync-workspaces                   Sync workflow scripts")
     print("  doctor                            Check installation status")
+    print("  where [--project <path>]          Print task.py path and invocation example")
     print("  help                              Show this help")
     print("  exit / quit                       Exit interactive mode")
     print()

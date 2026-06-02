@@ -1463,6 +1463,99 @@ class WorkflowCoreTests(unittest.TestCase):
                 "no impact scope set, committed all non-disallowed changes",
             )
 
+    def test_where_cli_prints_script_path_and_repo_root(self):
+        import subprocess
+
+        script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "where"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("task.py path:", result.stdout)
+        self.assertIn(str(script.resolve()), result.stdout)
+        self.assertIn("repo root:", result.stdout)
+        self.assertIn(str(REPO_ROOT.resolve()), result.stdout)
+        self.assertIn("To invoke against any project:", result.stdout)
+        self.assertIn("--root <project>", result.stdout)
+
+    def test_where_cli_project_flag_includes_invocation(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "where", "--project", str(project)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("To invoke against the project:", result.stdout)
+            self.assertIn(str(script.resolve()), result.stdout)
+            self.assertIn(str(project.resolve()), result.stdout)
+            self.assertIn("list-active", result.stdout)
+
+    def test_init_cli_output_includes_invocation_hint(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "init"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("Project invocation:", result.stdout)
+            self.assertIn(str(script.resolve()), result.stdout)
+            self.assertIn(str(root.resolve()), result.stdout)
+            self.assertIn("list-active", result.stdout)
+
+    def test_doctor_cli_includes_invocation_hint_on_stderr(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            # First init so the project has a .just-demand directory
+            subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "init"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            # Now doctor: stdout must remain valid JSON; stderr carries the hint
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "doctor"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["project"]["just_demand_dir_exists"])
+            self.assertIn("Project invocation:", result.stderr)
+            self.assertIn(str(script.resolve()), result.stderr)
+            self.assertIn(str(root.resolve()), result.stderr)
+
+    def test_doctor_cli_no_invocation_hint_when_project_not_initialized(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "fresh"
+            root.mkdir()
+            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--root", str(root), "doctor"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            # No project state, so no hint should be emitted
+            self.assertNotIn("Project invocation:", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
