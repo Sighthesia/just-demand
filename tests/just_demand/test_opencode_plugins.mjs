@@ -307,7 +307,10 @@ test("session-start does not inject workflow bootstrap into system prompt", asyn
   const plugin = await sessionStartFactory({ directory: root })
   const output = { text: "You are a helpful assistant." }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.equal(output.text, "You are a helpful assistant.")
+  assert.match(output.text, /^You are a helpful assistant\./)
+  assert.match(output.text, /<JUST_DEMAND_REMINDER>/)
+  assert.match(output.text, /Clarify new concrete work first/i)
+  assert.doesNotMatch(output.text, /<workflow-state>/i)
 })
 
 test("session-start leaves existing workflow marker text untouched", async () => {
@@ -316,7 +319,8 @@ test("session-start leaves existing workflow marker text untouched", async () =>
   const plugin = await sessionStartFactory({ directory: root })
   const output = { text: "Existing <JUST_DEMAND_WORKFLOW>content</JUST_DEMAND_WORKFLOW>" }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.equal(output.text, "Existing <JUST_DEMAND_WORKFLOW>content</JUST_DEMAND_WORKFLOW>")
+  assert.match(output.text, /<JUST_DEMAND_WORKFLOW>content<\/JUST_DEMAND_WORKFLOW>/)
+  assert.match(output.text, /<JUST_DEMAND_REMINDER>/)
 })
 
 test("session-start preserves existing system prompt content", async () => {
@@ -325,7 +329,17 @@ test("session-start preserves existing system prompt content", async () => {
   const plugin = await sessionStartFactory({ directory: root })
   const output = { text: "Original system prompt." }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.equal(output.text, "Original system prompt.")
+  assert.match(output.text, /^Original system prompt\./)
+  assert.match(output.text, /stronger explanation/i)
+})
+
+test("session-start avoids duplicate reminder injection", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const plugin = await sessionStartFactory({ directory: root })
+  const output = { text: "Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>" }
+  await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
+  assert.equal(output.text, "Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>")
 })
 
 // ---------------------------------------------------------------------------
@@ -340,7 +354,9 @@ test("state does not inject workflow state into main-session messages", async ()
   const plugin = await stateFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
   await plugin["chat.message"]({}, output)
-  assert.equal(output.parts[0].text, "Hello")
+  assert.match(output.parts[0].text, /^Hello/)
+  assert.match(output.parts[0].text, /\[just-demand reminder\]/)
+  assert.doesNotMatch(output.parts[0].text, /task-a/)
 })
 
 test("state does not inject when no active task", async () => {
@@ -350,7 +366,8 @@ test("state does not inject when no active task", async () => {
   const plugin = await stateFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
   await plugin["chat.message"]({}, output)
-  assert.equal(output.parts[0].text, "Hello")
+  assert.match(output.parts[0].text, /^Hello/)
+  assert.match(output.parts[0].text, /Clarify new concrete work first/i)
 })
 
 test("state does not inject when active task is done", async () => {
@@ -362,7 +379,18 @@ test("state does not inject when active task is done", async () => {
   const plugin = await stateFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "Hello" }] }
   await plugin["chat.message"]({}, output)
-  assert.equal(output.parts[0].text, "Hello")
+  assert.match(output.parts[0].text, /^Hello/)
+  assert.match(output.parts[0].text, /reset the problem model/i)
+})
+
+test("state avoids duplicate reminder injection", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const plugin = await stateFactory({ directory: root })
+  const text = "Hello\n\n[just-demand reminder]\n- already there"
+  const output = { parts: [{ type: "text", text }] }
+  await plugin["chat.message"]({}, output)
+  assert.equal(output.parts[0].text, text)
 })
 
 // ---------------------------------------------------------------------------

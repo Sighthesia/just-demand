@@ -70,6 +70,40 @@ Only continue implementation after the next expected effect and final implementa
 
 When correction feedback is vague, conflicting, or shows behavior drift without enough detail to act safely, load `socratic-clarification` before more implementation. The next validation revision must be based on the clarified final expected effect and final implementation plan, not a guessed fix.
 
+## Analysis Conclusion Confidence Gate
+
+For analysis, diagnosis, tuning, experiment-review, root-cause, or "which option is best" conclusions, do not present the result as an unconditional fact unless the evidence truly closes the question.
+
+Analysis-style conclusions must explicitly cover:
+
+- **Confidence**: high, medium, or low
+- **Evidence basis**: which observations directly support the conclusion
+- **Alternative explanations**: what else could explain the same data
+- **Falsifier**: what future evidence would weaken or overturn the current conclusion
+
+Purpose:
+
+- prevent stage-by-stage guesses from hardening into fake certainty
+- make evidence strength visible to the user
+- resist long-context drift where an early hypothesis gets repeated until it sounds proven
+- resist sycophancy when the user strongly frames the problem around a preferred variable or explanation
+
+If the available evidence cannot distinguish between a tuning problem, a structural limitation, a bad metric, or an inconsistent experiment setup, say so directly. In that case, verification should prefer "insufficient evidence" or "current best explanation with medium/low confidence" over a falsely definitive conclusion.
+
+### Required Shape For Analysis Conclusions
+
+Use this compact structure when the task result is primarily analytical rather than a code change:
+
+```text
+Conclusion: <current best explanation or recommendation>
+Confidence: <high|medium|low>
+Evidence: <key observations that directly support it>
+Alternative explanations: <other plausible explanations still alive>
+Falsifier: <what next evidence would weaken or overturn this conclusion>
+```
+
+This does not require long prose. Keep it scannable, but do not omit the uncertainty boundary.
+
 ## Lesson Capture Gate
 
 After verification passes, check whether the task involved non-trivial debugging. If any of the following are true, load the global `capture-lessons` skill and use its pattern before final closure:
@@ -133,6 +167,7 @@ The following items must be COVERED, but coverage means a scannable mention, not
 - Whether a lesson was captured (and where).
 - Whether the task is ready for archival.
 - Whether checkpoint commit was created, skipped, or blocked, with reason.
+- For analysis-style conclusions: confidence, live alternative explanations, and what evidence would overturn the current conclusion.
 
 ### Default Final Report
 

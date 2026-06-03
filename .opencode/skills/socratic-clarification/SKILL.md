@@ -28,6 +28,20 @@ Do NOT rationalize skipping any of these:
 - "The user is in a hurry" -- a short artifact is faster than a mismatched implementation.
 - "I'll clarify as I go" -- no. Blocking questions are promotion blockers.
 
+## Anti-Sycophancy And Premise Check
+
+When the user frames the work around a preferred variable, parameter, suspected root cause, or preferred solution family, do not adopt that frame by default.
+
+Before continuing inside the user's frame, explicitly test:
+
+- whether the framed variable is actually the dominant factor
+- whether a structural limitation or experiment flaw better explains the phenomenon
+- whether the current evidence can distinguish between a tuning problem and a wrong premise
+
+If the user's frame is weak, incomplete, or contradicted by stronger explanations, challenge the premise before proposing more detailed optimization. The goal is to prevent long conversations from collapsing into increasingly precise advice built on an unsupported assumption.
+
+For analysis, diagnosis, tuning, and experiment-review tasks, this premise check happens before fine-grained comparisons.
+
 ## Checklist
 
 You MUST complete these steps in order. Do not skip steps.
@@ -74,6 +88,21 @@ User approves final artifact?
 
 Use the rounds as a state machine. Ask only the rounds that still contain unknowns. If a later answer opens a new uncertainty, loop back to the relevant round.
 
+### Long-Context Reset Trigger
+
+If the conversation has spent 3 or more turns on the same phenomenon, or if the user keeps providing new samples under the same assumed explanation, pause incremental answering and restate the problem model.
+
+Minimum reset structure:
+
+```text
+Established: what the current evidence supports.
+Uncertain: what the evidence still cannot distinguish.
+Assumption at risk: which premise may be wrong.
+Decision: continue inside the current frame, or switch to a broader explanation.
+```
+
+Do this before proposing another narrow adjustment, another comparison, or another interpretation inside the same frame.
+
 ### Round 1: Intent and Expected Outcome
 
 Use the `question` tool to gather intent and expected outcomes when the answer can be expressed as options. Group related decisions when feasible.
@@ -106,6 +135,12 @@ When relevant, clarify the current state:
 - "What happens now instead of the desired behavior?"
 - "Can you reproduce it reliably, and if so with which steps or conditions?"
 - "Is this isolated or does it affect multiple paths/users/environments?"
+
+For analysis or experiment-review work, also clarify whether the data can support the intended conclusion:
+
+- "What evidence would distinguish a tuning issue from a structural limitation?"
+- "Is the experiment setup consistent enough to compare runs directly?"
+- "What alternative explanation would invalidate the current comparison?"
 
 ### Round 3: Constraints, Tradeoffs, and Edge Cases
 
@@ -143,6 +178,49 @@ Approach C: <name> (optional)
 ```
 
 Wait for the user to choose or approve your recommendation before proceeding.
+
+### Analysis And Tuning Tasks
+
+For analysis, diagnosis, tuning, experiment review, or "which parameter is best" requests, do not jump straight to parameter comparison. First compare 2-3 explanation paths when the premise is not yet secure.
+
+Before continuing a long analysis thread or recommending more tuning, summarize the current state using an uncertainty-aware conclusion shape. This keeps the problem model stable and prevents early guesses from turning into assumed facts.
+
+Required shape:
+
+```text
+Conclusion: <current best explanation or recommendation>
+Confidence: <high|medium|low>
+Evidence: <key observations that directly support it>
+Alternative explanations: <other plausible explanations still alive>
+Falsifier: <what next evidence would weaken or overturn this conclusion>
+```
+
+Use this shape when:
+
+- the user keeps providing new samples under the same framing
+- the conversation has already spent 3 or more turns on the same phenomenon
+- the user is asking for narrower tuning while the premise is still uncertain
+
+This is not just a reporting nicety. It is a guard against long-context drift, overconfidence, and adopting the user's preferred explanation too early.
+
+Example shapes:
+
+```text
+Approach A: Continue local tuning
+  - What you get: faster short-term iteration if the premise is already right
+  - Trade-offs: wastes time if the real problem is structural or the data is not comparable
+
+Approach B: Validate the premise first
+  - What you get: confidence that later tuning advice is solving the right problem
+  - Trade-offs: one extra validation step before optimization
+  - Recommended: yes, when the current evidence cannot rule out a stronger alternative explanation
+
+Approach C: Reframe the metric
+  - What you get: evaluation based on a signal that better matches the real control objective
+  - Trade-offs: may change the user's current test habit or reporting format
+```
+
+If the evidence suggests the user's metric or experiment cannot answer the stated question, say so directly and recommend a premise-validation or metric-change path before more tuning.
 
 ### Visual And Interaction Drift
 

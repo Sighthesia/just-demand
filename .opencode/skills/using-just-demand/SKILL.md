@@ -1,6 +1,6 @@
 ---
 name: using-just-demand
-description: "MANDATORY: Load this skill BEFORE any response. Do not respond without loading this skill first. This establishes how to find and use other skills."
+description: "Load this skill first for repo work so the correct just-demand routing rules are applied before other workflow skills."
 ---
 
 # Skill Priority
@@ -9,11 +9,7 @@ description: "MANDATORY: Load this skill BEFORE any response. Do not respond wit
 2. `socratic-clarification` - always loaded second for any request, bug report, correction, or mismatch, including follow-up turns that pivot from ordinary Q&A into concrete work.
 3. `just-demand-intake` and other workflow skills - loaded only after clarification has established the final expected effect and chosen direction.
 
-If you were dispatched as a subagent to execute a specific task, skip this skill. If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.
-
-IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
-
-This is not negotiable. This is not optional. You cannot rationalize your way out of this. 
+If you were dispatched as a subagent to execute a specific task, skip this skill. Otherwise, load it first for repo work and follow the routing below whenever a matching workflow skill applies.
 
 # Using Just Demand
 
@@ -50,6 +46,31 @@ When clarifying, prefer the `question` tool for grouped decisions, approvals, an
 
 Do not expose internal workflow mechanics to the user unless they are explicitly designing the workflow runtime.
 
+## Anti-Sycophancy Gate
+
+Do not adopt the user's framing just because it is specific, repeated, or confidently stated. Before continuing inside the user's preferred explanation, test whether that framing is actually the right problem model.
+
+- Check whether the named variable, parameter, or suspected cause is likely the dominant factor.
+- Check whether a structural limitation, invalid experiment design, missing reference signal, or process inconsistency is a stronger explanation.
+- Check whether the available evidence can actually distinguish "bad tuning" from "wrong premise".
+
+If the evidence is insufficient or points to a stronger alternative explanation, explicitly challenge the premise before giving more optimization advice. Do not keep narrowing inside a frame you no longer trust.
+
+## Long-Context Reset Gate
+
+After 3 or more turns on the same phenomenon, stop incremental answering and restate the problem model before continuing.
+
+Minimum reset output:
+
+```text
+Established: what the evidence already supports.
+Uncertain: what the evidence does not yet prove.
+Potentially wrong assumption: the premise that may be sending the conversation in the wrong direction.
+Next best move: whether to continue comparing options or change the frame.
+```
+
+Use this reset when the user keeps providing new samples, when the conversation is converging on finer detail without stronger evidence, or when a user-provided explanation is becoming the default without being re-tested.
+
 ## Operating Model
 
 - User owns goals, preferences, constraints, and final approval.
@@ -70,6 +91,7 @@ Do not expose internal workflow mechanics to the user unless they are explicitly
 - Business value over technical cleverness.
 - Evidence over stale memory when information may be outdated or uncertain.
 - Stability and maintainability over short-term speed.
+- Structural explanations over repeated local tuning when the data suggests the premise may be wrong.
 
 ## Output Style
 
