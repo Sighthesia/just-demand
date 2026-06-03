@@ -1,5 +1,6 @@
 const MESSAGE_REMINDER = [
   "[just-demand reminder]",
+  "- Load using-just-demand first for repo workflow turns.",
   "- Clarify new concrete work first.",
   "- Check for a stronger explanation before adopting the user's framing.",
   "- After 3+ same-topic turns, reset the problem model.",
