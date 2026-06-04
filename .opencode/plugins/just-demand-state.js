@@ -31,6 +31,16 @@ const PREMISE_PATTERNS = [
   /\b(seems? like|appears? to be)\b/i,
 ]
 
+const EXECUTION_NEAR_MISS_PATTERNS = [
+  /\b(still\s+want\s+to\s+confirm|want\s+to\s+confirm\s+.*\s+first|need\s+to\s+confirm\s+.*\s+first|hold\s+off\s+on|not\s+yet|before\s+i\s+(?:say|do)|before\s+we\s+(?:say|do))\b/i,
+  /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
+]
+
+const CROSS_SENTENCE_NEAR_MISS_PATTERNS = [
+  /\b(still\s+want\s+to\s+confirm|want\s+to\s+confirm\s+.*\s+first|need\s+to\s+confirm\s+.*\s+first|one\s+more\s+check|hold\s+off\s+on|not\s+yet|before\s+i\s+(?:say|do)|before\s+we\s+(?:say|do))\b/i,
+  /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
+]
+
 const normalizeWords = (text) => {
   const cleaned = String(text || "")
     .toLowerCase()
@@ -94,6 +104,8 @@ const updateTopicTurns = (sessionKey, text, reminderState) => {
 
 const chooseReminderType = (text, reminderState) => {
   if (reminderState.subagent_unavailable_pending) return "subagent_retry_or_skip"
+
+  if (CROSS_SENTENCE_NEAR_MISS_PATTERNS.some((pattern) => pattern.test(text))) return null
 
   const activeTask = reminderState.activeTask
   if (activeTask) {

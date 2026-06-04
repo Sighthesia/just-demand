@@ -506,6 +506,33 @@ test("state stays quiet for Chinese near-miss execution and closeout wording", a
   }
 })
 
+test("state stays quiet for cross-sentence execution and closeout near-miss wording", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "I can implement this inline in the main session. But I still want to confirm the scope first.",
+    "We should just finish this here in the main session. However, I want one more check before I say it is done.",
+    "This looks ready to ship. But I am not ready to close it out yet because I still need to confirm one detail.",
+    "It feels basically done. Still, I want to hold off on closing this out until the scope is confirmed.",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+
+    await plugin["chat.message"]({ sessionID: `cross-sentence-${index}` }, output)
+
+    assert.equal(output.parts[0].text, sample)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
+    assert.doesNotMatch(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
+    assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
+  }
+})
+
 test("state appends checkpoint-followup reminder when verification passed but checkpoint commit is missing", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)

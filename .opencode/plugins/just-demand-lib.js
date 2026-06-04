@@ -14,7 +14,13 @@ const COMPLETION_CLAIM_PATTERNS = [
 
 const NEGATED_COMPLETION_PATTERNS = [
   /\b(not yet|no(?:t)?\s+closing|not\s+closing\s+it\s+out|not\s+closing\s+out|not\s+done|not\s+finished|not\s+complete(?:d)?|not\s+ready\s+to\s+ship)\b/i,
+  /\b(not\s+ready\s+to\s+close(?:\s+it\s+out)?\s+yet|hold\s+off\s+on\s+closing(?:\s+it\s+out)?|not\s+closing(?:\s+it\s+out)?\s+yet|can't\s+close(?:\s+it\s+out)?\s+yet|won't\s+close(?:\s+it\s+out)?\s+yet)\b/i,
   /\b(暂不|先不|还不|还不能|不能|不打算|不准备)\s*(?:收尾|结束|关闭|close|close\s+out|ship|done|完成|结束)/i,
+]
+
+const NEGATED_EXECUTION_PATTERNS = [
+  /\b(still\s+want\s+to\s+confirm|want\s+to\s+confirm\s+.*\s+first|need\s+to\s+confirm\s+.*\s+first|hold\s+off\s+on|not\s+yet|before\s+i\s+(?:say|do)|before\s+we\s+(?:say|do))\b/i,
+  /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
 ]
 
 const EXECUTION_CANDIDATE_PATTERNS = [
@@ -91,6 +97,7 @@ export const taskLooksLikeLongContextExecutionCandidate = (task, text) => {
   const currentStep = String(task.current_step || "").toLowerCase()
   const status = String(task.status || "").toLowerCase()
   const body = String(text || "")
+  if (NEGATED_EXECUTION_PATTERNS.some((pattern) => pattern.test(body))) return false
   const hasTaskSignal = EXECUTION_CANDIDATE_PATTERNS.some((pattern) => pattern.test(body))
   const taskSignalsExecution = ["execut", "implement", "verify", "changes_requested"].some((fragment) => currentStep.includes(fragment) || status.includes(fragment))
 
