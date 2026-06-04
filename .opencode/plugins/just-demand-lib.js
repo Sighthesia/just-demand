@@ -12,6 +12,11 @@ const COMPLETION_CLAIM_PATTERNS = [
   /(?:已经)?(?:做完了?|完成了?)/,
 ]
 
+const NEGATED_COMPLETION_PATTERNS = [
+  /\b(not yet|no(?:t)?\s+closing|not\s+closing\s+it\s+out|not\s+closing\s+out|not\s+done|not\s+finished|not\s+complete(?:d)?|not\s+ready\s+to\s+ship)\b/i,
+  /\b(暂不|先不|还不|还不能|不能|不打算|不准备)\s*(?:收尾|结束|关闭|close|close\s+out|ship|done|完成|结束)/i,
+]
+
 const EXECUTION_CANDIDATE_PATTERNS = [
   /\b(i|we)\s+(am|'m|are|will|can|should|need to|need)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
   /\b(i|we)\s+(should|will|can|need to)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
@@ -75,6 +80,7 @@ export const hasAssignedWorkflowSubagents = (task) => {
 export const textLooksLikeCompletionClaim = (text) => {
   const value = String(text || "").trim()
   if (!value) return false
+  if (NEGATED_COMPLETION_PATTERNS.some((pattern) => pattern.test(value))) return false
   return COMPLETION_CLAIM_PATTERNS.some((pattern) => pattern.test(value))
 }
 

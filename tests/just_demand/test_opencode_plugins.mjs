@@ -486,7 +486,11 @@ test("state stays quiet for Chinese near-miss execution and closeout wording", a
   const plugin = await stateFactory({ directory: root })
   const samples = [
     "我先把思路整理清楚，再决定要不要改代码。",
+    "我可能会直接在主会话里做，但现在先不动，我还要先确认一下边界。",
+    "It looks like I could do this inline in the main session, but not yet — I want to confirm the scope first.",
     "这个看起来已经差不多了，我先再核对一遍边界。",
+    "看起来已经 ready 了，不过我现在还不能收尾，要先再核对一次。",
+    "This feels basically done, but I am not closing it out yet because one more check is still needed.",
     "我只是把结论再捋一遍，暂时不打算收尾。",
   ]
 
