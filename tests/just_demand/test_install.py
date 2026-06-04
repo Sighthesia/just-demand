@@ -199,7 +199,7 @@ class InstallCoreTests(unittest.TestCase):
             source = config_root / "source-package.json"
             target = config_root / "package.json"
             source.write_text('{"type":"module"}\n', encoding="utf-8")
-            target.write_text('{"dependencies":{"keep":"1.0.0"}}\n', encoding="utf-8")
+            target.write_text('not-json\n', encoding="utf-8")
             manifest = {"installed_files": {}, "version": "1.0"}
 
             copied, warning, entry = deploy_config_file(source, target, manifest, config_root)
@@ -207,8 +207,28 @@ class InstallCoreTests(unittest.TestCase):
             self.assertFalse(copied)
             self.assertIn("package.json", warning)
             self.assertIsNone(entry)
-            self.assertEqual(target.read_text(encoding="utf-8"), '{"dependencies":{"keep":"1.0.0"}}\n')
+            self.assertEqual(target.read_text(encoding="utf-8"), 'not-json\n')
             self.assertNotIn("package.json", manifest["installed_files"])
+
+    def test_deploy_config_file_merges_existing_unmanaged_package_json_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp)
+            source = config_root / "source-package.json"
+            target = config_root / "package.json"
+            source.write_text('{"type":"module"}\n', encoding="utf-8")
+            target.write_text('{"type":"commonjs","dependencies":{"keep":"1.0.0"}}\n', encoding="utf-8")
+            manifest = {"installed_files": {}, "version": "1.0"}
+
+            copied, warning, entry = deploy_config_file(source, target, manifest, config_root)
+
+            self.assertTrue(copied)
+            self.assertIsNone(warning)
+            self.assertIsNotNone(entry)
+            merged = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(merged["type"], "module")
+            self.assertEqual(merged["dependencies"], {"keep": "1.0.0"})
+            self.assertIn("package.json", manifest["installed_files"])
+            self.assertTrue(manifest["installed_files"]["package.json"]["preserve_on_uninstall"])
     
     def test_deployed_files_constant(self):
         self.assertIn("plugins", DEPLOYED_FILES)
@@ -382,31 +402,35 @@ class InstallIntegrationTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["config_root"], str(config_root))
 
-    def test_install_preserves_existing_unmanaged_package_json(self):
+    def test_install_merges_existing_unmanaged_package_json_type(self):
         with tempfile.TemporaryDirectory() as tmp:
             config_root = Path(tmp)
             package_json = config_root / "package.json"
-            package_json.write_text('{"dependencies":{"keep":"1.0.0"}}\n', encoding="utf-8")
+            package_json.write_text('{"type":"commonjs","dependencies":{"keep":"1.0.0"}}\n', encoding="utf-8")
 
             result = install_opencode_global(config_root)
             manifest = load_manifest(config_root)
 
             self.assertEqual(result["status"], "success")
-            self.assertEqual(package_json.read_text(encoding="utf-8"), '{"dependencies":{"keep":"1.0.0"}}\n')
-            self.assertNotIn("package.json", manifest["installed_files"])
-            self.assertTrue(result["results"]["warnings"])
+            merged = json.loads(package_json.read_text(encoding="utf-8"))
+            self.assertEqual(merged["type"], "module")
+            self.assertEqual(merged["dependencies"], {"keep": "1.0.0"})
+            self.assertIn("package.json", manifest["installed_files"])
+            self.assertFalse(result["results"]["warnings"])
 
     def test_uninstall_preserves_existing_unmanaged_package_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             config_root = Path(tmp)
             package_json = config_root / "package.json"
-            package_json.write_text('{"dependencies":{"keep":"1.0.0"}}\n', encoding="utf-8")
+            package_json.write_text('{"type":"commonjs","dependencies":{"keep":"1.0.0"}}\n', encoding="utf-8")
 
             install_opencode_global(config_root)
             uninstall_opencode_global(config_root)
 
             self.assertTrue(package_json.exists())
-            self.assertEqual(package_json.read_text(encoding="utf-8"), '{"dependencies":{"keep":"1.0.0"}}\n')
+            merged = json.loads(package_json.read_text(encoding="utf-8"))
+            self.assertEqual(merged["type"], "module")
+            self.assertEqual(merged["dependencies"], {"keep": "1.0.0"})
 
 
 class InstallCLITests(unittest.TestCase):

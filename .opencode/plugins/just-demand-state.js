@@ -144,6 +144,8 @@ export default async ({ directory } = {}) => {
   return {
     "chat.message": async (input, output) => {
       // Keep main-session injection lightweight: reminder only, no task state dump.
+      // This layer is best-effort: some OpenCode versions do not expose usable text
+      // parts to chat.message, so Layer 1 system prompt injection remains the primary path.
       if (!output || !Array.isArray(output.parts)) return
       const textPart = output.parts.find((part) => part?.type === "text" && typeof part.text === "string")
       if (!textPart) return

@@ -305,43 +305,45 @@ test("session-start does not inject workflow bootstrap into system prompt", asyn
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
-  const output = { text: "You are a helpful assistant." }
+  const output = { system: ["You are a helpful assistant."] }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.match(output.text, /^You are a helpful assistant\./)
-  assert.match(output.text, /<JUST_DEMAND_REMINDER>/)
-  assert.match(output.text, /Load using-just-demand first/i)
-  assert.match(output.text, /socratic-clarification second/i)
-  assert.match(output.text, /Use just-demand subagents proactively/i)
-  assert.doesNotMatch(output.text, /<workflow-state>/i)
+  assert.equal(output.system[0], "You are a helpful assistant.")
+  assert.equal(output.system.length, 2)
+  assert.match(output.system[1], /<JUST_DEMAND_REMINDER>/)
+  assert.match(output.system[1], /Load using-just-demand first/i)
+  assert.match(output.system[1], /socratic-clarification second/i)
+  assert.match(output.system[1], /Use just-demand subagents proactively/i)
+  assert.doesNotMatch(output.system[1], /<workflow-state>/i)
 })
 
 test("session-start leaves existing workflow marker text untouched", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
-  const output = { text: "Existing <JUST_DEMAND_WORKFLOW>content</JUST_DEMAND_WORKFLOW>" }
+  const output = { system: ["Existing <JUST_DEMAND_WORKFLOW>content</JUST_DEMAND_WORKFLOW>"] }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.match(output.text, /<JUST_DEMAND_WORKFLOW>content<\/JUST_DEMAND_WORKFLOW>/)
-  assert.match(output.text, /<JUST_DEMAND_REMINDER>/)
+  assert.equal(output.system.length, 2)
+  assert.match(output.system[0], /<JUST_DEMAND_WORKFLOW>content<\/JUST_DEMAND_WORKFLOW>/)
+  assert.match(output.system[1], /<JUST_DEMAND_REMINDER>/)
 })
 
 test("session-start preserves existing system prompt content", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
-  const output = { text: "Original system prompt." }
+  const output = { system: ["Original system prompt."] }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.match(output.text, /^Original system prompt\./)
-  assert.match(output.text, /retry now or skip one turn/i)
+  assert.equal(output.system[0], "Original system prompt.")
+  assert.match(output.system[1], /retry now or skip one turn/i)
 })
 
 test("session-start avoids duplicate reminder injection", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const plugin = await sessionStartFactory({ directory: root })
-  const output = { text: "Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>" }
+  const output = { system: ["Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>"] }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.equal(output.text, "Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>")
+  assert.deepEqual(output.system, ["Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>"])
 })
 
 // ---------------------------------------------------------------------------

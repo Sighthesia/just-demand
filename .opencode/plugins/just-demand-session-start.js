@@ -10,9 +10,11 @@ const SESSION_REMINDER = [
 export default async () => {
   return {
     "experimental.chat.system.transform": async (_input, output) => {
-      if (!output || typeof output.text !== "string") return
-      if (output.text.includes("<JUST_DEMAND_REMINDER>")) return
-      output.text = `${output.text}\n\n${SESSION_REMINDER}`
+      if (!output || !Array.isArray(output.system)) return
+      if (output.system.some((segment) => typeof segment === "string" && segment.includes("<JUST_DEMAND_REMINDER>"))) {
+        return
+      }
+      output.system.push(SESSION_REMINDER)
     },
   }
 }

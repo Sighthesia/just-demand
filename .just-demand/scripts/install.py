@@ -157,6 +157,35 @@ def deploy_config_file(source: Path, target: Path, manifest: dict[str, Any], con
     relative_target = str(target.relative_to(config_root))
     managed_files = manifest.setdefault("installed_files", {})
 
+    if target.name == "package.json" and target.exists() and relative_target not in managed_files:
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+            desired = json.loads(source.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return False, f"Skipped existing unmanaged config file: {relative_target}", None
+
+        merged = dict(existing)
+        changed = False
+        for key, value in desired.items():
+            if merged.get(key) != value:
+                merged[key] = value
+                changed = True
+
+        if not changed:
+            return False, None, None
+
+        before_text = target.read_text(encoding="utf-8")
+        after_text = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
+        target.write_text(after_text, encoding="utf-8")
+        existing_entry = managed_files.get(relative_target, {})
+        managed_files[relative_target] = {
+            "source": str(source),
+            "checksum": str(source.stat().st_mtime),
+            "preserve_on_uninstall": existing_entry.get("preserve_on_uninstall", True),
+        }
+        additions, deletions = line_numstat(before_text, after_text)
+        return True, None, make_numstat(relative_target, additions, deletions)
+
     if target.exists() and relative_target not in managed_files:
         return False, f"Skipped existing unmanaged config file: {relative_target}", None
 
@@ -288,6 +317,8 @@ def uninstall_opencode_global(config_root: Optional[Path] = None) -> dict[str, A
     errors = []
     
     for file_path, file_info in manifest.get("installed_files", {}).items():
+        if file_info.get("preserve_on_uninstall"):
+            continue
         full_path = config_root / file_path
         try:
             if full_path.exists():
