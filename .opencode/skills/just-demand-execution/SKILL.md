@@ -15,6 +15,8 @@ Execute formal work items through focused subagents and script-owned state.
 - Plugins and agents may read state, but lifecycle transitions must go through scripts.
 - Do not dispatch implementation before the user has confirmed the direction and the task is ready.
 - Long-context implementation, research, and verification must run through subagents. The main session should coordinate and summarize, not absorb the full execution context inline.
+- When a suitable `just-demand-*` subagent exists for long-context work, prefer dispatch over continuing inline in the main session.
+- If a suitable subagent is unavailable, ask the user to retry now or skip one turn rather than silently falling back.
 - Implementation or verification must not start unless the current formal task already has the required task context files. Do not treat missing task context as a recoverable inline shortcut.
 - Before dispatching a subagent or starting implementation, mark the task status with `mark`.
 - Before ending a turn with unfinished work, mark the task `paused` with current progress and known impact.
@@ -50,6 +52,21 @@ Keep this summary short and structured. Prefer names as they appear in code. If 
 - `just-demand-implement`: scoped implementation; no commits.
 - `just-demand-check`: verify requirements and fix only low-risk local issues within scope.
 - `just-demand-docs`: update workflow docs and durable notes; no business-code changes.
+
+## Subagent Unavailable Handling
+
+If a suitable workflow subagent is expected but unavailable, dispatch fails, or the tool appears temporarily unusable, do not silently fall back and do not stop trying forever after one failure.
+
+Immediate next step:
+
+1. Tell the user the subagent path is currently unavailable.
+2. Ask the user to choose one of these options:
+   - retry now
+   - skip one turn
+3. If the user chooses retry, attempt the subagent path again on the next turn.
+4. If the user chooses skip one turn, continue locally for that turn only if it is safe and scoped.
+
+Use the `question` tool when feasible so the user can answer with one click. Treat the failure as transient unless there is strong evidence the subagent path is structurally unavailable.
 
 ## Task Marking Policy
 
@@ -91,6 +108,8 @@ This is a fallback for context injection failures.
 ## Progressive Clarification Routing
 
 Before execution, if the active task still contains unresolved uncertainty about the user's intended effect, observed phenomenon, boundaries, or tradeoffs, load `socratic-clarification` and route back to clarification. Do not dispatch implementation while the final expected effect and final implementation plan are not explicit.
+
+If the work is long-context and a subagent should be used, but no supported subagent is available right now, ask the user to retry now or skip one turn instead of silently taking over the long-context work inline.
 
 ## Clarification Gate Before Execution
 

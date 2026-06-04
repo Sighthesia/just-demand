@@ -229,6 +229,7 @@ class InstallCoreTests(unittest.TestCase):
         
         self.assertIn("using-just-demand", DEPLOYED_FILES["skills"])
         self.assertIn("socratic-clarification", DEPLOYED_FILES["skills"])
+        self.assertLess(DEPLOYED_FILES["skills"].index("using-just-demand"), DEPLOYED_FILES["skills"].index("socratic-clarification"))
         self.assertIn("just-demand-execution", DEPLOYED_FILES["skills"])
         self.assertIn("just-demand-intake", DEPLOYED_FILES["skills"])
         self.assertIn("just-demand-memory", DEPLOYED_FILES["skills"])
@@ -264,6 +265,35 @@ class InstallIntegrationTests(unittest.TestCase):
             for skill in DEPLOYED_FILES["skills"]:
                 with self.subTest(skill=skill):
                     self.assertTrue((config_root / "skills" / skill / "SKILL.md").exists())
+
+    def test_install_opencode_global_deploys_socratic_clarification_before_intake(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp)
+            install_opencode_global(config_root)
+
+            deployed_skills = DEPLOYED_FILES["skills"]
+            self.assertLess(deployed_skills.index("using-just-demand"), deployed_skills.index("socratic-clarification"))
+            self.assertLess(deployed_skills.index("socratic-clarification"), deployed_skills.index("just-demand-intake"))
+            self.assertTrue((config_root / "skills" / "socratic-clarification" / "SKILL.md").exists())
+
+    def test_install_opencode_global_deploys_skill_guidance_for_routing_reset_and_subagent_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp)
+            install_opencode_global(config_root)
+
+            using_skill = (config_root / "skills" / "using-just-demand" / "SKILL.md").read_text(encoding="utf-8")
+            socratic_skill = (config_root / "skills" / "socratic-clarification" / "SKILL.md").read_text(encoding="utf-8")
+            execution_skill = (config_root / "skills" / "just-demand-execution" / "SKILL.md").read_text(encoding="utf-8")
+            intake_skill = (config_root / "skills" / "just-demand-intake" / "SKILL.md").read_text(encoding="utf-8")
+
+            self.assertIn("`socratic-clarification` - always loaded second", using_skill)
+            self.assertIn("follow-up turns that pivot from ordinary Q&A into concrete work", using_skill)
+            self.assertIn("reset the problem model", socratic_skill)
+            self.assertIn("retry now", using_skill)
+            self.assertIn("skip one turn", using_skill)
+            self.assertIn("retry now or skip one turn", execution_skill)
+            self.assertIn("socratic-clarification", intake_skill)
+            self.assertIn("Do not outrank `socratic-clarification`", intake_skill)
 
     def test_install_opencode_global_deploys_expected_agent_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:

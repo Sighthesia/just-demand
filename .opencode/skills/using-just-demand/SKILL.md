@@ -79,7 +79,19 @@ Use this reset when the user keeps providing new samples, when the conversation 
 - Scripts are the write path for `.just-demand/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
 - Long-context-consumption work belongs to subagents. The main agent should not perform broad code reading, large multi-file edits, or extended verification inline when a `just-demand-*` subagent can do it from a formal task package.
+- Prefer proactive subagent dispatch for long-context execution work. Do not stay inline in the main session just because one direct attempt seems possible.
 - Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
+
+## Subagent Availability Rule
+
+If a suitable `just-demand-*` subagent should be used but is unavailable, fails to dispatch, or appears temporarily unusable, do not silently abandon the subagent path and continue as if nothing happened.
+
+Instead, immediately ask the user to choose:
+
+- retry now
+- skip one turn and continue in the main session
+
+Treat one failed subagent attempt as a transient exception, not as permission to stop using subagents for the rest of the conversation.
 
 ### Role Model
 

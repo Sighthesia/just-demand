@@ -1,6 +1,16 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+const REMINDER_STATE = new Map()
+
+const defaultReminderState = () => ({
+  same_topic_turns: 0,
+  last_reminder_type: null,
+  subagent_unavailable_pending: false,
+})
+
+const reminderStateKey = (directory, sessionID) => `${workflowRoot(directory)}::${sessionID || "main"}`
+
 export const workflowRoot = (directory) => join(directory, ".just-demand")
 
 export const readJson = (path) => {
@@ -12,6 +22,33 @@ export const readJson = (path) => {
 }
 
 export const readTextIfExists = (path) => existsSync(path) ? readFileSync(path, "utf8") : ""
+
+export const getReminderState = (directory, sessionID) => {
+  const key = reminderStateKey(directory, sessionID)
+  if (!REMINDER_STATE.has(key)) {
+    REMINDER_STATE.set(key, defaultReminderState())
+  }
+  return REMINDER_STATE.get(key)
+}
+
+export const markSubagentUnavailablePending = (directory, sessionID) => {
+  const state = getReminderState(directory, sessionID)
+  state.subagent_unavailable_pending = true
+  state.last_reminder_type = null
+  return state
+}
+
+export const clearSubagentUnavailablePending = (directory, sessionID) => {
+  const state = getReminderState(directory, sessionID)
+  state.subagent_unavailable_pending = false
+  return state
+}
+
+export const updateReminderState = (directory, sessionID, updater) => {
+  const state = getReminderState(directory, sessionID)
+  updater(state)
+  return state
+}
 
 const renderClarificationContext = (task) => {
   const clarification = task?.clarification || {}

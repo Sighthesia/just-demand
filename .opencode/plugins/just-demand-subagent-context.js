@@ -1,5 +1,11 @@
 import { existsSync } from "node:fs"
-import { getActiveTask, getMissingRequiredContextFiles, readTaskContext, workflowRoot } from "./just-demand-lib.js"
+import {
+  getActiveTask,
+  getMissingRequiredContextFiles,
+  markSubagentUnavailablePending,
+  readTaskContext,
+  workflowRoot,
+} from "./just-demand-lib.js"
 
 const SUPPORTED = new Set(["just-demand-research", "just-demand-implement", "just-demand-check", "just-demand-docs"])
 const WRITABLE_SUBAGENTS = new Set(["just-demand-implement", "just-demand-check", "just-demand-docs"])
@@ -25,6 +31,7 @@ export default async ({ directory }) => {
       if (!taskId) return
       const missing = getMissingRequiredContextFiles(directory, taskId, args.subagent_type)
       if (missing.length > 0) {
+        markSubagentUnavailablePending(directory, input?.sessionID || "main")
         if (WRITABLE_SUBAGENTS.has(args.subagent_type)) {
           throw new Error(
             `Blocked ${args.subagent_type}: missing required task context files for active task ${taskId}: ${missing.join(", ")}`,

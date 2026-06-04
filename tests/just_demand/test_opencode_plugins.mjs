@@ -310,7 +310,8 @@ test("session-start does not inject workflow bootstrap into system prompt", asyn
   assert.match(output.text, /^You are a helpful assistant\./)
   assert.match(output.text, /<JUST_DEMAND_REMINDER>/)
   assert.match(output.text, /Load using-just-demand first/i)
-  assert.match(output.text, /Clarify new concrete work first/i)
+  assert.match(output.text, /socratic-clarification second/i)
+  assert.match(output.text, /Use just-demand subagents proactively/i)
   assert.doesNotMatch(output.text, /<workflow-state>/i)
 })
 
@@ -331,7 +332,7 @@ test("session-start preserves existing system prompt content", async () => {
   const output = { text: "Original system prompt." }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
   assert.match(output.text, /^Original system prompt\./)
-  assert.match(output.text, /stronger explanation/i)
+  assert.match(output.text, /retry now or skip one turn/i)
 })
 
 test("session-start avoids duplicate reminder injection", async () => {
@@ -344,24 +345,26 @@ test("session-start avoids duplicate reminder injection", async () => {
 })
 
 // ---------------------------------------------------------------------------
-// state: main-session does not inject workflow state
+// state: per-turn reminders stay lightweight and narrow
 // ---------------------------------------------------------------------------
-test("state does not inject workflow state into main-session messages", async () => {
+test("state appends clarification reminder for concrete request turns", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
   const plugin = await stateFactory({ directory: root })
-  const output = { parts: [{ type: "text", text: "Hello" }] }
+  const output = { parts: [{ type: "text", text: "Please fix the bug in the API." }] }
   await plugin["chat.message"]({}, output)
-  assert.match(output.parts[0].text, /^Hello/)
+  assert.match(output.parts[0].text, /^Please fix the bug in the API\./)
   assert.match(output.parts[0].text, /Load using-just-demand first/i)
+  assert.match(output.parts[0].text, /socratic-clarification second/i)
+  assert.match(output.parts[0].text, /Use just-demand subagents proactively/i)
   assert.match(output.parts[0].text, /\[just-demand reminder\]/)
   assert.doesNotMatch(output.parts[0].text, /task-a/)
 })
 
-test("state does not inject when no active task", async () => {
+test("state stays quiet for neutral turns", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
@@ -369,30 +372,58 @@ test("state does not inject when no active task", async () => {
   const output = { parts: [{ type: "text", text: "Hello" }] }
   await plugin["chat.message"]({}, output)
   assert.match(output.parts[0].text, /^Hello/)
-  assert.match(output.parts[0].text, /Clarify new concrete work first/i)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
 })
 
-test("state does not inject when active task is done", async () => {
+test("state resets after three same-topic turns", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "done" }))
   const plugin = await stateFactory({ directory: root })
-  const output = { parts: [{ type: "text", text: "Hello" }] }
-  await plugin["chat.message"]({}, output)
-  assert.match(output.parts[0].text, /^Hello/)
-  assert.match(output.parts[0].text, /reset the problem model/i)
+  const first = { parts: [{ type: "text", text: "Same topic alpha beta gamma" }] }
+  const second = { parts: [{ type: "text", text: "Same topic alpha beta gamma" }] }
+  const third = { parts: [{ type: "text", text: "Same topic alpha beta gamma" }] }
+  const fourth = { parts: [{ type: "text", text: "Same topic alpha beta gamma" }] }
+
+  await plugin["chat.message"]({ sessionID: "same-topic" }, first)
+  await plugin["chat.message"]({ sessionID: "same-topic" }, second)
+  await plugin["chat.message"]({ sessionID: "same-topic" }, third)
+  await plugin["chat.message"]({ sessionID: "same-topic" }, fourth)
+
+  assert.doesNotMatch(first.parts[0].text, /\[just-demand reminder\]/)
+  assert.doesNotMatch(second.parts[0].text, /\[just-demand reminder\]/)
+  assert.match(third.parts[0].text, /\[just-demand reminder\]/)
+  assert.match(third.parts[0].text, /Reset the problem model/i)
+  assert.equal(fourth.parts[0].text, "Same topic alpha beta gamma")
 })
 
-test("state avoids duplicate reminder injection", async () => {
+test("state asks retry or skip after subagent becomes unavailable", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
-  const plugin = await stateFactory({ directory: root })
-  const text = "Hello\n\n[just-demand reminder]\n- already there"
-  const output = { parts: [{ type: "text", text }] }
-  await plugin["chat.message"]({}, output)
-  assert.equal(output.parts[0].text, text)
+  const subagentPlugin = await subagentContextFactory({ directory: root })
+  const statePlugin = await stateFactory({ directory: root })
+
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
+
+  const toolInput = { tool: "Task" }
+  const toolOutput = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
+  await assert.rejects(
+    subagentPlugin["tool.execute.before"](toolInput, toolOutput),
+    /missing required task context files.*implement\.md/i,
+  )
+
+  const output = { parts: [{ type: "text", text: "Continue with the main session." }] }
+  await statePlugin["chat.message"]({}, output)
+  assert.match(output.parts[0].text, /retry now, or skip one turn/i)
+  assert.match(output.parts[0].text, /subagent was unavailable/i)
+
+  const second = { parts: [{ type: "text", text: "Continue with the main session." }] }
+  await statePlugin["chat.message"]({}, second)
+  assert.equal(second.parts[0].text, "Continue with the main session.")
 })
 
 // ---------------------------------------------------------------------------
