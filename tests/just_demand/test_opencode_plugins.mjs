@@ -378,6 +378,32 @@ test("state stays quiet for neutral turns", async () => {
   assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
 })
 
+test("state stays quiet for ordinary analysis and status-summary language", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "Quick status: I compared the tradeoffs and the analysis still points to option A.",
+    "Summary: I am just documenting the reasoning and next steps; no action is needed yet.",
+    "I am reviewing the current state and explaining the tradeoffs, not asking for any action yet.",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+
+    await plugin["chat.message"]({ sessionID: `neutral-analysis-${index}` }, output)
+
+    assert.equal(output.parts[0].text, sample)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
+    assert.doesNotMatch(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
+    assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
+  }
+})
+
 test("state appends premise-check reminder for narrow frame-check turns and deduplicates it", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -408,6 +434,8 @@ test("state appends execution-needed reminder when main-session work looks like 
   const samples = [
     "I will implement the feature and debug the bug inline.",
     "I'll just finish this in the main session.",
+    "先说明一下：I will implement the fix and debug the bug inline, 然后我再整理结果。",
+    "中文说明一下，we should build this in the main session and keep the rest for later.",
   ]
 
   for (const [index, sample] of samples.entries()) {
@@ -431,6 +459,8 @@ test("state appends verification-closeout reminder and names complete-verificati
   const samples = [
     "This is done and ready to ship.",
     "I think this is in a good place, so we can close this out.",
+    "这边已经 done 了，我觉得 we can close this out now.",
+    "中文说明：it is ready to ship, so please run the closeout step before concluding.",
   ]
 
   for (const [index, sample] of samples.entries()) {
