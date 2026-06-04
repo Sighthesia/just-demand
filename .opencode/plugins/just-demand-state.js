@@ -11,6 +11,7 @@ import {
 } from "./just-demand-lib.js"
 
 const REMINDER_HEADER = "[just-demand reminder]"
+const CLOSEOUT_BLOCKED_HEADER = "[just-demand closeout blocked]"
 
 const STOPWORDS = new Set([
   "about", "after", "again", "also", "am", "are", "because", "before", "can", "could", "did",
@@ -179,6 +180,29 @@ const appendReminder = (text, reminderState, reminderType) => {
   return `${text}\n\n${[REMINDER_HEADER, ...buildReminderLines(reminderType)].join("\n")}`
 }
 
+const blockVerificationCloseout = (text, reminderState) => {
+  if (typeof text !== "string") return text
+  if (text.includes(CLOSEOUT_BLOCKED_HEADER)) return text
+
+  updateReminderState(reminderState.directory, reminderState.sessionID, (state) => {
+    state.last_reminder_type = "verification_closeout"
+  })
+
+  const trimmed = text.trim()
+  const quotedText = trimmed
+    ? `> ${trimmed.replace(/\n/g, "\n> ")}`
+    : "> (empty response)"
+
+  return [
+    CLOSEOUT_BLOCKED_HEADER,
+    "- This reads like a completion claim, but the task has not passed verification closeout yet.",
+    "- Run `python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
+    "",
+    "Original response:",
+    quotedText,
+  ].join("\n")
+}
+
 export default async ({ directory } = {}) => {
   return {
     "chat.message": async (input, output) => {
@@ -203,7 +227,11 @@ export default async ({ directory } = {}) => {
       updateTopicTurns(`${workflowDirectory}::${sessionID}`, currentText, reminderState)
 
       const reminderType = chooseReminderType(currentText, reminderState)
-      textPart.text = appendReminder(textPart.text, reminderState, reminderType)
+      if (reminderType === "verification_closeout") {
+        textPart.text = blockVerificationCloseout(textPart.text, reminderState)
+      } else {
+        textPart.text = appendReminder(textPart.text, reminderState, reminderType)
+      }
 
       if (reminderType !== "subagent_retry_or_skip") {
         clearSubagentUnavailablePending(workflowDirectory, sessionID)

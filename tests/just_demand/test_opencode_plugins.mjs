@@ -449,7 +449,7 @@ test("state appends execution-needed reminder when main-session work looks like 
   }
 })
 
-test("state appends verification-closeout reminder and names complete-verification", async () => {
+test("state blocks obvious verification closeout claims until complete-verification", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -470,9 +470,39 @@ test("state appends verification-closeout reminder and names complete-verificati
 
     await plugin["chat.message"]({ sessionID: `verification-${index}` }, output)
 
-    assert.match(output.parts[0].text, /completion claim/i)
+    assert.match(output.parts[0].text, /closeout blocked/i)
+    assert.match(output.parts[0].text, /This reads like a completion claim/i)
     assert.match(output.parts[0].text, /complete-verification/i)
-    assert.match(output.parts[0].text, /before concluding the task/i)
+    assert.match(output.parts[0].text, /Original response:/i)
+    assert.match(output.parts[0].text, /> /)
+    assert.notEqual(output.parts[0].text, sample)
+  }
+})
+
+test("state leaves analysis and near-miss closeout replies unchanged", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "I am reviewing the tradeoffs and the analysis still points to option A.",
+    "This looks ready, but I still want to confirm the scope first.",
+    "I think it is in a good place, but not yet because one more check is needed.",
+    "We should wrap this up, but not yet because we still need to confirm the open question.",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+
+    await plugin["chat.message"]({ sessionID: `closeout-safe-${index}` }, output)
+
+    assert.equal(output.parts[0].text, sample)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand closeout blocked\]/i)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
+    assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
   }
 })
 
