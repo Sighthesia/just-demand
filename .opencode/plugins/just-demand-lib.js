@@ -3,6 +3,19 @@ import { join } from "node:path"
 
 const REMINDER_STATE = new Map()
 
+const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
+const COMPLETION_CLAIM_PATTERNS = [
+  /\b(done|finished|complete(?:d)?|implemented|shipped|resolved|wrapped up)\b/i,
+  /\b(all set|good to go|ready to close|ready to ship|that'?s it|we'?re done)\b/i,
+  /\b(should be good|looks good|nothing else to do|no further changes)\b/i,
+]
+
+const EXECUTION_CANDIDATE_PATTERNS = [
+  /\b(i|we)\s+(am|'m|are|will|can|should|need to|need)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  /\b(i|we)\s+(should|will|can|need to)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  /\b(i|we)\s+(implemented|built|added|removed|refactored|updated|fixed|debugged|investigated|traced|analy[sz]ed|designed|reworked|extended|patched|changed)\b/i,
+]
+
 const defaultReminderState = () => ({
   same_topic_turns: 0,
   last_reminder_type: null,
@@ -48,6 +61,41 @@ export const updateReminderState = (directory, sessionID, updater) => {
   const state = getReminderState(directory, sessionID)
   updater(state)
   return state
+}
+
+export const hasAssignedWorkflowSubagents = (task) => {
+  const subagents = task?.assigned_subagents
+  return Array.isArray(subagents) && subagents.some((subagent) => typeof subagent === "string" && subagent.startsWith(WORKFLOW_SUBAGENT_PREFIX))
+}
+
+export const textLooksLikeCompletionClaim = (text) => {
+  const value = String(text || "").trim()
+  if (!value) return false
+  return COMPLETION_CLAIM_PATTERNS.some((pattern) => pattern.test(value))
+}
+
+export const taskLooksLikeLongContextExecutionCandidate = (task, text) => {
+  if (!task || task.status === "done") return false
+  if (hasAssignedWorkflowSubagents(task)) return false
+
+  const currentStep = String(task.current_step || "").toLowerCase()
+  const status = String(task.status || "").toLowerCase()
+  const body = String(text || "")
+  const hasTaskSignal = EXECUTION_CANDIDATE_PATTERNS.some((pattern) => pattern.test(body))
+  const taskSignalsExecution = ["execut", "implement", "verify", "changes_requested"].some((fragment) => currentStep.includes(fragment) || status.includes(fragment))
+
+  return hasTaskSignal && taskSignalsExecution
+}
+
+export const taskNeedsVerificationCloseout = (task) => {
+  if (!task) return false
+  return String(task.verification_status || "").toLowerCase() !== "passed"
+}
+
+export const taskNeedsCheckpointFollowUp = (task) => {
+  if (!task) return false
+  if (String(task.verification_status || "").toLowerCase() !== "passed") return false
+  return !(task.checkpoint_commit && task.checkpoint_commit.created)
 }
 
 const renderClarificationContext = (task) => {

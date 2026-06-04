@@ -8,6 +8,7 @@ import {
   getActiveTask,
   getMissingRequiredContextFiles,
   listUnfinishedTasks,
+  markSubagentUnavailablePending,
   readJson,
   readTaskContext,
 } from "../../.opencode/plugins/just-demand-lib.js"
@@ -394,6 +395,91 @@ test("state appends premise-check reminder for narrow frame-check turns and dedu
   assert.match(first.parts[0].text, /Check whether the current frame is the right problem model/i)
   assert.match(first.parts[0].text, /Do not keep tuning a weak premise/i)
   assert.equal(second.parts[0].text, "What if the premise is off?")
+})
+
+test("state appends execution-needed reminder when main-session work looks like long-context execution", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "I will implement the feature and debug the bug inline." }] }
+
+  await plugin["chat.message"]({}, output)
+
+  assert.match(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
+  assert.match(output.parts[0].text, /Dispatch the supported subagent path/i)
+})
+
+test("state appends verification-closeout reminder and names complete-verification", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "This is done and ready to ship." }] }
+
+  await plugin["chat.message"]({}, output)
+
+  assert.match(output.parts[0].text, /completion claim/i)
+  assert.match(output.parts[0].text, /complete-verification/i)
+  assert.match(output.parts[0].text, /before concluding the task/i)
+})
+
+test("state appends checkpoint-followup reminder when verification passed but checkpoint commit is missing", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "done", current_step: "verify", verification_status: "passed", checkpoint_commit: { created: false }, assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "The work is finished." }] }
+
+  await plugin["chat.message"]({}, output)
+
+  assert.match(output.parts[0].text, /Verification is already passed/i)
+  assert.match(output.parts[0].text, /checkpoint follow-up/i)
+})
+
+test("state prefers retry or skip over verification closeout when subagent was unavailable", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  markSubagentUnavailablePending(root, "priority-test")
+
+  const output = { parts: [{ type: "text", text: "This is done." }] }
+
+  await plugin["chat.message"]({ sessionID: "priority-test" }, output)
+
+  assert.match(output.parts[0].text, /retry now, or skip one turn/i)
+  assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
+})
+
+test("state does not inject the same reminder type on consecutive turns", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const first = { parts: [{ type: "text", text: "We should implement this now." }] }
+  const second = { parts: [{ type: "text", text: "We should implement this now." }] }
+
+  await plugin["chat.message"]({ sessionID: "dedupe-test" }, first)
+  await plugin["chat.message"]({ sessionID: "dedupe-test" }, second)
+
+  assert.match(first.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
+  assert.equal(second.parts[0].text, "We should implement this now.")
 })
 
 test("state resets after three same-topic turns", async () => {

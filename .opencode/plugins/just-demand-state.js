@@ -3,6 +3,10 @@ import {
   clearSubagentUnavailablePending,
   getReminderState,
   readTaskJson,
+  taskLooksLikeLongContextExecutionCandidate,
+  taskNeedsCheckpointFollowUp,
+  taskNeedsVerificationCloseout,
+  textLooksLikeCompletionClaim,
   updateReminderState,
 } from "./just-demand-lib.js"
 
@@ -90,6 +94,14 @@ const updateTopicTurns = (sessionKey, text, reminderState) => {
 
 const chooseReminderType = (text, reminderState) => {
   if (reminderState.subagent_unavailable_pending) return "subagent_retry_or_skip"
+
+  const activeTask = reminderState.activeTask
+  if (activeTask) {
+    if (taskNeedsCheckpointFollowUp(activeTask)) return "checkpoint_followup"
+    if (textLooksLikeCompletionClaim(text) && taskNeedsVerificationCloseout(activeTask)) return "verification_closeout"
+    if (taskLooksLikeLongContextExecutionCandidate(activeTask, text)) return "execution_needed"
+  }
+
   if (reminderState.same_topic_turns >= 3) return "reset"
   if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text))) return "clarify"
   if (PREMISE_PATTERNS.some((pattern) => pattern.test(text))) return "premise_check"
@@ -118,6 +130,21 @@ const buildReminderLines = (type) => {
       return [
         "- Check whether the current frame is the right problem model before narrowing further.",
         "- Do not keep tuning a weak premise without re-testing it.",
+      ]
+    case "execution_needed":
+      return [
+        "- This looks like execution work that should run through a just-demand-* workflow subagent.",
+        "- Dispatch the supported subagent path instead of continuing the long-context work inline.",
+      ]
+    case "verification_closeout":
+      return [
+        "- This sounds like a completion claim, but the task has not been closed with complete-verification yet.",
+        "- Run `python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
+      ]
+    case "checkpoint_followup":
+      return [
+        "- Verification is already passed, but the successful checkpoint follow-up is still missing.",
+        "- Confirm the checkpoint commit path completed successfully before treating the task as fully closed.",
       ]
     default:
       return []
@@ -153,11 +180,12 @@ export default async ({ directory } = {}) => {
       const sessionID = typeof input?.sessionID === "string" && input.sessionID ? input.sessionID : "main"
       const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       const activeTaskId = getActiveTask(workflowDirectory)
-      const activeTask = activeTaskId ? readTaskJson(workflowDirectory, activeTaskId) : null
-      if (!activeTaskId || activeTask?.status === "done") return
+      const activeTask = activeTaskId ? (readTaskJson(workflowDirectory, activeTaskId) || { id: activeTaskId }) : null
+      if (!activeTaskId) return
       const reminderState = getReminderState(workflowDirectory, sessionID)
       reminderState.directory = workflowDirectory
       reminderState.sessionID = sessionID
+      reminderState.activeTask = activeTask
 
       const currentText = extractCurrentText(output)
       updateTopicTurns(`${workflowDirectory}::${sessionID}`, currentText, reminderState)
