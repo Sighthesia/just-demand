@@ -19,11 +19,12 @@ const SHORT_SIGNAL_WORDS = new Set(["api", "bug", "css", "db", "llm", "ui", "ux"
 
 const CONCRETE_WORK_PATTERNS = [
   /\b(request|feature|bug|regression|mismatch|correction|implement|update|add|remove|fix|refactor|change|improve)\b/i,
-  /\b(expected|actual|instead|should|broken|wrong|fail|failing)\b/i,
+  /\b(expected|actual|broken|fail|failing)\b/i,
 ]
 
 const PREMISE_PATTERNS = [
-  /\b(why|what if|could it be|maybe|seems|seem|assumption|premise|compare|tuning|optimi[sz]e|root cause)\b/i,
+  /\b(what if|could it be|assumption|premise|root cause)\b/i,
+  /\b(seems? like|appears? to be)\b/i,
 ]
 
 const normalizeWords = (text) => {

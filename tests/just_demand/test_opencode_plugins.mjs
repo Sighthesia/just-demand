@@ -375,6 +375,25 @@ test("state stays quiet for neutral turns", async () => {
   assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
 })
 
+test("state appends premise-check reminder for narrow frame-check turns and deduplicates it", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  const plugin = await stateFactory({ directory: root })
+
+  const first = { parts: [{ type: "text", text: "What if the premise is off?" }] }
+  const second = { parts: [{ type: "text", text: "What if the premise is off?" }] }
+
+  await plugin["chat.message"]({ sessionID: "premise-check" }, first)
+  await plugin["chat.message"]({ sessionID: "premise-check" }, second)
+
+  assert.match(first.parts[0].text, /\[just-demand reminder\]/)
+  assert.match(first.parts[0].text, /Check whether the current frame is the right problem model/i)
+  assert.match(first.parts[0].text, /Do not keep tuning a weak premise/i)
+  assert.equal(second.parts[0].text, "What if the premise is off?")
+})
+
 test("state resets after three same-topic turns", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
