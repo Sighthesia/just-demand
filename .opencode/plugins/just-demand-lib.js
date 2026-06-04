@@ -8,12 +8,14 @@ const COMPLETION_CLAIM_PATTERNS = [
   /\b(done|finished|complete(?:d)?|implemented|shipped|resolved|wrapped up)\b/i,
   /\b(all set|good to go|ready to close|ready to ship|that'?s it|we'?re done)\b/i,
   /\b(should be good|looks good|nothing else to do|no further changes)\b/i,
+  /\b(in a good place|close this out|wrap this up)\b/i,
 ]
 
 const EXECUTION_CANDIDATE_PATTERNS = [
   /\b(i|we)\s+(am|'m|are|will|can|should|need to|need)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
   /\b(i|we)\s+(should|will|can|need to)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
   /\b(i|we)\s+(implemented|built|added|removed|refactored|updated|fixed|debugged|investigated|traced|analy[sz]ed|designed|reworked|extended|patched|changed)\b/i,
+  /\b(i(?:'ll)?|we)\s+just\s+finish(?:\s+this)?\s+in\s+the\s+main\s+session\b/i,
 ]
 
 const defaultReminderState = () => ({

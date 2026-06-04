@@ -405,12 +405,19 @@ test("state appends execution-needed reminder when main-session work looks like 
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
 
   const plugin = await stateFactory({ directory: root })
-  const output = { parts: [{ type: "text", text: "I will implement the feature and debug the bug inline." }] }
+  const samples = [
+    "I will implement the feature and debug the bug inline.",
+    "I'll just finish this in the main session.",
+  ]
 
-  await plugin["chat.message"]({}, output)
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
 
-  assert.match(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
-  assert.match(output.parts[0].text, /Dispatch the supported subagent path/i)
+    await plugin["chat.message"]({ sessionID: `execution-${index}` }, output)
+
+    assert.match(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
+    assert.match(output.parts[0].text, /Dispatch the supported subagent path/i)
+  }
 })
 
 test("state appends verification-closeout reminder and names complete-verification", async () => {
@@ -421,13 +428,20 @@ test("state appends verification-closeout reminder and names complete-verificati
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
 
   const plugin = await stateFactory({ directory: root })
-  const output = { parts: [{ type: "text", text: "This is done and ready to ship." }] }
+  const samples = [
+    "This is done and ready to ship.",
+    "I think this is in a good place, so we can close this out.",
+  ]
 
-  await plugin["chat.message"]({}, output)
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
 
-  assert.match(output.parts[0].text, /completion claim/i)
-  assert.match(output.parts[0].text, /complete-verification/i)
-  assert.match(output.parts[0].text, /before concluding the task/i)
+    await plugin["chat.message"]({ sessionID: `verification-${index}` }, output)
+
+    assert.match(output.parts[0].text, /completion claim/i)
+    assert.match(output.parts[0].text, /complete-verification/i)
+    assert.match(output.parts[0].text, /before concluding the task/i)
+  }
 })
 
 test("state appends checkpoint-followup reminder when verification passed but checkpoint commit is missing", async () => {
