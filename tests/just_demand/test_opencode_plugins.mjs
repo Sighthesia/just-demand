@@ -436,6 +436,7 @@ test("state appends execution-needed reminder when main-session work looks like 
     "I'll just finish this in the main session.",
     "先说明一下：I will implement the fix and debug the bug inline, 然后我再整理结果。",
     "中文说明一下，we should build this in the main session and keep the rest for later.",
+    "我打算直接在主会话里实现这个修复并调试一下。",
   ]
 
   for (const [index, sample] of samples.entries()) {
@@ -461,6 +462,7 @@ test("state appends verification-closeout reminder and names complete-verificati
     "I think this is in a good place, so we can close this out.",
     "这边已经 done 了，我觉得 we can close this out now.",
     "中文说明：it is ready to ship, so please run the closeout step before concluding.",
+    "这个已经做完了，可以收尾了。",
   ]
 
   for (const [index, sample] of samples.entries()) {
@@ -471,6 +473,32 @@ test("state appends verification-closeout reminder and names complete-verificati
     assert.match(output.parts[0].text, /completion claim/i)
     assert.match(output.parts[0].text, /complete-verification/i)
     assert.match(output.parts[0].text, /before concluding the task/i)
+  }
+})
+
+test("state stays quiet for Chinese near-miss execution and closeout wording", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "我先把思路整理清楚，再决定要不要改代码。",
+    "这个看起来已经差不多了，我先再核对一遍边界。",
+    "我只是把结论再捋一遍，暂时不打算收尾。",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+
+    await plugin["chat.message"]({ sessionID: `near-miss-${index}` }, output)
+
+    assert.equal(output.parts[0].text, sample)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
+    assert.doesNotMatch(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
+    assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
   }
 })
 
