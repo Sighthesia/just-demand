@@ -12,6 +12,7 @@ import {
 
 const REMINDER_HEADER = "[just-demand reminder]"
 const CLOSEOUT_BLOCKED_HEADER = "[just-demand closeout blocked]"
+const EXECUTION_BLOCKED_HEADER = "[just-demand execution blocked]"
 
 const STOPWORDS = new Set([
   "about", "after", "again", "also", "am", "are", "because", "before", "can", "could", "did",
@@ -203,6 +204,29 @@ const blockVerificationCloseout = (text, reminderState) => {
   ].join("\n")
 }
 
+const blockExecutionNeeded = (text, reminderState) => {
+  if (typeof text !== "string") return text
+  if (text.includes(EXECUTION_BLOCKED_HEADER)) return text
+
+  updateReminderState(reminderState.directory, reminderState.sessionID, (state) => {
+    state.last_reminder_type = "execution_needed"
+  })
+
+  const trimmed = text.trim()
+  const quotedText = trimmed
+    ? `> ${trimmed.replace(/\n/g, "\n> ")}`
+    : "> (empty response)"
+
+  return [
+    EXECUTION_BLOCKED_HEADER,
+    "- This reads like execution work that should run through a just-demand-* workflow subagent.",
+    "- Dispatch the supported just-demand-* subagent path before continuing the long-context work inline.",
+    "",
+    "Original response:",
+    quotedText,
+  ].join("\n")
+}
+
 export default async ({ directory } = {}) => {
   return {
     "chat.message": async (input, output) => {
@@ -229,6 +253,8 @@ export default async ({ directory } = {}) => {
       const reminderType = chooseReminderType(currentText, reminderState)
       if (reminderType === "verification_closeout") {
         textPart.text = blockVerificationCloseout(textPart.text, reminderState)
+      } else if (reminderType === "execution_needed") {
+        textPart.text = blockExecutionNeeded(textPart.text, reminderState)
       } else {
         textPart.text = appendReminder(textPart.text, reminderState, reminderType)
       }

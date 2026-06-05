@@ -423,7 +423,7 @@ test("state appends premise-check reminder for narrow frame-check turns and dedu
   assert.equal(second.parts[0].text, "What if the premise is off?")
 })
 
-test("state appends execution-needed reminder when main-session work looks like long-context execution", async () => {
+test("state blocks obvious execution-needed replies on unrouted active tasks", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -444,9 +444,29 @@ test("state appends execution-needed reminder when main-session work looks like 
 
     await plugin["chat.message"]({ sessionID: `execution-${index}` }, output)
 
-    assert.match(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
-    assert.match(output.parts[0].text, /Dispatch the supported subagent path/i)
+    assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
+    assert.match(output.parts[0].text, /This reads like execution work that should run through a just-demand-\* workflow subagent/i)
+    assert.match(output.parts[0].text, /Dispatch the supported just-demand-\* subagent path/i)
+    assert.match(output.parts[0].text, /Original response:/i)
+    assert.match(output.parts[0].text, /> /)
+    assert.notEqual(output.parts[0].text, sample)
   }
+})
+
+test("state leaves execution-needed wording unchanged when workflow subagents are already assigned", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: ["just-demand-implement"] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "I will implement the feature and debug the bug inline." }] }
+
+  await plugin["chat.message"]({}, output)
+
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.match(output.parts[0].text, /\[just-demand reminder\]/i)
 })
 
 test("state blocks obvious verification closeout claims until complete-verification", async () => {
@@ -605,14 +625,14 @@ test("state does not inject the same reminder type on consecutive turns", async 
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
 
   const plugin = await stateFactory({ directory: root })
-  const first = { parts: [{ type: "text", text: "We should implement this now." }] }
-  const second = { parts: [{ type: "text", text: "We should implement this now." }] }
+  const first = { parts: [{ type: "text", text: "Please fix the bug in the API." }] }
+  const second = { parts: [{ type: "text", text: "Please fix the bug in the API." }] }
 
   await plugin["chat.message"]({ sessionID: "dedupe-test" }, first)
   await plugin["chat.message"]({ sessionID: "dedupe-test" }, second)
 
-  assert.match(first.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
-  assert.equal(second.parts[0].text, "We should implement this now.")
+  assert.match(first.parts[0].text, /\[just-demand reminder\]/i)
+  assert.equal(second.parts[0].text, "Please fix the bug in the API.")
 })
 
 test("state resets after three same-topic turns", async () => {
