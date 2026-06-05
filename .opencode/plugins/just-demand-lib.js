@@ -4,6 +4,15 @@ import { join } from "node:path"
 const REMINDER_STATE = new Map()
 
 const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
+const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
+  "design",
+  "implementation",
+  "feature",
+  "feat",
+  "refactor",
+  "architecture",
+])
+const BUG_OR_MISMATCH_TASK_TYPES = new Set(["bug", "bugfix", "fix", "incident"])
 const COMPLETION_CLAIM_PATTERNS = [
   /\b(done|finished|complete(?:d)?|implemented|shipped|resolved|wrapped up)\b/i,
   /\b(all set|good to go|ready to close|ready to ship|that'?s it|we'?re done)\b/i,
@@ -114,6 +123,40 @@ export const taskNeedsCheckpointFollowUp = (task) => {
   if (String(task.verification_status || "").toLowerCase() !== "passed") return false
   return !(task.checkpoint_commit && task.checkpoint_commit.created)
 }
+
+export const getMissingExecutionGateFields = (task) => {
+  if (!task) return ["active formal task"]
+
+  const clarification = task?.clarification || {}
+  const missing = []
+
+  if (!String(clarification.scope || "").trim()) {
+    missing.push("Scope")
+  }
+
+  if (Array.isArray(clarification.blocking_questions) && clarification.blocking_questions.length > 0) {
+    missing.push("Blocking Questions")
+  }
+
+  const taskType = String(task.type || "").trim().toLowerCase()
+  const needsBugClarification = Boolean(clarification.needs_bug_clarification) || BUG_OR_MISMATCH_TASK_TYPES.has(taskType)
+  if (needsBugClarification) {
+    if (!String(clarification.expected_behavior || "").trim()) missing.push("Expected Behavior")
+    if (!String(clarification.actual_behavior || "").trim()) missing.push("Actual Behavior")
+    if (!String(clarification.reproduction || "").trim()) missing.push("Reproduction")
+  }
+
+  if (DESIGN_OR_IMPLEMENTATION_TASK_TYPES.has(taskType)) {
+    if (!String(clarification.final_expected_effect || "").trim()) missing.push("Final Expected Effect")
+    if (!String(clarification.chosen_approach || "").trim()) missing.push("Chosen Approach")
+    if (!String(clarification.final_implementation_plan || "").trim()) missing.push("Final Implementation Plan")
+    if (!String(clarification.approval || "").trim()) missing.push("Approval")
+  }
+
+  return [...new Set(missing)]
+}
+
+export const taskIsReadyForExecution = (task) => getMissingExecutionGateFields(task).length === 0
 
 const renderClarificationContext = (task) => {
   const clarification = task?.clarification || {}

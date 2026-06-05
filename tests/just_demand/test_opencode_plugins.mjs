@@ -426,6 +426,32 @@ test("state hard redirects concrete workflow work when no active task exists", a
   assert.notEqual(output.parts[0].text, "Please fix the bug in the API.")
 })
 
+test("state blocks apply_patch when no active task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch: there is no active formal task yet\./,
+  )
+})
+
+test("state blocks apply_patch when active task is not ready for execution", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch: active task task-a is not ready for execution yet\./,
+  )
+})
+
 test("state stays quiet for neutral turns", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })

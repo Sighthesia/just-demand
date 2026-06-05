@@ -1,8 +1,10 @@
 import {
   getActiveTask,
   clearSubagentUnavailablePending,
+  getMissingExecutionGateFields,
   getReminderState,
   readTaskJson,
+  taskIsReadyForExecution,
   taskLooksLikeLongContextExecutionCandidate,
   taskNeedsCheckpointFollowUp,
   taskNeedsVerificationCloseout,
@@ -28,6 +30,8 @@ const CONTROLLER_ACTION = Object.freeze({
   remind: "remind",
   block: "block",
 })
+
+const WRITE_TOOL_NAMES = new Set(["apply_patch"])
 
 const STOPWORDS = new Set([
   "about", "after", "again", "also", "am", "are", "because", "before", "can", "could", "did",
@@ -375,6 +379,27 @@ const blockWorkflowEntryRequired = (text, reminderState) => {
 
 export default async ({ directory } = {}) => {
   return {
+    "tool.execute.before": async (input, output) => {
+      const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
+      if (!workflowDirectory) return
+
+      const toolName = String(input?.tool || "").toLowerCase()
+      if (!WRITE_TOOL_NAMES.has(toolName)) return
+
+      const taskId = getActiveTask(workflowDirectory)
+      if (!taskId) {
+        throw new Error("Blocked apply_patch: there is no active formal task yet.")
+      }
+
+      const task = readTaskJson(workflowDirectory, taskId)
+      if (!taskIsReadyForExecution(task)) {
+        const missing = getMissingExecutionGateFields(task)
+        throw new Error(
+          `Blocked apply_patch: active task ${taskId} is not ready for execution yet. Missing or incomplete fields: ${missing.join(", ")}`,
+        )
+      }
+    },
+
     "chat.message": async (input, output) => {
       // Keep main-session injection lightweight: reminder only, no task state dump.
       // This layer is best-effort: some OpenCode versions do not expose usable text
