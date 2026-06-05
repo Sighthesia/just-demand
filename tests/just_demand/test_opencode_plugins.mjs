@@ -13,7 +13,11 @@ import {
   readTaskContext,
 } from "../../.opencode/plugins/just-demand-lib.js"
 import sessionStartFactory from "../../.opencode/plugins/just-demand-session-start.js"
-import stateFactory from "../../.opencode/plugins/just-demand-state.js"
+import stateFactory, {
+  CONTROLLER_ACTION,
+  CONTROLLER_PHASE,
+  buildControllerDecision,
+} from "../../.opencode/plugins/just-demand-state.js"
 import subagentContextFactory from "../../.opencode/plugins/just-demand-subagent-context.js"
 
 function makeRoot() {
@@ -286,6 +290,32 @@ test("state factory returns hooks object with chat.message", async () => {
   const plugin = await stateFactory({ directory: root })
   assert.ok(plugin)
   assert.equal(typeof plugin["chat.message"], "function")
+})
+
+test("controller decision shape exposes phase action reason and rewrite", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const remindDecision = buildControllerDecision("Please fix the bug in the API.", { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
+  assert.deepEqual(remindDecision, {
+    phase: CONTROLLER_PHASE.clarify,
+    action: CONTROLLER_ACTION.remind,
+    reason_code: "clarify_hint",
+    rewrite: { mode: "append" },
+  })
+
+  const executionDecision = buildControllerDecision("I will implement the feature and debug the bug inline.", {
+    activeTask: { id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+  assert.equal(executionDecision.phase, CONTROLLER_PHASE.execute)
+  assert.equal(executionDecision.action, CONTROLLER_ACTION.block)
+  assert.equal(executionDecision.reason_code, "execution_needed")
+  assert.deepEqual(executionDecision.rewrite, { mode: "replace", preserve_original: true })
 })
 
 // ---------------------------------------------------------------------------

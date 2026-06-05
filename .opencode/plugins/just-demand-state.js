@@ -14,6 +14,20 @@ const REMINDER_HEADER = "[just-demand reminder]"
 const CLOSEOUT_BLOCKED_HEADER = "[just-demand closeout blocked]"
 const EXECUTION_BLOCKED_HEADER = "[just-demand execution blocked]"
 
+const CONTROLLER_PHASE = Object.freeze({
+  clarify: "clarify",
+  route: "route",
+  execute: "execute",
+  verify: "verify",
+  close: "close",
+})
+
+const CONTROLLER_ACTION = Object.freeze({
+  allow: "allow",
+  remind: "remind",
+  block: "block",
+})
+
 const STOPWORDS = new Set([
   "about", "after", "again", "also", "am", "are", "because", "before", "can", "could", "did",
   "do", "does", "doing", "for", "from", "have", "has", "how", "i", "is", "it", "just", "let",
@@ -104,22 +118,102 @@ const updateTopicTurns = (sessionKey, text, reminderState) => {
   return reminderState
 }
 
-const chooseReminderType = (text, reminderState) => {
-  if (reminderState.subagent_unavailable_pending) return "subagent_retry_or_skip"
+const reminderTypeFromReasonCode = (reasonCode) => {
+  switch (reasonCode) {
+    case "subagent_retry_or_skip":
+    case "checkpoint_followup":
+    case "reset":
+    case "premise_check":
+      return reasonCode
+    case "clarify_hint":
+      return "clarify"
+    default:
+      return null
+  }
+}
 
-  if (CROSS_SENTENCE_NEAR_MISS_PATTERNS.some((pattern) => pattern.test(text))) return null
+const buildControllerDecision = (text, reminderState) => {
+  if (reminderState.subagent_unavailable_pending) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.remind,
+      reason_code: "subagent_retry_or_skip",
+      rewrite: { mode: "append" },
+    }
+  }
+
+  if (CROSS_SENTENCE_NEAR_MISS_PATTERNS.some((pattern) => pattern.test(text))) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.allow,
+      reason_code: "no_op",
+      rewrite: null,
+    }
+  }
 
   const activeTask = reminderState.activeTask
   if (activeTask) {
-    if (taskNeedsCheckpointFollowUp(activeTask)) return "checkpoint_followup"
-    if (textLooksLikeCompletionClaim(text) && taskNeedsVerificationCloseout(activeTask)) return "verification_closeout"
-    if (taskLooksLikeLongContextExecutionCandidate(activeTask, text)) return "execution_needed"
+    if (textLooksLikeCompletionClaim(text) && taskNeedsVerificationCloseout(activeTask)) {
+      return {
+        phase: CONTROLLER_PHASE.verify,
+        action: CONTROLLER_ACTION.block,
+        reason_code: "verification_closeout",
+        rewrite: { mode: "replace", preserve_original: true },
+      }
+    }
+
+    if (taskLooksLikeLongContextExecutionCandidate(activeTask, text)) {
+      return {
+        phase: CONTROLLER_PHASE.execute,
+        action: CONTROLLER_ACTION.block,
+        reason_code: "execution_needed",
+        rewrite: { mode: "replace", preserve_original: true },
+      }
+    }
+
+    if (taskNeedsCheckpointFollowUp(activeTask)) {
+      return {
+        phase: CONTROLLER_PHASE.close,
+        action: CONTROLLER_ACTION.remind,
+        reason_code: "checkpoint_followup",
+        rewrite: { mode: "append" },
+      }
+    }
   }
 
-  if (reminderState.same_topic_turns >= 3) return "reset"
-  if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text))) return "clarify"
-  if (PREMISE_PATTERNS.some((pattern) => pattern.test(text))) return "premise_check"
-  return null
+  if (reminderState.same_topic_turns >= 3) {
+    return {
+      phase: CONTROLLER_PHASE.clarify,
+      action: CONTROLLER_ACTION.remind,
+      reason_code: "reset",
+      rewrite: { mode: "append" },
+    }
+  }
+
+  if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text))) {
+    return {
+      phase: CONTROLLER_PHASE.clarify,
+      action: CONTROLLER_ACTION.remind,
+      reason_code: "clarify_hint",
+      rewrite: { mode: "append" },
+    }
+  }
+
+  if (PREMISE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return {
+      phase: CONTROLLER_PHASE.clarify,
+      action: CONTROLLER_ACTION.remind,
+      reason_code: "premise_check",
+      rewrite: { mode: "append" },
+    }
+  }
+
+  return {
+    phase: CONTROLLER_PHASE.route,
+    action: CONTROLLER_ACTION.allow,
+    reason_code: "no_op",
+    rewrite: null,
+  }
 }
 
 const buildReminderLines = (type) => {
@@ -179,6 +273,19 @@ const appendReminder = (text, reminderState, reminderType) => {
   })
 
   return `${text}\n\n${[REMINDER_HEADER, ...buildReminderLines(reminderType)].join("\n")}`
+}
+
+const applyControllerDecision = (text, reminderState, decision) => {
+  if (decision.action === CONTROLLER_ACTION.block) {
+    if (decision.reason_code === "verification_closeout") return blockVerificationCloseout(text, reminderState)
+    if (decision.reason_code === "execution_needed") return blockExecutionNeeded(text, reminderState)
+  }
+
+  if (decision.action === CONTROLLER_ACTION.remind) {
+    return appendReminder(text, reminderState, reminderTypeFromReasonCode(decision.reason_code))
+  }
+
+  return text
 }
 
 const blockVerificationCloseout = (text, reminderState) => {
@@ -250,18 +357,14 @@ export default async ({ directory } = {}) => {
       const currentText = extractCurrentText(output)
       updateTopicTurns(`${workflowDirectory}::${sessionID}`, currentText, reminderState)
 
-      const reminderType = chooseReminderType(currentText, reminderState)
-      if (reminderType === "verification_closeout") {
-        textPart.text = blockVerificationCloseout(textPart.text, reminderState)
-      } else if (reminderType === "execution_needed") {
-        textPart.text = blockExecutionNeeded(textPart.text, reminderState)
-      } else {
-        textPart.text = appendReminder(textPart.text, reminderState, reminderType)
-      }
+      const controllerDecision = buildControllerDecision(currentText, reminderState)
+      textPart.text = applyControllerDecision(textPart.text, reminderState, controllerDecision)
 
-      if (reminderType !== "subagent_retry_or_skip") {
+      if (controllerDecision.reason_code !== "subagent_retry_or_skip") {
         clearSubagentUnavailablePending(workflowDirectory, sessionID)
       }
     },
   }
 }
+
+export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE }
