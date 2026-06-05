@@ -5,10 +5,13 @@ import { join } from "node:path"
 import test from "node:test"
 
 import {
+  buildExecutionGateError,
   getActiveTask,
   getMissingRequiredContextFiles,
   listUnfinishedTasks,
   markSubagentUnavailablePending,
+  getWriteToolRule,
+  looksLikeBashWriteCommand,
   readJson,
   readTaskContext,
 } from "../../.opencode/plugins/just-demand-lib.js"
@@ -270,6 +273,20 @@ test("getMissingRequiredContextFiles reports missing implement context files", (
   assert.deepEqual(missing, ["implement.md"])
 })
 
+test("write tool rule table identifies write-like tools and ignores read-only bash", () => {
+  assert.equal(getWriteToolRule("apply_patch", {})?.label, "apply_patch")
+  assert.equal(getWriteToolRule("task", { subagent_type: "just-demand-implement" })?.label, "Task")
+  assert.equal(getWriteToolRule("bash", { command: "mkdir -p out && touch out/file.txt" })?.label, "bash")
+  assert.equal(getWriteToolRule("bash", { command: "python3 -m unittest tests.just_demand.test_workflow_core -v" }), null)
+  assert.equal(looksLikeBashWriteCommand("mkdir -p out && touch out/file.txt"), true)
+  assert.equal(looksLikeBashWriteCommand("python3 -m unittest tests.just_demand.test_workflow_core -v"), false)
+  assert.equal(buildExecutionGateError("bash", null, []), "Blocked bash: there is no active formal task yet.")
+  assert.equal(
+    buildExecutionGateError("apply_patch", "task-a", ["Scope", "Approval"]),
+    "Blocked apply_patch: active task task-a is not ready for execution yet. Missing or incomplete fields: Scope, Approval",
+  )
+})
+
 // ---------------------------------------------------------------------------
 // plugin factory: session-start returns hooks object
 // ---------------------------------------------------------------------------
@@ -450,6 +467,47 @@ test("state blocks apply_patch when active task is not ready for execution", asy
     plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
     /Blocked apply_patch: active task task-a is not ready for execution yet\./,
   )
+})
+
+test("state blocks implement task dispatch when active task is not ready for execution", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }),
+    /Blocked Task: active task task-a is not ready for execution yet\./,
+  )
+})
+
+test("state blocks write-like bash commands when active task is not ready for execution", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+    /Blocked bash: active task task-a is not ready for execution yet\./,
+  )
+})
+
+test("state allows read-only bash commands through the write gate", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { args: { command: "python3 -m unittest tests.just_demand.test_workflow_core -v" } }
+  await plugin["tool.execute.before"]({ tool: "bash" }, output)
+  assert.equal(output.args.command, "python3 -m unittest tests.just_demand.test_workflow_core -v")
 })
 
 test("state stays quiet for neutral turns", async () => {

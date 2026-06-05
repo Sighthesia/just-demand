@@ -1,8 +1,10 @@
 import {
+  buildExecutionGateError,
   getActiveTask,
   clearSubagentUnavailablePending,
   getMissingExecutionGateFields,
   getReminderState,
+  getWriteToolRule,
   readTaskJson,
   taskIsReadyForExecution,
   taskLooksLikeLongContextExecutionCandidate,
@@ -30,8 +32,6 @@ const CONTROLLER_ACTION = Object.freeze({
   remind: "remind",
   block: "block",
 })
-
-const WRITE_TOOL_NAMES = new Set(["apply_patch"])
 
 const STOPWORDS = new Set([
   "about", "after", "again", "also", "am", "are", "because", "before", "can", "could", "did",
@@ -384,19 +384,18 @@ export default async ({ directory } = {}) => {
       if (!workflowDirectory) return
 
       const toolName = String(input?.tool || "").toLowerCase()
-      if (!WRITE_TOOL_NAMES.has(toolName)) return
+      const rule = getWriteToolRule(toolName, output?.args)
+      if (!rule) return
 
       const taskId = getActiveTask(workflowDirectory)
       if (!taskId) {
-        throw new Error("Blocked apply_patch: there is no active formal task yet.")
+        throw new Error(buildExecutionGateError(rule.label, null, []))
       }
 
       const task = readTaskJson(workflowDirectory, taskId)
-      if (!taskIsReadyForExecution(task)) {
+      if (!taskIsReadyForExecution(task) && rule.needsExecutionGate(output?.args)) {
         const missing = getMissingExecutionGateFields(task)
-        throw new Error(
-          `Blocked apply_patch: active task ${taskId} is not ready for execution yet. Missing or incomplete fields: ${missing.join(", ")}`,
-        )
+        throw new Error(buildExecutionGateError(rule.label, taskId, missing))
       }
     },
 

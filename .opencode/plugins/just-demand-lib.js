@@ -13,6 +13,36 @@ const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
   "architecture",
 ])
 const BUG_OR_MISMATCH_TASK_TYPES = new Set(["bug", "bugfix", "fix", "incident"])
+const WRITE_TOOL_RULES = Object.freeze([
+  {
+    name: "apply_patch",
+    label: "apply_patch",
+    match: (toolName) => toolName === "apply_patch",
+    needsExecutionGate: () => true,
+  },
+  {
+    name: "task:implement-check-docs",
+    label: "Task",
+    match: (toolName, args) => toolName === "task" && ["just-demand-implement", "just-demand-check", "just-demand-docs"].includes(String(args?.subagent_type || "")),
+    needsExecutionGate: () => true,
+  },
+  {
+    name: "bash:write-like",
+    label: "bash",
+    match: (toolName, args) => toolName === "bash" && looksLikeBashWriteCommand(String(args?.command || "")),
+    needsExecutionGate: () => true,
+  },
+])
+
+const BASH_WRITE_PATTERNS = [
+  /(^|[;&|])\s*(?:mkdir|touch|rm|mv|cp|ln|install|chmod|chown)\b/i,
+  /(^|[;&|])\s*git\s+(?:add|commit|amend|reset|clean|stash|checkout|switch|merge|rebase)\b/i,
+  /(^|[;&|])\s*(?:sed|perl)\s+-i\b/i,
+  /(^|[;&|])\s*tee\b/i,
+  /(^|[;&|])\s*truncate\b/i,
+  /(^|[;&|])\s*apply_patch\b/i,
+  />/,
+]
 const COMPLETION_CLAIM_PATTERNS = [
   /\b(done|finished|complete(?:d)?|implemented|shipped|resolved|wrapped up)\b/i,
   /\b(all set|good to go|ready to close|ready to ship|that'?s it|we'?re done)\b/i,
@@ -122,6 +152,21 @@ export const taskNeedsCheckpointFollowUp = (task) => {
   if (!task) return false
   if (String(task.verification_status || "").toLowerCase() !== "passed") return false
   return !(task.checkpoint_commit && task.checkpoint_commit.created)
+}
+
+export const looksLikeBashWriteCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+  return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed))
+}
+
+export const getWriteToolRule = (toolName, args) => WRITE_TOOL_RULES.find((rule) => rule.match(toolName, args)) || null
+
+export const buildExecutionGateError = (toolLabel, taskId, missing) => {
+  const suffix = taskId
+    ? `active task ${taskId} is not ready for execution yet. Missing or incomplete fields: ${missing.join(", ")}`
+    : `there is no active formal task yet.`
+  return `Blocked ${toolLabel}: ${suffix}`
 }
 
 export const getMissingExecutionGateFields = (task) => {
