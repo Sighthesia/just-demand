@@ -299,7 +299,15 @@ test("controller decision shape exposes phase action reason and rewrite", () => 
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
 
-  const remindDecision = buildControllerDecision("Please fix the bug in the API.", { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
+  const redirectDecision = buildControllerDecision("Please fix the bug in the API.", { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
+  assert.deepEqual(redirectDecision, {
+    phase: CONTROLLER_PHASE.route,
+    action: CONTROLLER_ACTION.block,
+    reason_code: "workflow_entry_required",
+    rewrite: { mode: "replace", preserve_original: true },
+  })
+
+  const remindDecision = buildControllerDecision("Please fix the bug in the API.", { activeTask: { id: "task-a", status: "planning" }, same_topic_turns: 0, subagent_unavailable_pending: false })
   assert.deepEqual(remindDecision, {
     phase: CONTROLLER_PHASE.clarify,
     action: CONTROLLER_ACTION.remind,
@@ -395,6 +403,27 @@ test("state appends clarification reminder for concrete request turns", async ()
   assert.match(output.parts[0].text, /Use just-demand subagents proactively/i)
   assert.match(output.parts[0].text, /\[just-demand reminder\]/)
   assert.doesNotMatch(output.parts[0].text, /task-a/)
+})
+
+test("state hard redirects concrete workflow work when no active task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "Please fix the bug in the API." }] }
+
+  await plugin["chat.message"]({ sessionID: "no-active-task" }, output)
+
+  assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
+  assert.match(output.parts[0].text, /no active formal task yet/i)
+  assert.match(output.parts[0].text, /Return to the workflow entry path first/i)
+  assert.match(output.parts[0].text, /using-just-demand/i)
+  assert.match(output.parts[0].text, /socratic-clarification/i)
+  assert.match(output.parts[0].text, /create the intake\/task/i)
+  assert.match(output.parts[0].text, /Original response:/i)
+  assert.match(output.parts[0].text, /> Please fix the bug in the API\./)
+  assert.notEqual(output.parts[0].text, "Please fix the bug in the API.")
 })
 
 test("state stays quiet for neutral turns", async () => {

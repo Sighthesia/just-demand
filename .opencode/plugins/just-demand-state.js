@@ -13,6 +13,7 @@ import {
 const REMINDER_HEADER = "[just-demand reminder]"
 const CLOSEOUT_BLOCKED_HEADER = "[just-demand closeout blocked]"
 const EXECUTION_BLOCKED_HEADER = "[just-demand execution blocked]"
+const WORKFLOW_ENTRY_BLOCKED_HEADER = "[just-demand workflow entry required]"
 
 const CONTROLLER_PHASE = Object.freeze({
   clarify: "clarify",
@@ -181,6 +182,15 @@ const buildControllerDecision = (text, reminderState) => {
     }
   }
 
+  if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) && !activeTask) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.block,
+      reason_code: "workflow_entry_required",
+      rewrite: { mode: "replace", preserve_original: true },
+    }
+  }
+
   if (reminderState.same_topic_turns >= 3) {
     return {
       phase: CONTROLLER_PHASE.clarify,
@@ -254,6 +264,11 @@ const buildReminderLines = (type) => {
         "- Verification is already passed, but the successful checkpoint follow-up is still missing.",
         "- Confirm the checkpoint commit path completed successfully before treating the task as fully closed.",
       ]
+    case "workflow_entry_required":
+      return [
+        "- This is concrete workflow work, but there is no active formal task yet.",
+        "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then create the intake/task before continuing.",
+      ]
     default:
       return []
   }
@@ -279,6 +294,7 @@ const applyControllerDecision = (text, reminderState, decision) => {
   if (decision.action === CONTROLLER_ACTION.block) {
     if (decision.reason_code === "verification_closeout") return blockVerificationCloseout(text, reminderState)
     if (decision.reason_code === "execution_needed") return blockExecutionNeeded(text, reminderState)
+    if (decision.reason_code === "workflow_entry_required") return blockWorkflowEntryRequired(text, reminderState)
   }
 
   if (decision.action === CONTROLLER_ACTION.remind) {
@@ -334,6 +350,29 @@ const blockExecutionNeeded = (text, reminderState) => {
   ].join("\n")
 }
 
+const blockWorkflowEntryRequired = (text, reminderState) => {
+  if (typeof text !== "string") return text
+  if (text.includes(WORKFLOW_ENTRY_BLOCKED_HEADER)) return text
+
+  updateReminderState(reminderState.directory, reminderState.sessionID, (state) => {
+    state.last_reminder_type = "workflow_entry_required"
+  })
+
+  const trimmed = text.trim()
+  const quotedText = trimmed
+    ? `> ${trimmed.replace(/\n/g, "\n> ")}`
+    : "> (empty response)"
+
+  return [
+    WORKFLOW_ENTRY_BLOCKED_HEADER,
+    "- This is concrete workflow work, but there is no active formal task yet.",
+    "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then create the intake/task before continuing.",
+    "",
+    "Original response:",
+    quotedText,
+  ].join("\n")
+}
+
 export default async ({ directory } = {}) => {
   return {
     "chat.message": async (input, output) => {
@@ -348,7 +387,6 @@ export default async ({ directory } = {}) => {
       const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       const activeTaskId = getActiveTask(workflowDirectory)
       const activeTask = activeTaskId ? (readTaskJson(workflowDirectory, activeTaskId) || { id: activeTaskId }) : null
-      if (!activeTaskId) return
       const reminderState = getReminderState(workflowDirectory, sessionID)
       reminderState.directory = workflowDirectory
       reminderState.sessionID = sessionID
