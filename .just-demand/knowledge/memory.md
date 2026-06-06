@@ -193,3 +193,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-05-diagnose-unstable-workflow-prompt-injection-and-triggering-task (Diagnose unstable workflow prompt injection and triggering) completed with status 'done'.
   Verification summary: Add hard workflow-entry redirect for concrete work without an active task and cover it with plugin regression tests.
+
+- Task 2026-05-23-fix-init-script-deployment-task (Fix init script deployment) completed with status 'done'.
+  Verification summary: Switched project init to local-state-only architecture and removed workspace script copies
