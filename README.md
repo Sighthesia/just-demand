@@ -19,7 +19,7 @@ Use this repository directly as the installation source.
 From this repository root, run:
 
 ```bash
-python3 .just-demand/scripts/task.py install --opencode --global
+just-demand install --opencode --global
 ```
 
 This installs Just Demand runtime assets into the default OpenCode global config directory:
@@ -42,7 +42,7 @@ Restart OpenCode after installation.
 Useful for testing or isolated setups:
 
 ```bash
-python3 .just-demand/scripts/task.py install --opencode --global --config-root "/your/config/root"
+just-demand install --opencode --global --config-root "/your/config/root"
 ```
 
 ### Windows
@@ -57,13 +57,13 @@ python3 .just-demand/scripts/task.py install --opencode --global --config-root "
 Open **PowerShell** or **Command Prompt** in this repository root, run:
 
 ```powershell
-python .just-demand/scripts/task.py install --opencode --global
+just-demand install --opencode --global
 ```
 
 If you have multiple Python versions, use the `py` launcher:
 
 ```powershell
-py -3 .just-demand/scripts/task.py install --opencode --global
+py -3 just-demand install --opencode --global
 ```
 
 Python accepts forward slashes in paths, so `scripts/task.py` works on Windows too.
@@ -81,7 +81,7 @@ After installation, restart OpenCode.
 #### 2. Install to a custom OpenCode config root
 
 ```powershell
-python .just-demand/scripts/task.py install --opencode --global --config-root "C:\Users\You\.config\opencode"
+just-demand install --opencode --global --config-root "C:\Users\You\.config\opencode"
 ```
 
 ## Enable In A Project
@@ -91,13 +91,13 @@ After the global install, each project needs its own local `.just-demand/` state
 Linux / macOS:
 
 ```bash
-python3 /path/to/just-demand/.just-demand/scripts/task.py --root "/path/to/project" init
+just-demand --root "/path/to/project" init
 ```
 
 Windows:
 
 ```powershell
-python C:\path\to\just-demand\.just-demand\scripts\task.py --root "C:\path\to\project" init
+just-demand --root "C:\path\to\project" init
 ```
 
 This creates:
@@ -120,23 +120,23 @@ To refresh the global OpenCode install after pulling new changes in this reposit
 Linux / macOS:
 
 ```bash
-python3 .just-demand/scripts/task.py update --opencode --global
+just-demand update --opencode --global
 ```
 
 Windows:
 
 ```powershell
-python .just-demand/scripts/task.py update --opencode --global
+just-demand update --opencode --global
 ```
 
 With a custom OpenCode config root:
 
 ```bash
-python3 .just-demand/scripts/task.py update --opencode --global --config-root "/your/config/root"
+just-demand update --opencode --global --config-root "/your/config/root"
 ```
 
 ```powershell
-python .just-demand/scripts/task.py update --opencode --global --config-root "C:\Users\You\.config\opencode"
+just-demand update --opencode --global --config-root "C:\Users\You\.config\opencode"
 ```
 
 Project-local state usually does not need migration for this workflow change. If a project has not been initialized yet, run `init` for that project.
@@ -144,11 +144,11 @@ Project-local state usually does not need migration for this workflow change. If
 If you have existing initialized projects, rerun `init` for each project from the updated repository checkout to refresh local state if needed:
 
 ```bash
-python3 /stable/path/to/just-demand/.just-demand/scripts/task.py --root "/target/project" init
+just-demand --root "/target/project" init
 ```
 
 ```powershell
-python C:\path\to\just-demand\.just-demand\scripts\task.py --root "C:\path\to\project" init
+just-demand --root "C:\path\to\project" init
 ```
 
 `update --opencode --global` refreshes only the global OpenCode runtime assets under the OpenCode config root. It does not fan out to previously initialized project workspaces because project workspaces only hold local state. `init` is idempotent and is the explicit project bootstrap step.
@@ -156,11 +156,11 @@ python C:\path\to\just-demand\.just-demand\scripts\task.py --root "C:\path\to\pr
 If you want one explicit command that refreshes all initialized workspaces under one or more directory trees, use `sync-workspaces`:
 
 ```bash
-python3 .just-demand/scripts/task.py sync-workspaces --search-root "/projects" --search-root "/more-projects"
+just-demand sync-workspaces --search-root "/projects" --search-root "/more-projects"
 ```
 
 ```powershell
-python .just-demand/scripts/task.py sync-workspaces --search-root "C:\Projects" --search-root "D:\Shared"
+just-demand sync-workspaces --search-root "C:\Projects" --search-root "D:\Shared"
 ```
 
 If you omit `--search-root`, the command scans the current working directory recursively.
@@ -172,23 +172,23 @@ Check the current global install and the current project's activation status:
 Linux / macOS:
 
 ```bash
-python3 .just-demand/scripts/task.py --root . doctor
+just-demand --root . doctor
 ```
 
 Windows:
 
 ```powershell
-python .just-demand/scripts/task.py --root . doctor
+just-demand --root . doctor
 ```
 
 Check another project explicitly:
 
 ```bash
-python3 /path/to/just-demand/.just-demand/scripts/task.py --root "/path/to/project" doctor
+just-demand --root "/path/to/project" doctor
 ```
 
 ```powershell
-python C:\path\to\just-demand\.just-demand\scripts\task.py --root "C:\path\to\project" doctor
+just-demand --root "C:\path\to\project" doctor
 ```
 
 ## Uninstall
@@ -196,21 +196,21 @@ python C:\path\to\just-demand\.just-demand\scripts\task.py --root "C:\path\to\pr
 Remove the global OpenCode installation:
 
 ```bash
-python3 .just-demand/scripts/task.py uninstall --opencode --global
+just-demand uninstall --opencode --global
 ```
 
 ```powershell
-python .just-demand/scripts/task.py uninstall --opencode --global
+just-demand uninstall --opencode --global
 ```
 
 With a custom config root:
 
 ```bash
-python3 .just-demand/scripts/task.py uninstall --opencode --global --config-root "/your/config/root"
+just-demand uninstall --opencode --global --config-root "/your/config/root"
 ```
 
 ```powershell
-python .just-demand/scripts/task.py uninstall --opencode --global --config-root "C:\Users\You\.config\opencode"
+just-demand uninstall --opencode --global --config-root "C:\Users\You\.config\opencode"
 ```
 
 The uninstaller removes Just Demand-managed files only.
@@ -223,25 +223,25 @@ The uninstaller removes Just Demand-managed files only.
 2. Install globally once:
 
 ```bash
-python3 .just-demand/scripts/task.py install --opencode --global
+just-demand install --opencode --global
 ```
 
 3. For each project you want to use Just Demand in:
 
 ```bash
-python3 /stable/path/to/just-demand/.just-demand/scripts/task.py --root "/target/project" init
+just-demand --root "/target/project" init
 ```
 
 4. After updating this repository, refresh the global runtime assets:
 
 ```bash
-python3 .just-demand/scripts/task.py update --opencode --global
+just-demand update --opencode --global
 ```
 
 5. Refresh local state in all initialized workspaces:
 
 ```bash
-python3 .just-demand/scripts/task.py sync-workspaces --search-root "/path/to/projects/parent"
+just-demand sync-workspaces --search-root "/path/to/projects/parent"
 ```
 
 ### Windows
@@ -251,25 +251,25 @@ python3 .just-demand/scripts/task.py sync-workspaces --search-root "/path/to/pro
 2. Install globally once:
 
 ```powershell
-python C:\Users\You\just-demand\.just-demand\scripts\task.py install --opencode --global
+just-demand install --opencode --global
 ```
 
 3. For each project you want to use Just Demand in:
 
 ```powershell
-python C:\Users\You\just-demand\.just-demand\scripts\task.py --root "C:\path\to\target\project" init
+just-demand --root "C:\path\to\target\project" init
 ```
 
 4. After updating this repository, refresh the global runtime assets:
 
 ```powershell
-python C:\Users\You\just-demand\.just-demand\scripts\task.py update --opencode --global
+just-demand update --opencode --global
 ```
 
 5. Refresh local workflow scripts in all initialized workspaces:
 
 ```powershell
-python C:\Users\You\just-demand\.just-demand\scripts\task.py sync-workspaces --search-root "C:\path\to\projects\parent"
+just-demand sync-workspaces --search-root "C:\path\to\projects\parent"
 ```
 
 ## Verification Commands

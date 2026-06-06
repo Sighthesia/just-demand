@@ -261,7 +261,7 @@ const buildReminderLines = (type) => {
     case "verification_closeout":
       return [
         "- This sounds like a completion claim, but the task has not been closed with complete-verification yet.",
-        "- Run `python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
+        "- Run `just-demand --root . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
       ]
     case "checkpoint_followup":
       return [
@@ -324,7 +324,7 @@ const blockVerificationCloseout = (text, reminderState) => {
   return [
     CLOSEOUT_BLOCKED_HEADER,
     "- This reads like a completion claim, but the task has not passed verification closeout yet.",
-    "- Run `python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
+    "- Run `just-demand --root . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
     "",
     "Original response:",
     quotedText,

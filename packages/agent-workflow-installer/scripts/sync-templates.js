@@ -23,9 +23,6 @@ const DEFAULT_REPO_ROOT = path.resolve(PACKAGE_DIR, '..', '..');
 
 // Source paths relative to repo root → destination paths relative to templates/
 const SYNC_MAP = [
-  { src: '.just-demand/scripts', dest: '.just-demand/scripts', recursive: true },
-  { src: '.just-demand/global/rules.md', dest: '.just-demand/global/rules.md', recursive: false },
-  { src: '.just-demand/workspace', dest: '.just-demand/workspace', recursive: true, filter: (name) => name.endsWith('.md') },
   { src: '.opencode/plugins', dest: '.opencode/plugins', recursive: true },
   { src: '.opencode/agent', dest: '.opencode/agent', recursive: true },
   { src: '.opencode/skills', dest: '.opencode/skills', recursive: true },

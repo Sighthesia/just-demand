@@ -45,7 +45,7 @@ npx just-demand upgrade
 npx just-demand upgrade ./my-project
 ```
 
-This copies the workflow runtime templates (scripts, plugins, agents, skills, rules) into the target directory. Without `--force`, existing files are skipped; with `--force`, managed template files are overwritten. `upgrade` always overwrites managed template files (equivalent to `init --force`). `.gitignore` rules and `.opencode/package.json` are always merged (never blindly overwritten).
+This copies the Just Demand runtime templates (OpenCode plugins, agents, skills, and AGENTS guidance) into the target directory. Without `--force`, existing files are skipped; with `--force`, managed template files are overwritten. `upgrade` always overwrites managed template files (equivalent to `init --force`). `.gitignore` rules and `.opencode/package.json` are always merged (never blindly overwritten).
 
 Both `init` and `upgrade` write installer version metadata to `.just-demand/installer-metadata.json`. This file records which installer version last touched the workspace, enabling future commands to compare installed vs. current versions.
 
@@ -67,9 +67,6 @@ npm run sync-templates
 
 This rebuilds `templates/` from:
 
-- `.just-demand/scripts/` (Python workflow core)
-- `.just-demand/global/rules.md`
-- `.just-demand/workspace/*.md` (seed files only)
 - `.opencode/plugins/`
 - `.opencode/agent/`
 - `.opencode/skills/`
@@ -81,10 +78,6 @@ The script skips `__pycache__/` directories and `.pyc` files.
 
 ```
 templates/
-├── .just-demand/
-│   ├── global/rules.md
-│   ├── scripts/task.py
-│   └── workspace/*.md
 ├── .opencode/
 │   ├── agent/
 │   ├── plugins/

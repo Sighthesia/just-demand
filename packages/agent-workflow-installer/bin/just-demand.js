@@ -17,13 +17,6 @@ const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 
 // Files to copy from templates to target root
 const COPY_MAP = {
-  '.just-demand/scripts': '.just-demand/scripts',
-  '.just-demand/global/rules.md': '.just-demand/global/rules.md',
-  '.just-demand/workspace/decisions.md': '.just-demand/workspace/decisions.md',
-  '.just-demand/workspace/deferred_options.md': '.just-demand/workspace/deferred_options.md',
-  '.just-demand/workspace/facts.md': '.just-demand/workspace/facts.md',
-  '.just-demand/workspace/open_questions.md': '.just-demand/workspace/open_questions.md',
-  '.just-demand/workspace/preferences.md': '.just-demand/workspace/preferences.md',
   '.opencode/plugins': '.opencode/plugins',
   '.opencode/agent': '.opencode/agent',
   '.opencode/skills': '.opencode/skills',
@@ -45,17 +38,12 @@ const GITIGNORE_LINES = [
   '# OpenCode local dependencies',
   '.opencode/node_modules/',
   '',
-  '# Workflow runtime state and task files',
-  '.just-demand/tasks/',
-  '.just-demand/workspace/state.json',
-  '.just-demand/workspace/events.jsonl',
-  '.just-demand/workspace/locks.json',
-  '.just-demand/workspace/intake/',
-  '.just-demand/workspace/sessions/',
+  '# Just Demand runtime state',
+  '.just-demand/state/',
+  '.just-demand/knowledge/',
   '',
-  '# Auto-generated placeholder files',
-  '.just-demand/global/architecture.md',
-  '.just-demand/global/glossary.md',
+  '# Auto-generated installer metadata',
+  '.just-demand/installer-metadata.json',
 ];
 
 function parseArgs(argv) {

@@ -12,8 +12,8 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 
 ## Source Of Truth
 
-- Trust executable behavior over prose: `.just-demand/scripts/task.py`, `.just-demand/scripts/workflow_core.py`, and `.opencode/plugins/*.js` are the real workflow spec.
-- Do not hand-edit `.just-demand/state/state.json`, `locks.json`, or `events.jsonl`; change workflow state only through `.just-demand/scripts/`.
+- Trust executable behavior over prose: the `just-demand` CLI, `.just-demand/scripts/workflow_core.py`, and `.opencode/plugins/*.js` are the real workflow spec.
+- Do not hand-edit `.just-demand/state/state.json`, `locks.json`, or `events.jsonl`; change workflow state only through the `just-demand` CLI.
 - Main-session plugins should stay lightweight. `just-demand-state.js` should not inject a task-state dump; task inspection is explicit via `list-active`.
 
 ## Required Commands
@@ -22,12 +22,12 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Install tests: `python3 -m unittest tests.just_demand.test_install -v`
 - Plugin tests: `node --test tests/just_demand/test_opencode_plugins.mjs`
 - Validate Node package file: `python3 -m json.tool .opencode/package.json`
-- List unfinished formal tasks before execution: `python3 .just-demand/scripts/task.py --root . list-active`
-- Create intake: `python3 .just-demand/scripts/task.py --root . create-intake "<title>" "<raw request>" --session <session-id>`
-- Promote intake: `python3 .just-demand/scripts/task.py --root . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
-- Mark task status/progress/impact: `python3 .just-demand/scripts/task.py --root . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
-- Close verified work: `python3 .just-demand/scripts/task.py --root . complete-verification <task-id> passed "<summary>"`
-- Mid-task checkpoint: `python3 .just-demand/scripts/task.py --root . checkpoint-commit <task-id>`
+- List unfinished formal tasks before execution: `just-demand --root . list-active`
+- Create intake: `just-demand --root . create-intake "<title>" "<raw request>" --session <session-id>`
+- Promote intake: `just-demand --root . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
+- Mark task status/progress/impact: `just-demand --root . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
+- Close verified work: `just-demand --root . complete-verification <task-id> passed "<summary>"`
+- Mid-task checkpoint: `just-demand --root . checkpoint-commit <task-id>`
 
 ## Command Order That Matters
 

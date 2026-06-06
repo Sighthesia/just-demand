@@ -1,6 +1,83 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+const REMINDER_STATE = new Map()
+
+const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
+const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
+  "design",
+  "implementation",
+  "feature",
+  "feat",
+  "refactor",
+  "architecture",
+])
+const BUG_OR_MISMATCH_TASK_TYPES = new Set(["bug", "bugfix", "fix", "incident"])
+const WRITE_TOOL_RULES = Object.freeze([
+  {
+    name: "apply_patch",
+    label: "apply_patch",
+    match: (toolName) => toolName === "apply_patch",
+    needsExecutionGate: () => true,
+  },
+  {
+    name: "task:implement-check-docs",
+    label: "Task",
+    match: (toolName, args) => toolName === "task" && ["just-demand-implement", "just-demand-check", "just-demand-docs"].includes(String(args?.subagent_type || "")),
+    needsExecutionGate: () => true,
+  },
+  {
+    name: "bash:write-like",
+    label: "bash",
+    match: (toolName, args) => toolName === "bash" && looksLikeBashWriteCommand(String(args?.command || "")),
+    needsExecutionGate: () => true,
+  },
+])
+
+const BASH_WRITE_PATTERNS = [
+  /(^|[;&|])\s*(?:mkdir|touch|rm|mv|cp|ln|install|chmod|chown)\b/i,
+  /(^|[;&|])\s*git\s+(?:add|commit|amend|reset|clean|stash|checkout|switch|merge|rebase)\b/i,
+  /(^|[;&|])\s*(?:sed|perl)\s+-i\b/i,
+  /(^|[;&|])\s*tee\b/i,
+  /(^|[;&|])\s*truncate\b/i,
+  /(^|[;&|])\s*apply_patch\b/i,
+  />/,
+]
+const COMPLETION_CLAIM_PATTERNS = [
+  /\b(done|finished|complete(?:d)?|implemented|shipped|resolved|wrapped up)\b/i,
+  /\b(all set|good to go|ready to close|ready to ship|that'?s it|we'?re done)\b/i,
+  /\b(should be good|looks good|nothing else to do|no further changes)\b/i,
+  /\b(in a good place|close this out|wrap this up)\b/i,
+  /(?:已经)?(?:做完了?|完成了?)/,
+]
+
+const NEGATED_COMPLETION_PATTERNS = [
+  /\b(not yet|no(?:t)?\s+closing|not\s+closing\s+it\s+out|not\s+closing\s+out|not\s+done|not\s+finished|not\s+complete(?:d)?|not\s+ready\s+to\s+ship)\b/i,
+  /\b(not\s+ready\s+to\s+close(?:\s+it\s+out)?\s+yet|hold\s+off\s+on\s+closing(?:\s+it\s+out)?|not\s+closing(?:\s+it\s+out)?\s+yet|can't\s+close(?:\s+it\s+out)?\s+yet|won't\s+close(?:\s+it\s+out)?\s+yet)\b/i,
+  /\b(暂不|先不|还不|还不能|不能|不打算|不准备)\s*(?:收尾|结束|关闭|close|close\s+out|ship|done|完成|结束)/i,
+]
+
+const NEGATED_EXECUTION_PATTERNS = [
+  /\b(still\s+want\s+to\s+confirm|want\s+to\s+confirm\s+.*\s+first|need\s+to\s+confirm\s+.*\s+first|hold\s+off\s+on|not\s+yet|before\s+i\s+(?:say|do)|before\s+we\s+(?:say|do))\b/i,
+  /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
+]
+
+const EXECUTION_CANDIDATE_PATTERNS = [
+  /\b(i|we)\s+(am|'m|are|will|can|should|need to|need)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  /\b(i|we)\s+(should|will|can|need to)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  /\b(i|we)\s+(implemented|built|added|removed|refactored|updated|fixed|debugged|investigated|traced|analy[sz]ed|designed|reworked|extended|patched|changed)\b/i,
+  /\b(i(?:'ll)?|we)\s+just\s+finish(?:\s+this)?\s+in\s+the\s+main\s+session\b/i,
+  /直接在主会话里(?:实现|修复|调试|处理|修改)/,
+]
+
+const defaultReminderState = () => ({
+  same_topic_turns: 0,
+  last_reminder_type: null,
+  subagent_unavailable_pending: false,
+})
+
+const reminderStateKey = (directory, sessionID) => `${workflowRoot(directory)}::${sessionID || "main"}`
+
 export const workflowRoot = (directory) => join(directory, ".just-demand")
 
 export const readJson = (path) => {
@@ -13,8 +90,146 @@ export const readJson = (path) => {
 
 export const readTextIfExists = (path) => existsSync(path) ? readFileSync(path, "utf8") : ""
 
+export const getReminderState = (directory, sessionID) => {
+  const key = reminderStateKey(directory, sessionID)
+  if (!REMINDER_STATE.has(key)) {
+    REMINDER_STATE.set(key, defaultReminderState())
+  }
+  return REMINDER_STATE.get(key)
+}
+
+export const markSubagentUnavailablePending = (directory, sessionID) => {
+  const state = getReminderState(directory, sessionID)
+  state.subagent_unavailable_pending = true
+  state.last_reminder_type = null
+  return state
+}
+
+export const clearSubagentUnavailablePending = (directory, sessionID) => {
+  const state = getReminderState(directory, sessionID)
+  state.subagent_unavailable_pending = false
+  return state
+}
+
+export const updateReminderState = (directory, sessionID, updater) => {
+  const state = getReminderState(directory, sessionID)
+  updater(state)
+  return state
+}
+
+export const hasAssignedWorkflowSubagents = (task) => {
+  const subagents = task?.assigned_subagents
+  return Array.isArray(subagents) && subagents.some((subagent) => typeof subagent === "string" && subagent.startsWith(WORKFLOW_SUBAGENT_PREFIX))
+}
+
+export const textLooksLikeCompletionClaim = (text) => {
+  const value = String(text || "").trim()
+  if (!value) return false
+  if (NEGATED_COMPLETION_PATTERNS.some((pattern) => pattern.test(value))) return false
+  return COMPLETION_CLAIM_PATTERNS.some((pattern) => pattern.test(value))
+}
+
+export const taskLooksLikeLongContextExecutionCandidate = (task, text) => {
+  if (!task || task.status === "done") return false
+  if (hasAssignedWorkflowSubagents(task)) return false
+
+  const currentStep = String(task.current_step || "").toLowerCase()
+  const status = String(task.status || "").toLowerCase()
+  const body = String(text || "")
+  if (NEGATED_EXECUTION_PATTERNS.some((pattern) => pattern.test(body))) return false
+  const hasTaskSignal = EXECUTION_CANDIDATE_PATTERNS.some((pattern) => pattern.test(body))
+  const taskSignalsExecution = ["execut", "implement", "verify", "changes_requested"].some((fragment) => currentStep.includes(fragment) || status.includes(fragment))
+
+  return hasTaskSignal && taskSignalsExecution
+}
+
+export const taskNeedsVerificationCloseout = (task) => {
+  if (!task) return false
+  return String(task.verification_status || "").toLowerCase() !== "passed"
+}
+
+export const taskNeedsCheckpointFollowUp = (task) => {
+  if (!task) return false
+  if (String(task.verification_status || "").toLowerCase() !== "passed") return false
+  return !(task.checkpoint_commit && task.checkpoint_commit.created)
+}
+
+export const looksLikeBashWriteCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+  return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed))
+}
+
+export const getWriteToolRule = (toolName, args) => WRITE_TOOL_RULES.find((rule) => rule.match(toolName, args)) || null
+
+export const buildExecutionGateError = (toolLabel, taskId, missing) => {
+  const suffix = taskId
+    ? `active task ${taskId} is not ready for execution yet. Missing or incomplete fields: ${missing.join(", ")}`
+    : `there is no active formal task yet.`
+  return `Blocked ${toolLabel}: ${suffix}`
+}
+
+export const getMissingExecutionGateFields = (task) => {
+  if (!task) return ["active formal task"]
+
+  const clarification = task?.clarification || {}
+  const missing = []
+
+  if (!String(clarification.scope || "").trim()) {
+    missing.push("Scope")
+  }
+
+  if (Array.isArray(clarification.blocking_questions) && clarification.blocking_questions.length > 0) {
+    missing.push("Blocking Questions")
+  }
+
+  const taskType = String(task.type || "").trim().toLowerCase()
+  const needsBugClarification = Boolean(clarification.needs_bug_clarification) || BUG_OR_MISMATCH_TASK_TYPES.has(taskType)
+  if (needsBugClarification) {
+    if (!String(clarification.expected_behavior || "").trim()) missing.push("Expected Behavior")
+    if (!String(clarification.actual_behavior || "").trim()) missing.push("Actual Behavior")
+    if (!String(clarification.reproduction || "").trim()) missing.push("Reproduction")
+  }
+
+  if (DESIGN_OR_IMPLEMENTATION_TASK_TYPES.has(taskType)) {
+    if (!String(clarification.final_expected_effect || "").trim()) missing.push("Final Expected Effect")
+    if (!String(clarification.chosen_approach || "").trim()) missing.push("Chosen Approach")
+    if (!String(clarification.final_implementation_plan || "").trim()) missing.push("Final Implementation Plan")
+    if (!String(clarification.approval || "").trim()) missing.push("Approval")
+  }
+
+  return [...new Set(missing)]
+}
+
+export const taskIsReadyForExecution = (task) => getMissingExecutionGateFields(task).length === 0
+
+const renderClarificationContext = (task) => {
+  const clarification = task?.clarification || {}
+  const entries = [
+    ["Current Understanding", clarification.current_understanding],
+    ["Expected Behavior", clarification.expected_behavior],
+    ["Actual Behavior", clarification.actual_behavior],
+    ["Reproduction", clarification.reproduction],
+    ["Scope", clarification.scope],
+    ["Final Expected Effect", clarification.final_expected_effect],
+    ["Approach Options", clarification.approach_options],
+    ["Chosen Approach", clarification.chosen_approach],
+    ["Final Implementation Plan", clarification.final_implementation_plan],
+    ["Validation", clarification.validation],
+    ["Approval", clarification.approval],
+  ].filter(([, value]) => typeof value === "string" && value.trim())
+
+  if (entries.length === 0) return ""
+
+  return [
+    "# Clarification",
+    "",
+    ...entries.flatMap(([label, value]) => [`## ${label}`, value.trim(), ""]),
+  ].join("\n").trimEnd()
+}
+
 export const getActiveTask = (directory) => {
-  const statePath = join(workflowRoot(directory), "workspace", "state.json")
+  const statePath = join(workflowRoot(directory), "state", "state.json")
   if (!existsSync(statePath)) return null
   const state = readJson(statePath)
   if (!state) return null
@@ -22,12 +237,12 @@ export const getActiveTask = (directory) => {
 }
 
 export const readTaskJson = (directory, taskId) => {
-  const path = join(workflowRoot(directory), "tasks", "active", taskId, "task.json")
+  const path = join(workflowRoot(directory), "state", "active", taskId, "task.json")
   return existsSync(path) ? readJson(path) : null
 }
 
 export const listUnfinishedTasks = (directory) => {
-  const activeDir = join(workflowRoot(directory), "tasks", "active")
+  const activeDir = join(workflowRoot(directory), "state", "active")
   if (!existsSync(activeDir)) return []
   try {
     const entries = readdirSync(activeDir, { withFileTypes: true })
@@ -54,29 +269,45 @@ export const listUnfinishedTasks = (directory) => {
 
 
 export const readTaskContext = (directory, taskId, agentName) => {
-  const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
-  const workspaceDir = join(workflowRoot(directory), "workspace")
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
+  const knowledgeDir = join(workflowRoot(directory), "knowledge")
   const parts = []
+  const task = readTaskJson(directory, taskId)
 
   const context = readTextIfExists(join(taskDir, "context.md"))
   if (context) parts.push(context)
 
+  if (["just-demand-implement", "just-demand-check"].includes(agentName)) {
+    const clarificationContext = renderClarificationContext(task)
+    if (clarificationContext) parts.push(clarificationContext)
+  }
+
   const decisions = readTextIfExists(join(taskDir, "decisions.md"))
   if (decisions) parts.push(decisions)
 
+  const openQuestions = readTextIfExists(join(taskDir, "open_questions.md"))
+  const clarificationQuestions = task?.clarification?.non_blocking_questions || []
+  const hasRemainingOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, "")) || clarificationQuestions.length > 0
+  const renderedOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, ""))
+    ? openQuestions
+    : `# Open Questions\n\n## Remaining Open Questions\n\n${clarificationQuestions.map((question) => `- ${question}`).join("\n")}\n`
+  if (hasRemainingOpenQuestions && ["just-demand-implement", "just-demand-check"].includes(agentName)) {
+    parts.push(renderedOpenQuestions)
+  }
+
   switch (agentName) {
-    case "workflow-implement": {
+    case "just-demand-implement": {
       const implement = readTextIfExists(join(taskDir, "implement.md"))
       if (implement) parts.push(implement)
       break
     }
-    case "workflow-check": {
+    case "just-demand-check": {
       const verify = readTextIfExists(join(taskDir, "verify.md"))
       if (verify) parts.push(verify)
       break
     }
-    case "workflow-research": {
-      const facts = readTextIfExists(join(workspaceDir, "facts.md"))
+    case "just-demand-research": {
+      const facts = readTextIfExists(join(knowledgeDir, "memory.md"))
       if (facts) parts.push(`# Workspace Facts\n\n${facts}`)
       const researchDir = join(taskDir, "research")
       if (existsSync(researchDir)) {
@@ -84,11 +315,9 @@ export const readTaskContext = (directory, taskId, agentName) => {
       }
       break
     }
-    case "workflow-docs": {
-      const wsDecisions = readTextIfExists(join(workspaceDir, "decisions.md"))
+    case "just-demand-docs": {
+      const wsDecisions = readTextIfExists(join(knowledgeDir, "memory.md"))
       if (wsDecisions) parts.push(`# Workspace Decisions\n\n${wsDecisions}`)
-      const deferred = readTextIfExists(join(workspaceDir, "deferred_options.md"))
-      if (deferred) parts.push(`# Deferred Options\n\n${deferred}`)
       break
     }
   }
@@ -98,13 +327,13 @@ export const readTaskContext = (directory, taskId, agentName) => {
 
 export const getRequiredContextFiles = (agentName) => {
   switch (agentName) {
-    case "workflow-implement":
+    case "just-demand-implement":
       return ["context.md", "implement.md"]
-    case "workflow-check":
+    case "just-demand-check":
       return ["context.md", "verify.md"]
-    case "workflow-docs":
+    case "just-demand-docs":
       return ["context.md", "decisions.md"]
-    case "workflow-research":
+    case "just-demand-research":
       return ["context.md"]
     default:
       return []
@@ -112,6 +341,6 @@ export const getRequiredContextFiles = (agentName) => {
 }
 
 export const getMissingRequiredContextFiles = (directory, taskId, agentName) => {
-  const taskDir = join(workflowRoot(directory), "tasks", "active", taskId)
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
   return getRequiredContextFiles(agentName).filter((file) => !existsSync(join(taskDir, file)))
 }

@@ -35,15 +35,13 @@ describe('just-demand init', () => {
     console.log(output);
 
     // Check some key files exist
-    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/workflow_core.py')));
-    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/task.py')));
-    assert.ok(fs.existsSync(path.join(target, '.just-demand/global/rules.md')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/just-demand-state.js')));
-    assert.ok(fs.existsSync(path.join(target, '.opencode/agent/workflow-implement.md')));
-    assert.ok(fs.existsSync(path.join(target, '.opencode/skills/workflow-execution/SKILL.md')));
+    assert.ok(fs.existsSync(path.join(target, '.opencode/agent/just-demand-implement.md')));
+    assert.ok(fs.existsSync(path.join(target, '.opencode/skills/using-just-demand/SKILL.md')));
     assert.ok(fs.existsSync(path.join(target, 'AGENTS.md')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/package.json')));
     assert.ok(fs.existsSync(path.join(target, '.gitignore')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand', 'installer-metadata.json')));
 
     // Check .opencode/package.json has type: module
     const pkg = JSON.parse(fs.readFileSync(path.join(target, '.opencode/package.json'), 'utf8'));
@@ -56,7 +54,6 @@ describe('just-demand init', () => {
 
     execSync(`node ${CLI} init ${target}`, { encoding: 'utf8' });
 
-    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/task.py')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/just-demand-state.js')));
   });
 
@@ -66,7 +63,7 @@ describe('just-demand init', () => {
     const output = execSync(`node ${CLI} init ${target}`, { encoding: 'utf8' });
 
     assert.ok(output.includes('created target directory'));
-    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/workflow_core.py')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand', 'installer-metadata.json')));
   });
 
   it('skips existing files without overwriting', () => {
@@ -108,7 +105,7 @@ describe('just-demand init', () => {
     // Create .gitignore with some existing lines
     fs.writeFileSync(
       path.join(target, '.gitignore'),
-      'node_modules/\n.env\n# Workflow runtime state and task files\n.just-demand/tasks/\n'
+      'node_modules/\n.env\n'
     );
 
     const output = execSync(`node ${CLI} ${target}`, { encoding: 'utf8' });
@@ -119,11 +116,11 @@ describe('just-demand init', () => {
 
     // Check that missing lines were added
     const content = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
-    assert.ok(content.includes('.just-demand/workspace/state.json'));
-    assert.ok(content.includes('.just-demand/workspace/events.jsonl'));
+    assert.ok(content.includes('.just-demand/state/'));
+    assert.ok(content.includes('.just-demand/knowledge/'));
     // Should NOT duplicate existing line
     const lines = content.split('\n');
-    const taskLineCount = lines.filter(l => l === '.just-demand/tasks/').length;
+    const taskLineCount = lines.filter(l => l === '.just-demand/state/').length;
     assert.strictEqual(taskLineCount, 1);
   });
 
@@ -169,7 +166,7 @@ describe('just-demand init', () => {
 
     // Plugin file should be overwritten with template content
     const pluginContent = fs.readFileSync(pluginPath, 'utf8');
-    assert.ok(pluginContent.includes('buildWorkflowBreadcrumb'));
+    assert.ok(pluginContent.includes('[just-demand reminder]'));
     assert.ok(!pluginContent.includes('// old plugin'));
   });
 
@@ -214,8 +211,8 @@ describe('just-demand init', () => {
 
     // Check that missing lines were added
     const content = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
-    assert.ok(content.includes('.just-demand/workspace/state.json'));
-    assert.ok(content.includes('.just-demand/workspace/events.jsonl'));
+    assert.ok(content.includes('.just-demand/state/'));
+    assert.ok(content.includes('.just-demand/knowledge/'));
     // Should NOT duplicate existing line
     const lines = content.split('\n');
     const nodeModulesCount = lines.filter(l => l === 'node_modules/').length;
@@ -299,7 +296,7 @@ describe('just-demand upgrade', () => {
 
     // Plugin file should be overwritten with template content
     const pluginContent = fs.readFileSync(pluginPath, 'utf8');
-    assert.ok(pluginContent.includes('buildWorkflowBreadcrumb'));
+    assert.ok(pluginContent.includes('[just-demand reminder]'));
     assert.ok(!pluginContent.includes('// old plugin'));
   });
 
@@ -344,8 +341,8 @@ describe('just-demand upgrade', () => {
 
     // Check that missing lines were added
     const content = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
-    assert.ok(content.includes('.just-demand/workspace/state.json'));
-    assert.ok(content.includes('.just-demand/workspace/events.jsonl'));
+    assert.ok(content.includes('.just-demand/state/'));
+    assert.ok(content.includes('.just-demand/knowledge/'));
     // Should NOT duplicate existing line
     const lines = content.split('\n');
     const nodeModulesCount = lines.filter(l => l === 'node_modules/').length;
@@ -358,7 +355,7 @@ describe('just-demand upgrade', () => {
     const output = execSync(`node ${CLI} upgrade ${target}`, { encoding: 'utf8' });
 
     assert.ok(output.includes('created target directory'));
-    assert.ok(fs.existsSync(path.join(target, '.just-demand/scripts/task.py')));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand', 'installer-metadata.json')));
   });
 
   it('produces upgrade-specific log message', () => {

@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import runpy
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parent
+    task_script = repo_root / ".just-demand" / "scripts" / "task.py"
+    if not task_script.exists():
+        raise SystemExit(f"Missing workflow CLI backend: {task_script}")
+
+    sys.argv = [str(task_script), *sys.argv[1:]]
+    try:
+        runpy.run_path(str(task_script), run_name="__main__")
+    except SystemExit as exc:
+        code = exc.code
+        if isinstance(code, int):
+            return code
+        return 0 if code is None else 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

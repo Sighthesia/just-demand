@@ -819,7 +819,7 @@ def build_parser() -> Any:
     update_parser.add_argument("--opencode", action="store_true", help="Update OpenCode runtime assets")
     update_parser.add_argument("--global", action="store_true", dest="global_update", help="Update global installation")
 
-    sync_parser = sub.add_parser("sync-workspaces", help="Refresh local workflow scripts in initialized workspaces")
+    sync_parser = sub.add_parser("sync-workspaces", help="Refresh local workspace runtime state in initialized workspaces")
     sync_parser.add_argument("--search-root", action="append", default=None, help="Directory tree to scan for initialized workspaces (repeatable, default: current directory)")
     
     # doctor command

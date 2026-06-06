@@ -52,7 +52,7 @@ def repo_root() -> Path:
 
 def invocation_hint(project_root: Path, command: str = "<cmd>") -> str:
     """Return a one-line invocation example for the given project root."""
-    return f"  python3 {script_path()} --root {project_root} {command}"
+    return f"  just-demand --root {project_root} {command}"
 
 
 def print_invocation_hint(project_root: Path, stream=None) -> None:
@@ -60,7 +60,7 @@ def print_invocation_hint(project_root: Path, stream=None) -> None:
     out = stream if stream is not None else sys.stdout
     out.write("\nProject invocation:\n")
     out.write(invocation_hint(project_root, "list-active") + "\n")
-    out.write(f"  python3 {script_path()} where           # to find this script's path\n")
+    out.write("  just-demand where           # to inspect the global CLI entry\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -300,7 +300,7 @@ def execute_command(root: Path, args: list[str]) -> int:
             return 0 if (isinstance(result, dict) and result.get("status") != "error") else 1
         elif parsed.command == "where":
             target = Path(parsed.project).resolve() if parsed.project else None
-            print(f"task.py path: {script_path()}")
+            print("global CLI: just-demand")
             print(f"repo root:    {repo_root()}")
             if target is not None:
                 print()
@@ -309,7 +309,7 @@ def execute_command(root: Path, args: list[str]) -> int:
             else:
                 print()
                 print("To invoke against any project:")
-                print(f"  python3 {script_path()} --root <project> <cmd>")
+                print("  just-demand --root <project> <cmd>")
                 print()
                 print("Run with --project <path> to see a project-specific example.")
             return 0
@@ -348,9 +348,9 @@ def show_help():
     print("  archive-task <id>                 Archive completed task")
     print("  cleanup-task <id>                 Clean up completed task")
     print("  init                              Initialize project")
-    print("  sync-workspaces                   Sync workflow scripts")
+    print("  sync-workspaces                   Sync workspace runtime state")
     print("  doctor                            Check installation status")
-    print("  where [--project <path>]          Print task.py path and invocation example")
+    print("  where [--project <path>]          Print global CLI invocation example")
     print("  help                              Show this help")
     print("  exit / quit                       Exit interactive mode")
     print()

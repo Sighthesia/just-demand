@@ -433,7 +433,7 @@ class InstallCLITests(unittest.TestCase):
         
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            script = REPO_ROOT / "just-demand"
             result = subprocess.run(
                 [sys.executable, str(script), "--root", str(root), "init"],
                 text=True,
@@ -450,7 +450,7 @@ class InstallCLITests(unittest.TestCase):
         
         with tempfile.TemporaryDirectory() as tmp:
             config_root = Path(tmp)
-            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            script = REPO_ROOT / "just-demand"
             result = subprocess.run(
                 [sys.executable, str(script), "install", "--config-root", str(config_root)],
                 text=True,
@@ -463,7 +463,7 @@ class InstallCLITests(unittest.TestCase):
         
         with tempfile.TemporaryDirectory() as tmp:
             config_root = Path(tmp)
-            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            script = REPO_ROOT / "just-demand"
             result = subprocess.run(
                 [sys.executable, str(script), "install", "--opencode", "--global", "--config-root", str(config_root)],
                 text=True,
@@ -480,7 +480,7 @@ class InstallCLITests(unittest.TestCase):
         
         with tempfile.TemporaryDirectory() as tmp:
             config_root = Path(tmp)
-            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            script = REPO_ROOT / "just-demand"
             
             # Install first
             subprocess.run(
@@ -519,7 +519,7 @@ class InstallCLITests(unittest.TestCase):
             (legacy_scripts / "workflow_core.py").write_text("stale\n", encoding="utf-8")
             (legacy_scripts / "task.py").write_text("stale\n", encoding="utf-8")
 
-            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            script = REPO_ROOT / "just-demand"
             result = subprocess.run(
                 [sys.executable, str(script), "sync-workspaces", "--search-root", str(search_root)],
                 text=True,
@@ -539,7 +539,7 @@ class InstallCLITests(unittest.TestCase):
             root = Path(tmp)
             init_project(root)
             
-            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            script = REPO_ROOT / "just-demand"
             result = subprocess.run(
                 [sys.executable, str(script), "--root", str(root), "doctor"],
                 text=True,
@@ -556,7 +556,7 @@ class InstallCLITests(unittest.TestCase):
         
         with tempfile.TemporaryDirectory() as tmp:
             config_root = Path(tmp)
-            script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
+            script = REPO_ROOT / "just-demand"
             
             # Install first
             subprocess.run(
