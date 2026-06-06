@@ -19,7 +19,6 @@ from workflow_core import (
     promote_to_task,
 )
 from install import (
-    sync_initialized_workspaces,
     init_project,
     install_opencode_global,
     update_opencode_global,
@@ -119,9 +118,6 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--global", action="store_true", dest="global_update", help="Update global installation")
     update.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
 
-    sync = sub.add_parser("sync-workspaces", help="Refresh local workflow scripts in initialized workspaces")
-    sync.add_argument("--search-root", action="append", default=None, help="Directory tree to scan for initialized workspaces (repeatable, default: current directory)")
-    
     doctor = sub.add_parser("doctor", help="Report installation and activation status")
     doctor.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
     
@@ -241,56 +237,6 @@ def execute_command(root: Path, args: list[str]) -> int:
                 else:
                     print(json.dumps(result, ensure_ascii=False))
                 return 0 if result.get("status") == "success" else 1
-        elif parsed.command == "sync-workspaces":
-            # First update global installation to ensure latest scripts/plugins
-            print("Updating global installation...")
-            update_result = update_opencode_global()
-            if update_result.get("status") == "success":
-                results = update_result.get("results", {})
-                total = results.get("total_deployed", 0)
-                if total > 0:
-                    print(f"✓ Updated {total} global files")
-                else:
-                    print("· Global installation already current")
-                print_numstat(results.get("numstat", []))
-                if results.get("warnings"):
-                    for warning in results["warnings"]:
-                        print(f"  ⚠ {warning}")
-            else:
-                print(f"⚠ Global update failed: {update_result.get('message', 'Unknown error')}")
-            print()
-            
-            # Then sync workspaces
-            search_roots = [Path(path) for path in parsed.search_root] if parsed.search_root else None
-            result = sync_initialized_workspaces(search_roots)
-            # Format human-readable output for sync-workspaces
-            if result.get("status") == "success":
-                print(f"✓ {result['message']}  (workflow {result['workflow_version']})")
-                print()
-                for ws in result["workspaces"]:
-                    status = "✓ updated" if ws["updated"] else "· current"
-                    details = []
-                    if ws["scripts_synced"] > 0:
-                        details.append(f"{ws['scripts_synced']} scripts")
-                    if ws["legacy_removed"]:
-                        details.append(f"removed: {', '.join(ws['legacy_removed'])}")
-                    if ws["state_created"]:
-                        details.append("state initialized")
-                    if ws["gitignore_updated"]:
-                        details.append("gitignore updated")
-                    detail_str = f" ({', '.join(details)})" if details else ""
-                    # Shorten path for readability
-                    path = ws["project_root"]
-                    try:
-                        path = str(Path(path).relative_to(root))
-                    except ValueError:
-                        pass
-                    print(f"  {status}{detail_str}  {path}")
-                print_numstat(result.get("numstat", []))
-                print()
-            else:
-                print(json.dumps(result, ensure_ascii=False))
-            return 0 if result.get("status") == "success" else 1
         elif parsed.command == "doctor":
             config_root = Path(parsed.config_root) if parsed.config_root else None
             result = doctor_opencode_global(config_root, root)

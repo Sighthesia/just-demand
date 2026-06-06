@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import difflib
-import hashlib
 import shutil
 import sys
 from pathlib import Path
@@ -58,11 +57,6 @@ def get_repo_opencode_dir() -> Path:
     return get_repo_root() / ".opencode"
 
 
-def get_repo_scripts_dir() -> Path:
-    """Get the project-local workflow scripts directory in the repository."""
-    return get_repo_root() / ".just-demand" / "scripts"
-
-
 def get_config_root(config_root: Optional[Path] = None) -> Path:
     """Get the OpenCode config root, using provided or default."""
     return config_root or DEFAULT_CONFIG_ROOT
@@ -88,10 +82,22 @@ def make_numstat(path: str, additions: int, deletions: int) -> dict[str, Any]:
     return {"path": path, "additions": additions, "deletions": deletions}
 
 
-def workflow_version() -> str:
-    """Short content hash of the synced workflow file, used as a sync version id."""
-    content = (get_repo_scripts_dir() / "workflow_core.py").read_bytes()
-    return hashlib.sha256(content).hexdigest()[:12]
+def prune_manifest_entries(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Drop stale legacy workflow records that no longer belong to this runtime."""
+    installed_files = manifest.get("installed_files")
+    if not isinstance(installed_files, dict):
+        manifest["installed_files"] = {}
+        return manifest
+
+    manifest["installed_files"] = {
+        path: info
+        for path, info in installed_files.items()
+        if not (
+            path.startswith("agents/workflow-") or
+            path.startswith("skills/workflow-")
+        )
+    }
+    return manifest
 
 
 def load_manifest(config_root: Path) -> dict[str, Any]:
@@ -100,7 +106,7 @@ def load_manifest(config_root: Path) -> dict[str, Any]:
     if not manifest_path.exists():
         return {"installed_files": {}, "version": "1.0"}
     try:
-        return json.loads(manifest_path.read_text(encoding="utf-8"))
+        return prune_manifest_entries(json.loads(manifest_path.read_text(encoding="utf-8")))
     except (json.JSONDecodeError, OSError):
         return {"installed_files": {}, "version": "1.0"}
 
@@ -109,6 +115,7 @@ def save_manifest(config_root: Path, manifest: dict[str, Any]) -> None:
     """Save the installation manifest."""
     manifest_path = config_root / MANIFEST_FILE
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = prune_manifest_entries(manifest)
     encoded = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
     manifest_path.write_text(encoded, encoding="utf-8")
 
@@ -610,7 +617,6 @@ def sync_workspace(project_root: Path) -> dict[str, Any]:
     workspace/task directories are migrated into the current state layout.
     """
     workflow_root = project_root / ".just-demand"
-    repo_scripts = get_repo_scripts_dir()
     repo_root = get_repo_root()
     
     # Check if this is the repo itself (don't delete repo scripts)
@@ -713,58 +719,6 @@ def sync_workspace(project_root: Path) -> dict[str, Any]:
     )
     
     return result
-
-
-def discover_initialized_workspaces(search_root: Path) -> list[Path]:
-    """Find initialized project roots beneath a search root."""
-    resolved_root = search_root.resolve()
-    if not resolved_root.exists():
-        raise FileNotFoundError(f"Search root not found: {resolved_root}")
-
-    discovered: set[Path] = set()
-    for state_path in resolved_root.rglob(".just-demand/state/state.json"):
-        discovered.add(state_path.parents[2].resolve())
-    return sorted(discovered)
-
-
-def sync_initialized_workspaces(search_roots: Optional[list[Path]] = None) -> dict[str, Any]:
-    """Sync all initialized workspaces with latest layout."""
-    roots = search_roots or [Path.cwd()]
-    resolved_search_roots = [root.resolve() for root in roots]
-    workspaces: list[dict[str, Any]] = []
-    seen_projects: set[Path] = set()
-
-    for search_root in resolved_search_roots:
-        for project_root in discover_initialized_workspaces(search_root):
-            if project_root in seen_projects:
-                continue
-            seen_projects.add(project_root)
-            sync_result = sync_workspace(project_root)
-            workspaces.append({
-                "project_root": str(project_root),
-                "scripts_synced": sync_result["scripts_synced"],
-                "legacy_removed": sync_result["legacy_removed"],
-                "state_created": sync_result["state_created"],
-                "gitignore_updated": sync_result["gitignore_updated"],
-                "updated": sync_result["updated"],
-                "numstat": sync_result["numstat"],
-            })
-
-    total_scripts_synced = sum(item["scripts_synced"] for item in workspaces)
-    updated_count = sum(1 for item in workspaces if item["updated"])
-    return {
-        "status": "success",
-        "workflow_version": workflow_version(),
-        "search_roots": [str(root) for root in resolved_search_roots],
-        "workspaces_found": len(workspaces),
-        "workspaces_updated": updated_count,
-        "total_scripts_synced": total_scripts_synced,
-        "numstat": [entry for workspace in workspaces for entry in workspace["numstat"]],
-        "workspaces": workspaces,
-        "message": f"Synchronized {updated_count} of {len(workspaces)} workspaces",
-    }
-
-
 def init_project(project_root: Optional[Path] = None) -> dict[str, Any]:
     """Initialize project-local .just-demand state.
     
@@ -819,9 +773,6 @@ def build_parser() -> Any:
     update_parser.add_argument("--opencode", action="store_true", help="Update OpenCode runtime assets")
     update_parser.add_argument("--global", action="store_true", dest="global_update", help="Update global installation")
 
-    sync_parser = sub.add_parser("sync-workspaces", help="Refresh local workspace runtime state in initialized workspaces")
-    sync_parser.add_argument("--search-root", action="append", default=None, help="Directory tree to scan for initialized workspaces (repeatable, default: current directory)")
-    
     # doctor command
     doctor_parser = sub.add_parser("doctor", help="Report installation and activation status")
     
@@ -853,9 +804,6 @@ def main() -> int:
             result = {"status": "error", "message": "Update requires --opencode --global flags"}
         else:
             result = update_opencode_global(config_root)
-    elif args.command == "sync-workspaces":
-        search_roots = [Path(path) for path in args.search_root] if args.search_root else None
-        result = sync_initialized_workspaces(search_roots)
     elif args.command == "doctor":
         result = doctor_opencode_global(config_root, project_root)
     elif args.command == "uninstall":

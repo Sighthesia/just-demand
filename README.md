@@ -153,18 +153,6 @@ just-demand --root "C:\path\to\project" init
 
 `update --opencode --global` refreshes only the global OpenCode runtime assets under the OpenCode config root. It does not fan out to previously initialized project workspaces because project workspaces only hold local state. `init` is idempotent and is the explicit project bootstrap step.
 
-If you want one explicit command that refreshes all initialized workspaces under one or more directory trees, use `sync-workspaces`:
-
-```bash
-just-demand sync-workspaces --search-root "/projects" --search-root "/more-projects"
-```
-
-```powershell
-just-demand sync-workspaces --search-root "C:\Projects" --search-root "D:\Shared"
-```
-
-If you omit `--search-root`, the command scans the current working directory recursively.
-
 ## Check Status
 
 Check the current global install and the current project's activation status:
@@ -238,12 +226,6 @@ just-demand --root "/target/project" init
 just-demand update --opencode --global
 ```
 
-5. Refresh local state in all initialized workspaces:
-
-```bash
-just-demand sync-workspaces --search-root "/path/to/projects/parent"
-```
-
 ### Windows
 
 1. Clone or keep this repository at a stable local path (e.g. `C:\Users\You\just-demand`).
@@ -264,12 +246,6 @@ just-demand --root "C:\path\to\target\project" init
 
 ```powershell
 just-demand update --opencode --global
-```
-
-5. Refresh local workflow scripts in all initialized workspaces:
-
-```powershell
-just-demand sync-workspaces --search-root "C:\path\to\projects\parent"
 ```
 
 ## Verification Commands

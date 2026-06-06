@@ -11,7 +11,6 @@ SCRIPT_DIR = REPO_ROOT / ".just-demand" / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from install import (
-    sync_initialized_workspaces,
     init_project,
     install_opencode_global,
     update_opencode_global,
@@ -66,7 +65,7 @@ class InstallCoreTests(unittest.TestCase):
             self.assertEqual(result2["status"], "success")
             # Should not fail on second run
 
-    def test_init_project_refreshes_changed_local_script(self):
+    def test_init_project_is_idempotent_and_keeps_workspace_runtime_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             init_project(root)
@@ -74,35 +73,7 @@ class InstallCoreTests(unittest.TestCase):
             result = init_project(root)
 
             self.assertEqual(result["status"], "success")
-            self.assertEqual(result["scripts_synced"], 0)
-
-    def test_sync_initialized_workspaces_refreshes_all_discovered_projects(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            search_root = Path(tmp)
-            project_a = search_root / "project-a"
-            project_b = search_root / "nested" / "project-b"
-            project_a.mkdir(parents=True)
-            project_b.mkdir(parents=True)
-            init_project(project_a)
-            init_project(project_b)
-
-            result = sync_initialized_workspaces([search_root])
-
-            self.assertEqual(result["status"], "success")
-            self.assertEqual(result["workspaces_found"], 2)
-            self.assertEqual(result["workspaces_updated"], 0)
-            self.assertEqual(result["total_scripts_synced"], 0)
-
-    def test_sync_initialized_workspaces_returns_empty_result_when_none_found(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            search_root = Path(tmp)
-
-            result = sync_initialized_workspaces([search_root])
-
-            self.assertEqual(result["status"], "success")
-            self.assertEqual(result["workspaces_found"], 0)
-            self.assertEqual(result["workspaces_updated"], 0)
-            self.assertEqual(result["total_scripts_synced"], 0)
+            self.assertFalse((root / ".just-demand" / "scripts").exists())
     
     def test_get_repo_root_returns_path(self):
         repo_root = get_repo_root()
@@ -132,6 +103,29 @@ class InstallCoreTests(unittest.TestCase):
             
             loaded = load_manifest(config_root)
             self.assertEqual(loaded, manifest)
+
+    def test_load_manifest_prunes_stale_workflow_assets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp)
+            (config_root / ".just-demand-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "installed_files": {
+                            "plugins/just-demand-lib.js": {"source": "/source", "checksum": "123"},
+                            "agents/workflow-research.md": {"source": "/old", "checksum": "456"},
+                            "skills/workflow-intake/SKILL.md": {"source": "/old", "checksum": "789"},
+                        },
+                        "version": "1.0",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = load_manifest(config_root)
+
+            self.assertIn("plugins/just-demand-lib.js", loaded["installed_files"])
+            self.assertNotIn("agents/workflow-research.md", loaded["installed_files"])
+            self.assertNotIn("skills/workflow-intake/SKILL.md", loaded["installed_files"])
     
     def test_doctor_reports_global_status(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -155,6 +149,7 @@ class InstallCoreTests(unittest.TestCase):
             
             self.assertTrue(result["project"]["just_demand_dir_exists"])
             self.assertTrue(result["project"]["workspace_state_exists"])
+            self.assertNotIn("workflow", json.dumps(result["global"]))
     
     def test_uninstall_removes_managed_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -505,33 +500,6 @@ class InstallCLITests(unittest.TestCase):
             self.assertIn("✓", result.stdout)
             self.assertIn("Diff summary:", result.stdout)
 
-    def test_cli_sync_workspaces(self):
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            search_root = Path(tmp)
-            project_root = search_root / "project"
-            project_root.mkdir()
-            init_project(project_root)
-
-            legacy_scripts = project_root / ".just-demand" / "scripts"
-            legacy_scripts.mkdir(parents=True, exist_ok=True)
-            (legacy_scripts / "workflow_core.py").write_text("stale\n", encoding="utf-8")
-            (legacy_scripts / "task.py").write_text("stale\n", encoding="utf-8")
-
-            script = REPO_ROOT / "just-demand"
-            result = subprocess.run(
-                [sys.executable, str(script), "sync-workspaces", "--search-root", str(search_root)],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            # Check for success indicators in human-readable output
-            self.assertIn("✓", result.stdout)
-            self.assertIn("Synchronized", result.stdout)
-            self.assertIn("Diff summary:", result.stdout)
-            self.assertFalse((project_root / ".just-demand" / "scripts").exists())
-    
     def test_cli_doctor(self):
         import subprocess
         
