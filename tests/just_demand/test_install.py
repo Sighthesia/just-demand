@@ -23,6 +23,7 @@ from install import (
     save_manifest,
     deploy_config_file,
     DEPLOYED_FILES,
+    render_workspace_task_shim,
 )
 
 
@@ -31,13 +32,37 @@ class InstallCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             result = init_project(root)
-            
+
             self.assertEqual(result["status"], "success")
+            self.assertIn("workflow_core.py runtime core", result["message"])
+            self.assertIn("thin task.py shim", result["message"])
             self.assertTrue((root / ".just-demand").exists())
             self.assertTrue((root / ".just-demand" / "state" / "state.json").exists())
             self.assertTrue((root / ".just-demand" / "knowledge" / "memory.md").exists())
             self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())
             # task.py and install.py are not copied, they use global installation
+
+    def test_init_project_keeps_global_cli_entrypoints_outside_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            init_project(root)
+
+            self.assertFalse((root / ".just-demand" / "scripts" / "install.py").exists())
+
+    def test_init_project_creates_workspace_task_shim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            result = init_project(root)
+            shim = root / ".just-demand" / "scripts" / "task.py"
+
+            self.assertEqual(result["status"], "success")
+            self.assertTrue(shim.exists())
+            shim_text = shim.read_text(encoding="utf-8")
+            self.assertIn("SOURCE_TASK", shim_text)
+            self.assertIn("subprocess.run", shim_text)
+            self.assertIn("source repository", result["message"])
 
     def test_init_project_creates_only_project_workflow_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -73,6 +98,21 @@ class InstallCoreTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertGreater(result["scripts_synced"], 0)
             self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
+
+    def test_init_project_refreshes_changed_task_shim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = SCRIPT_DIR / "task.py"
+
+            init_project(root)
+            target = root / ".just-demand" / "scripts" / "task.py"
+            target.write_text("stale shim\n", encoding="utf-8")
+
+            result = init_project(root)
+
+            self.assertEqual(result["status"], "success")
+            self.assertGreater(result["scripts_synced"], 0)
+            self.assertEqual(target.read_text(encoding="utf-8"), render_workspace_task_shim(source))
 
     def test_sync_initialized_workspaces_refreshes_all_discovered_projects(self):
         with tempfile.TemporaryDirectory() as tmp:

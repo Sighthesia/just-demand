@@ -433,20 +433,62 @@ def doctor_opencode_global(config_root: Optional[Path] = None, project_root: Opt
 
 
 def sync_project_scripts(project_root: Path) -> int:
-    """Copy only workflow_core.py into a workspace.
+    """Copy the workspace-local runtime core and entrypoint shim.
 
-    task.py and install.py are used from global installation.
-    Only the core state machine (workflow_core.py) is needed locally.
+    The workspace keeps `workflow_core.py` locally and a thin `task.py` shim
+    that forwards to the source repository's full CLI. `install.py` remains a
+    global/source-repo tool and is not copied into workspaces.
     """
     workflow_root = project_root / ".just-demand"
-    source = get_repo_scripts_dir() / "workflow_core.py"
-    target = workflow_root / "scripts" / "workflow_core.py"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    
-    if not target.exists() or source.read_text(encoding="utf-8") != target.read_text(encoding="utf-8"):
-        shutil.copy2(str(source), str(target))
+    scripts_dir = workflow_root / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    synced = 0
+
+    core_source = get_repo_scripts_dir() / "workflow_core.py"
+    core_target = scripts_dir / "workflow_core.py"
+    if not core_target.exists() or core_source.read_text(encoding="utf-8") != core_target.read_text(encoding="utf-8"):
+        shutil.copy2(str(core_source), str(core_target))
+        synced += 1
+
+    shim_target = scripts_dir / "task.py"
+    shim_source = get_repo_scripts_dir() / "task.py"
+    shim_text = render_workspace_task_shim(shim_source)
+    if not shim_target.exists() or shim_target.read_text(encoding="utf-8") != shim_text:
+        shim_target.write_text(shim_text, encoding="utf-8")
+        synced += 1
+
+    return synced
+
+
+def render_workspace_task_shim(source_task_path: Path) -> str:
+    """Render a tiny workspace-local task.py that forwards to the source CLI."""
+    return f'''#!/usr/bin/env python3
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+
+SOURCE_TASK = Path({str(source_task_path)!r})
+
+
+def main() -> int:
+    if not SOURCE_TASK.exists():
+        sys.stderr.write(
+            "Just Demand task CLI not found at: " + str(SOURCE_TASK) + "\n"
+            "Run the source repository copy of task.py instead.\n"
+        )
         return 1
-    return 0
+
+    completed = subprocess.run([sys.executable, str(SOURCE_TASK), *sys.argv[1:]])
+    return completed.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
 
 
 def migrate_workspace(project_root: Path) -> dict[str, Any]:
@@ -651,13 +693,22 @@ def sync_workspace(project_root: Path) -> dict[str, Any]:
     
     # Delete old scripts that are no longer needed (only in project workspaces, not repo)
     if not is_repo:
-        for old_file in ["task.py", "install.py"]:
+        for old_file in ["install.py"]:
             old_path = scripts_dir / old_file
             if old_path.exists():
                 removed_lines = len(old_path.read_text(encoding="utf-8").splitlines())
                 old_path.unlink()
                 result["legacy_removed"].append(f"scripts/{old_file}")
                 result["numstat"].append(make_numstat(f".just-demand/scripts/{old_file}", 0, removed_lines))
+
+        shim_path = scripts_dir / "task.py"
+        shim_text = render_workspace_task_shim(get_repo_scripts_dir() / "task.py")
+        before_text = shim_path.read_text(encoding="utf-8") if shim_path.exists() else None
+        if before_text != shim_text:
+            shim_path.write_text(shim_text, encoding="utf-8")
+            result["scripts_synced"] += 1
+            additions, deletions = line_numstat(before_text, shim_text)
+            result["numstat"].append(make_numstat(".just-demand/scripts/task.py", additions, deletions))
     
     # Copy workflow_core.py if changed
     source = repo_scripts / "workflow_core.py"
@@ -811,7 +862,11 @@ def init_project(project_root: Optional[Path] = None) -> dict[str, Any]:
             "scripts_synced": sync_result["scripts_synced"],
             "legacy_removed": sync_result["legacy_removed"],
             "numstat": sync_result["numstat"],
-            "message": f"Initialized project workspace in {project_root / '.just-demand'}",
+            "message": (
+                f"Initialized project workspace in {project_root / '.just-demand'}; "
+                "synced the local workflow_core.py runtime core plus a thin task.py shim "
+                "that forwards to the source repository CLI"
+            ),
         }
     except Exception as e:
         return {
