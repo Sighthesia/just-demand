@@ -73,7 +73,6 @@ def ensure_workspace(root: Path) -> None:
         base / "state" / "active",
         base / "state" / "archive",
         base / "knowledge",
-        base / "scripts",
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 

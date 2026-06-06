@@ -23,7 +23,6 @@ from install import (
     save_manifest,
     deploy_config_file,
     DEPLOYED_FILES,
-    render_workspace_task_shim,
 )
 
 
@@ -34,13 +33,10 @@ class InstallCoreTests(unittest.TestCase):
             result = init_project(root)
 
             self.assertEqual(result["status"], "success")
-            self.assertIn("workflow_core.py runtime core", result["message"])
-            self.assertIn("thin task.py shim", result["message"])
+            self.assertIn("stored local state only", result["message"])
             self.assertTrue((root / ".just-demand").exists())
             self.assertTrue((root / ".just-demand" / "state" / "state.json").exists())
             self.assertTrue((root / ".just-demand" / "knowledge" / "memory.md").exists())
-            self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())
-            # task.py and install.py are not copied, they use global installation
 
     def test_init_project_keeps_global_cli_entrypoints_outside_workspace(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -49,20 +45,6 @@ class InstallCoreTests(unittest.TestCase):
             init_project(root)
 
             self.assertFalse((root / ".just-demand" / "scripts" / "install.py").exists())
-
-    def test_init_project_creates_workspace_task_shim(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-
-            result = init_project(root)
-            shim = root / ".just-demand" / "scripts" / "task.py"
-
-            self.assertEqual(result["status"], "success")
-            self.assertTrue(shim.exists())
-            shim_text = shim.read_text(encoding="utf-8")
-            self.assertIn("SOURCE_TASK", shim_text)
-            self.assertIn("subprocess.run", shim_text)
-            self.assertIn("source repository", result["message"])
 
     def test_init_project_creates_only_project_workflow_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -87,32 +69,12 @@ class InstallCoreTests(unittest.TestCase):
     def test_init_project_refreshes_changed_local_script(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            source = SCRIPT_DIR / "workflow_core.py"
-
             init_project(root)
-            target = root / ".just-demand" / "scripts" / "workflow_core.py"
-            target.write_text("stale\n", encoding="utf-8")
 
             result = init_project(root)
 
             self.assertEqual(result["status"], "success")
-            self.assertGreater(result["scripts_synced"], 0)
-            self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
-
-    def test_init_project_refreshes_changed_task_shim(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = SCRIPT_DIR / "task.py"
-
-            init_project(root)
-            target = root / ".just-demand" / "scripts" / "task.py"
-            target.write_text("stale shim\n", encoding="utf-8")
-
-            result = init_project(root)
-
-            self.assertEqual(result["status"], "success")
-            self.assertGreater(result["scripts_synced"], 0)
-            self.assertEqual(target.read_text(encoding="utf-8"), render_workspace_task_shim(source))
+            self.assertEqual(result["scripts_synced"], 0)
 
     def test_sync_initialized_workspaces_refreshes_all_discovered_projects(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -124,20 +86,12 @@ class InstallCoreTests(unittest.TestCase):
             init_project(project_a)
             init_project(project_b)
 
-            source_core = SCRIPT_DIR / "workflow_core.py"
-            target_core_a = project_a / ".just-demand" / "scripts" / "workflow_core.py"
-            target_core_b = project_b / ".just-demand" / "scripts" / "workflow_core.py"
-            target_core_a.write_text("stale core\n", encoding="utf-8")
-            target_core_b.write_text("stale core\n", encoding="utf-8")
-
             result = sync_initialized_workspaces([search_root])
 
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["workspaces_found"], 2)
-            self.assertEqual(result["workspaces_updated"], 2)
-            self.assertGreaterEqual(result["total_scripts_synced"], 2)
-            self.assertEqual(target_core_a.read_text(encoding="utf-8"), source_core.read_text(encoding="utf-8"))
-            self.assertEqual(target_core_b.read_text(encoding="utf-8"), source_core.read_text(encoding="utf-8"))
+            self.assertEqual(result["workspaces_updated"], 0)
+            self.assertEqual(result["total_scripts_synced"], 0)
 
     def test_sync_initialized_workspaces_returns_empty_result_when_none_found(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -488,9 +442,8 @@ class InstallCLITests(unittest.TestCase):
             )
             # Check for success indicators in human-readable output
             self.assertIn("✓", result.stdout)
-            self.assertIn("Diff summary:", result.stdout)
             self.assertTrue((root / ".just-demand").exists())
-            self.assertTrue((root / ".just-demand" / "scripts" / "workflow_core.py").exists())
+            self.assertTrue((root / ".just-demand" / "state" / "state.json").exists())
     
     def test_cli_install_requires_flags(self):
         import subprocess
@@ -561,9 +514,10 @@ class InstallCLITests(unittest.TestCase):
             project_root.mkdir()
             init_project(project_root)
 
-            source = SCRIPT_DIR / "workflow_core.py"
-            target = project_root / ".just-demand" / "scripts" / "workflow_core.py"
-            target.write_text("stale\n", encoding="utf-8")
+            legacy_scripts = project_root / ".just-demand" / "scripts"
+            legacy_scripts.mkdir(parents=True, exist_ok=True)
+            (legacy_scripts / "workflow_core.py").write_text("stale\n", encoding="utf-8")
+            (legacy_scripts / "task.py").write_text("stale\n", encoding="utf-8")
 
             script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
             result = subprocess.run(
@@ -576,7 +530,7 @@ class InstallCLITests(unittest.TestCase):
             self.assertIn("✓", result.stdout)
             self.assertIn("Synchronized", result.stdout)
             self.assertIn("Diff summary:", result.stdout)
-            self.assertEqual(target.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
+            self.assertFalse((project_root / ".just-demand" / "scripts").exists())
     
     def test_cli_doctor(self):
         import subprocess

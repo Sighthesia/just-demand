@@ -86,7 +86,7 @@ python .just-demand/scripts/task.py install --opencode --global --config-root "C
 
 ## Enable In A Project
 
-After the global install, each project needs its own local `.just-demand/` state and the managed `.just-demand/scripts/` snapshot created by `init`.
+After the global install, each project needs its own local `.just-demand/` state created by `init`.
 
 Linux / macOS:
 
@@ -109,7 +109,7 @@ This creates:
 The normal model is:
 
 - global install provides reusable OpenCode runtime capability
-- each project stores its own local `.just-demand/` state and local workflow script snapshot
+- each project stores its own local `.just-demand/` state and knowledge files
 
 No per-project `.opencode/` copy is required for the normal flow.
 
@@ -141,7 +141,7 @@ python .just-demand/scripts/task.py update --opencode --global --config-root "C:
 
 Project-local state usually does not need migration for this workflow change. If a project has not been initialized yet, run `init` for that project.
 
-If you have existing initialized projects and want to refresh their local `.just-demand/scripts/` after pulling repository changes, rerun `init` for each project from the updated repository checkout:
+If you have existing initialized projects, rerun `init` for each project from the updated repository checkout to refresh local state if needed:
 
 ```bash
 python3 /stable/path/to/just-demand/.just-demand/scripts/task.py --root "/target/project" init
@@ -151,7 +151,7 @@ python3 /stable/path/to/just-demand/.just-demand/scripts/task.py --root "/target
 python C:\path\to\just-demand\.just-demand\scripts\task.py --root "C:\path\to\project" init
 ```
 
-`update --opencode --global` refreshes only the global OpenCode runtime assets under the OpenCode config root. It does not fan out to previously initialized project workspaces because those workspaces hold their own local `.just-demand/scripts/` copies. `init` is idempotent and now acts as the explicit workspace script sync step.
+`update --opencode --global` refreshes only the global OpenCode runtime assets under the OpenCode config root. It does not fan out to previously initialized project workspaces because project workspaces only hold local state. `init` is idempotent and is the explicit project bootstrap step.
 
 If you want one explicit command that refreshes all initialized workspaces under one or more directory trees, use `sync-workspaces`:
 
@@ -238,7 +238,7 @@ python3 /stable/path/to/just-demand/.just-demand/scripts/task.py --root "/target
 python3 .just-demand/scripts/task.py update --opencode --global
 ```
 
-5. Refresh local workflow scripts in all initialized workspaces:
+5. Refresh local state in all initialized workspaces:
 
 ```bash
 python3 .just-demand/scripts/task.py sync-workspaces --search-root "/path/to/projects/parent"
