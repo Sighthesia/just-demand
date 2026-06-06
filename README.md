@@ -91,13 +91,13 @@ After the global install, each project needs its own local `.just-demand/` state
 Linux / macOS:
 
 ```bash
-just-demand --root "/path/to/project" init
+just-demand "/path/to/project" init
 ```
 
 Windows:
 
 ```powershell
-just-demand --root "C:\path\to\project" init
+just-demand "C:\path\to\project" init
 ```
 
 This creates:
@@ -144,11 +144,11 @@ Project-local state usually does not need migration for this workflow change. If
 If you have existing initialized projects, rerun `init` for each project from the updated repository checkout to refresh local state if needed:
 
 ```bash
-just-demand --root "/target/project" init
+just-demand "/target/project" init
 ```
 
 ```powershell
-just-demand --root "C:\path\to\project" init
+just-demand "C:\path\to\project" init
 ```
 
 `update --opencode --global` refreshes only the global OpenCode runtime assets under the OpenCode config root. It does not fan out to previously initialized project workspaces because project workspaces only hold local state. `init` is idempotent and is the explicit project bootstrap step.
@@ -160,23 +160,23 @@ Check the current global install and the current project's activation status:
 Linux / macOS:
 
 ```bash
-just-demand --root . doctor
+just-demand doctor
 ```
 
 Windows:
 
 ```powershell
-just-demand --root . doctor
+just-demand doctor
 ```
 
 Check another project explicitly:
 
 ```bash
-just-demand --root "/path/to/project" doctor
+just-demand "/path/to/project" doctor
 ```
 
 ```powershell
-just-demand --root "C:\path\to\project" doctor
+just-demand "C:\path\to\project" doctor
 ```
 
 ## Uninstall
@@ -217,7 +217,7 @@ just-demand install --opencode --global
 3. For each project you want to use Just Demand in:
 
 ```bash
-just-demand --root "/target/project" init
+just-demand "/target/project" init
 ```
 
 4. After updating this repository, refresh the global runtime assets:
@@ -239,7 +239,7 @@ just-demand install --opencode --global
 3. For each project you want to use Just Demand in:
 
 ```powershell
-just-demand --root "C:\path\to\target\project" init
+just-demand "C:\path\to\target\project" init
 ```
 
 4. After updating this repository, refresh the global runtime assets:

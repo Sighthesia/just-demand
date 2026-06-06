@@ -73,7 +73,7 @@ Use the `question` tool when feasible so the user can answer with one click. Tre
 Use `mark` for high-frequency, low-token state updates:
 
 ```text
-just-demand --root . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]
+just-demand . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]
 ```
 
 ### When to mark
@@ -133,7 +133,7 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 ## Execution Loop
 
 1. Confirm active formal work item.
-2. Run `just-demand --root . list-active` and inspect all unfinished tasks for conflict risk.
+2. Run `just-demand . list-active` and inspect all unfinished tasks for conflict risk.
 3. Ensure the current task package has the required files for the intended subagent.
 4. Verify the clarification gate above passes. If not, route back to clarification.
 5. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
@@ -149,7 +149,7 @@ Every clean verification result should produce a checkpoint commit. The commit r
 When verification passes, the script-owned closure command creates the checkpoint commit automatically:
 
 ```text
-just-demand --root . complete-verification <task-id> passed "<summary>"
+just-demand . complete-verification <task-id> passed "<summary>"
 ```
 
 That command records verification, runs the checkpoint-commit safety gate, and archives the task. Pass `--no-checkpoint-commit` only when the user explicitly asked to avoid committing.
@@ -159,7 +159,7 @@ That command records verification, runs the checkpoint-commit safety gate, and a
 After any clean `just-demand-check` result, create a mid-task checkpoint without closing the task:
 
 ```text
-just-demand --root . checkpoint-commit <task-id>
+just-demand . checkpoint-commit <task-id>
 ```
 
 This is useful for:

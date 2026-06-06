@@ -15,6 +15,7 @@ from workflow_core import ensure_workspace
 
 # Default OpenCode config root
 DEFAULT_CONFIG_ROOT = Path.home() / ".config" / "opencode"
+COMMANDS = {"init", "install", "update", "doctor", "uninstall"}
 
 # Files to deploy for global installation
 DEPLOYED_FILES = {
@@ -754,8 +755,10 @@ def build_parser() -> Any:
     """Build argument parser for install CLI."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Just Demand installation and initialization tools")
-    parser.add_argument("--root", default=".", help="Project root (for project commands)")
+    parser = argparse.ArgumentParser(
+        description="Just Demand installation and initialization tools",
+        epilog="Use: just-demand [project-dir] <command> ...",
+    )
     parser.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
     
     sub = parser.add_subparsers(dest="command", required=True)
@@ -784,13 +787,21 @@ def build_parser() -> Any:
     return parser
 
 
+def split_project_root(argv: list[str]) -> tuple[Path | None, list[str]]:
+    """Split an optional leading project directory from command arguments."""
+    if len(argv) >= 2 and argv[0] not in COMMANDS and not argv[0].startswith("-") and argv[1] in COMMANDS:
+        return Path(argv[0]), argv[1:]
+    return None, argv
+
+
 def main() -> int:
     """Main entry point for install CLI."""
+    project_root_arg, cmd_args = split_project_root(sys.argv[1:])
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(cmd_args)
     
     config_root = Path(args.config_root) if args.config_root else None
-    project_root = Path(args.root).resolve()
+    project_root = (project_root_arg or Path(".")).resolve()
     
     if args.command == "init":
         result = init_project(project_root)

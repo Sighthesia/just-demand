@@ -430,7 +430,7 @@ class InstallCLITests(unittest.TestCase):
             root = Path(tmp)
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "init"],
+                [sys.executable, str(script), str(root), "init"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -509,7 +509,7 @@ class InstallCLITests(unittest.TestCase):
             
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "doctor"],
+                [sys.executable, str(script), str(root), "doctor"],
                 text=True,
                 capture_output=True,
                 check=True,

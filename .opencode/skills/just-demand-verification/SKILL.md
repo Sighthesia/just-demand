@@ -147,7 +147,7 @@ After `just-demand-check` passes with no unresolved findings, the main agent sho
 Use the script-owned closure path instead of inventing an inline sequence:
 
 ```text
-just-demand --root . complete-verification <task-id> passed "<summary>"
+just-demand . complete-verification <task-id> passed "<summary>"
 ```
 
 This command records the verification result, applies the checkpoint-commit safety gate, and archives the task when appropriate.

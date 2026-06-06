@@ -731,7 +731,7 @@ Append this test method inside `WorkflowCoreTests` before the `if __name__ == "_
             root = Path(tmp)
             script = REPO_ROOT / ".agent-workflow" / "scripts" / "task.py"
             result = subprocess.run(
-                [sys.executable, str(script), "create-intake", "Agent workflow", "Build workflow", "--session", "session-main", "--root", str(root)],
+                [sys.executable, str(script), str(root), "create-intake", "Agent workflow", "Build workflow", "--session", "session-main"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -764,7 +764,7 @@ from workflow_core import create_intake, promote_to_task
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Agent workflow task tools")
-    parser.add_argument("--root", default=".", help="Workspace root")
+    parser.add_argument("project_dir", nargs="?", default=".", help="Workspace root")
     sub = parser.add_subparsers(dest="command", required=True)
 
     create = sub.add_parser("create-intake", help="Create a workspace intake note")
@@ -1213,7 +1213,7 @@ Expected: PASS, 3 tests run.
 
 - [ ] **Step 3: Run a manual CLI smoke test in a temporary directory**
 
-Run: `tmpdir=$(mktemp -d) && python3 .agent-workflow/scripts/task.py --root "$tmpdir" create-intake "Agent workflow" "Build workflow" --session session-main`
+Run: `tmpdir=$(mktemp -d) && python3 .agent-workflow/scripts/task.py "$tmpdir" create-intake "Agent workflow" "Build workflow" --session session-main`
 
 Expected: JSON output containing `intake_id` and `path`.
 

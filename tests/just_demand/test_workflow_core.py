@@ -386,7 +386,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "create-intake", "Agent workflow", "Build workflow", "--session", "session-main"],
+                [sys.executable, str(script), str(root), "create-intake", "Agent workflow", "Build workflow", "--session", "session-main"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -403,7 +403,7 @@ class WorkflowCoreTests(unittest.TestCase):
             intake = create_intake(root, "Broken save", "Bug: save is broken", "session-main")
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "promote", intake["intake_id"], "Broken save", "Fix save", "--type", "bugfix", "--acceptance", "Saving works"],
+                [sys.executable, str(script), str(root), "promote", intake["intake_id"], "Broken save", "Fix save", "--type", "bugfix", "--acceptance", "Saving works"],
                 text=True,
                 capture_output=True,
             )
@@ -434,7 +434,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "list-active"],
+                [sys.executable, str(script), str(root), "list-active"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -515,7 +515,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "cleanup-task", task_id],
+                [sys.executable, str(script), str(root), "cleanup-task", task_id],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -537,7 +537,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "cleanup-task", task_id],
+                [sys.executable, str(script), str(root), "cleanup-task", task_id],
                 text=True,
                 capture_output=True,
             )
@@ -794,7 +794,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "complete-verification", task_id, "passed", "All done"],
+                [sys.executable, str(script), str(root), "complete-verification", task_id, "passed", "All done"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -870,7 +870,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "archive-task", task_id],
+                [sys.executable, str(script), str(root), "archive-task", task_id],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -892,7 +892,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "archive-task", task_id],
+                [sys.executable, str(script), str(root), "archive-task", task_id],
                 text=True,
                 capture_output=True,
             )
@@ -1159,7 +1159,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "mark", task_id, "debugging", "--progress", "42", "--impact", ".just-demand/scripts/", "--note", "debugging state"],
+                [sys.executable, str(script), str(root), "mark", task_id, "debugging", "--progress", "42", "--impact", ".just-demand/scripts/", "--note", "debugging state"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -1182,7 +1182,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "mark", task_id, "bogus"],
+                [sys.executable, str(script), str(root), "mark", task_id, "bogus"],
                 text=True,
                 capture_output=True,
             )
@@ -1201,7 +1201,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "list-active", "--verbose"],
+                [sys.executable, str(script), str(root), "list-active", "--verbose"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -1420,7 +1420,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "checkpoint-commit", task_id],
+                [sys.executable, str(script), str(root), "checkpoint-commit", task_id],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -1477,8 +1477,8 @@ class WorkflowCoreTests(unittest.TestCase):
         self.assertIn("just-demand", result.stdout)
         self.assertIn("repo root:", result.stdout)
         self.assertIn(str(REPO_ROOT.resolve()), result.stdout)
-        self.assertIn("To invoke against any project:", result.stdout)
-        self.assertIn("--root <project>", result.stdout)
+        self.assertIn("To invoke against a project:", result.stdout)
+        self.assertIn(f"just-demand {REPO_ROOT.resolve()} list-active", result.stdout)
 
     def test_where_cli_project_flag_includes_invocation(self):
         import subprocess
@@ -1487,12 +1487,12 @@ class WorkflowCoreTests(unittest.TestCase):
             project = Path(tmp)
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "where", "--project", str(project)],
+                [sys.executable, str(script), str(project), "where"],
                 text=True,
                 capture_output=True,
                 check=True,
             )
-            self.assertIn("To invoke against the project:", result.stdout)
+            self.assertIn("To invoke against a project:", result.stdout)
             self.assertIn(str(project.resolve()), result.stdout)
             self.assertIn("list-active", result.stdout)
 
@@ -1503,7 +1503,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root = Path(tmp)
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "init"],
+                [sys.executable, str(script), str(root), "init"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -1520,14 +1520,14 @@ class WorkflowCoreTests(unittest.TestCase):
             script = REPO_ROOT / "just-demand"
             # First init so the project has a .just-demand directory
             subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "init"],
+                [sys.executable, str(script), str(root), "init"],
                 text=True,
                 capture_output=True,
                 check=True,
             )
             # Now doctor: stdout must remain valid JSON; stderr carries the hint
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "doctor"],
+                [sys.executable, str(script), str(root), "doctor"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -1535,7 +1535,7 @@ class WorkflowCoreTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertTrue(payload["project"]["just_demand_dir_exists"])
             self.assertIn("Project invocation:", result.stderr)
-            self.assertIn("just-demand --root", result.stderr)
+            self.assertIn("just-demand", result.stderr)
             self.assertIn(str(root.resolve()), result.stderr)
 
     def test_doctor_cli_no_invocation_hint_when_project_not_initialized(self):
@@ -1546,7 +1546,7 @@ class WorkflowCoreTests(unittest.TestCase):
             root.mkdir()
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), "--root", str(root), "doctor"],
+                [sys.executable, str(script), str(root), "doctor"],
                 text=True,
                 capture_output=True,
                 check=True,

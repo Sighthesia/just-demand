@@ -134,7 +134,7 @@ Users skim. Output past ~300 characters is usually not read closely, so every ma
 - Main-session plugins should not inject workflow text when there is no active unfinished formal task.
 - Active unfinished tasks do not get a `<workflow-state>` breadcrumb in main-session messages. Tasks should be inspected explicitly via list-active scripts.
 - Task context is injected only for supported `just-demand-*` subagents.
-- Execution must not start until the current task context files exist and the intake is actually ready. Promotion is blocked when required clarification fields are still missing or blocking questions remain. Use `just-demand --root . list-active` to inspect unfinished tasks before dispatch.
+- Execution must not start until the current task context files exist and the intake is actually ready. Promotion is blocked when required clarification fields are still missing or blocking questions remain. Use `just-demand . list-active` to inspect unfinished tasks before dispatch.
 - Restart OpenCode after changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`.
 
 ## Commands
@@ -142,4 +142,4 @@ Users skim. Output past ~300 characters is usually not read closely, so every ma
 - Python tests: `python3 -m unittest tests.just_demand.test_workflow_core -v`
 - OpenCode plugin tests: `node --test tests/just_demand/test_opencode_plugins.mjs`
 - Package config check: `python3 -m json.tool .opencode/package.json`
-- List unfinished tasks: `just-demand --root . list-active`
+- List unfinished tasks: `just-demand . list-active`

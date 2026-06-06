@@ -27,44 +27,51 @@ from install import (
 )
 
 
-def print_numstat(numstat: list[dict[str, object]]) -> None:
-    if not numstat:
-        return
-    print()
-    print("  Diff summary:")
-    for entry in numstat:
-        additions = entry.get("additions", 0)
-        deletions = entry.get("deletions", 0)
-        path = entry.get("path", "")
-        print(f"    {additions}\t{deletions}\t{path}")
+COMMANDS = {
+    "archive-task",
+    "checkpoint-commit",
+    "cleanup-task",
+    "complete-verification",
+    "create-intake",
+    "doctor",
+    "init",
+    "install",
+    "list-active",
+    "mark",
+    "promote",
+    "uninstall",
+    "update",
+    "where",
+}
+
+GLOBAL_COMMANDS = {"install", "update", "uninstall", "where"}
 
 
-def script_path() -> Path:
-    """Return the absolute path of the running task.py script."""
-    return Path(__file__).resolve()
+def split_project_root(argv: list[str]) -> tuple[Path | None, list[str]]:
+    """Split an optional leading project directory from command arguments."""
+    if len(argv) >= 2 and argv[0] not in COMMANDS and not argv[0].startswith("-") and argv[1] in COMMANDS:
+        return Path(argv[0]), argv[1:]
+    return None, argv
 
 
-def repo_root() -> Path:
-    """Return the just-demand source repo root (parent of .just-demand/)."""
-    return script_path().parents[2]
+def format_project_invocation(project_root: Path | None, command: str = "list-active") -> str:
+    if project_root is None:
+        return f"  just-demand [project-dir] {command}"
+    return f"  just-demand {project_root} {command}"
 
 
-def invocation_hint(project_root: Path, command: str = "<cmd>") -> str:
-    """Return a one-line invocation example for the given project root."""
-    return f"  just-demand --root {project_root} {command}"
-
-
-def print_invocation_hint(project_root: Path, stream=None) -> None:
-    """Print a 'how to invoke' hint to the given stream (default stdout)."""
+def print_project_invocation(project_root: Path | None, stream=None) -> None:
     out = stream if stream is not None else sys.stdout
     out.write("\nProject invocation:\n")
-    out.write(invocation_hint(project_root, "list-active") + "\n")
-    out.write("  just-demand where           # to inspect the global CLI entry\n")
+    out.write(format_project_invocation(project_root) + "\n")
+    out.write("  (omit [project-dir] to use the current directory)\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Agent workflow task tools")
-    parser.add_argument("--root", default=".", help="Workspace root")
+    parser = argparse.ArgumentParser(
+        description="Just Demand task tools",
+        epilog="Use: just-demand [project-dir] <command> ...",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     create = sub.add_parser("create-intake", help="Create a workspace intake note")
@@ -105,14 +112,13 @@ def build_parser() -> argparse.ArgumentParser:
     complete.add_argument("--no-auto-archive", action="store_true", help="Keep passed task active instead of archiving it")
     complete.add_argument("--no-checkpoint-commit", action="store_true", help="Skip automatic checkpoint commit on passed verification")
 
-    # Installation commands
-    init = sub.add_parser("init", help="Initialize project-local .just-demand state")
-    
+    sub.add_parser("init", help="Initialize project-local .just-demand state")
+
     install = sub.add_parser("install", help="Install Just Demand globally for OpenCode")
     install.add_argument("--opencode", action="store_true", help="Install OpenCode runtime assets")
     install.add_argument("--global", action="store_true", dest="global_install", help="Install globally")
     install.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
-    
+
     update = sub.add_parser("update", help="Update existing global installation")
     update.add_argument("--opencode", action="store_true", help="Update OpenCode runtime assets")
     update.add_argument("--global", action="store_true", dest="global_update", help="Update global installation")
@@ -120,14 +126,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="Report installation and activation status")
     doctor.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
-    
+
     uninstall = sub.add_parser("uninstall", help="Remove global Just Demand installation")
     uninstall.add_argument("--opencode", action="store_true", help="Uninstall OpenCode runtime assets")
     uninstall.add_argument("--global", action="store_true", dest="global_uninstall", help="Uninstall globally")
     uninstall.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
 
-    where = sub.add_parser("where", help="Print the path of this task.py and a one-line invocation example")
-    where.add_argument("--project", default=None, help="Optional project root to include in the invocation example")
+    sub.add_parser("where", help="Print the global CLI path and invocation example")
 
     return parser
 
@@ -138,7 +143,7 @@ def execute_command(root: Path, args: list[str]) -> int:
         parsed = build_parser().parse_args(args)
     except SystemExit:
         return 1
-    
+
     try:
         if parsed.command == "create-intake":
             result = create_intake(root, parsed.title, parsed.raw_request, parsed.session)
@@ -173,14 +178,13 @@ def execute_command(root: Path, args: list[str]) -> int:
             )
         elif parsed.command == "init":
             result = init_project(root)
-            # Format human-readable output for init
             if result.get("status") == "success":
                 print(f"✓ {result['message']}")
                 print()
                 print(f"  Project root: {result['project_root']}")
                 print(f"  Scripts deployed: {result.get('scripts_deployed', 0)}")
                 print_numstat(result.get("numstat", []))
-                print_invocation_hint(root)
+                print_project_invocation(root)
                 print()
             else:
                 print(json.dumps(result, ensure_ascii=False))
@@ -191,7 +195,6 @@ def execute_command(root: Path, args: list[str]) -> int:
             else:
                 config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = install_opencode_global(config_root)
-                # Format human-readable output for install
                 if result.get("status") == "success":
                     print(f"✓ {result['message']}")
                     results = result.get("results", {})
@@ -217,7 +220,6 @@ def execute_command(root: Path, args: list[str]) -> int:
             else:
                 config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = update_opencode_global(config_root)
-                # Format human-readable output for update
                 if result.get("status") == "success":
                     print(f"✓ {result['message']}")
                     results = result.get("results", {})
@@ -242,22 +244,20 @@ def execute_command(root: Path, args: list[str]) -> int:
             result = doctor_opencode_global(config_root, root)
             print(json.dumps(result, ensure_ascii=False))
             if isinstance(result, dict) and result.get("project", {}).get("just_demand_dir_exists"):
-                print_invocation_hint(root, stream=sys.stderr)
+                print_project_invocation(root, stream=sys.stderr)
             return 0 if (isinstance(result, dict) and result.get("status") != "error") else 1
         elif parsed.command == "where":
-            target = Path(parsed.project).resolve() if parsed.project else None
             print("global CLI: just-demand")
             print(f"repo root:    {repo_root()}")
-            if target is not None:
-                print()
-                print("To invoke against the project:")
-                print(invocation_hint(target, "list-active"))
-            else:
-                print()
-                print("To invoke against any project:")
-                print("  just-demand --root <project> <cmd>")
-                print()
-                print("Run with --project <path> to see a project-specific example.")
+            print()
+            print("To invoke against a project:")
+            print(format_project_invocation(root, "list-active"))
+            print("  (omit [project-dir] to use the current directory)")
+            print()
+            print("To install / update / uninstall globally:")
+            print("  just-demand install --opencode --global")
+            print("  just-demand update --opencode --global")
+            print("  just-demand uninstall --opencode --global")
             return 0
         elif parsed.command == "uninstall":
             if not parsed.opencode or not parsed.global_uninstall:
@@ -269,15 +269,13 @@ def execute_command(root: Path, args: list[str]) -> int:
             raise RuntimeError(f"Unsupported command: {parsed.command}")
     except Exception as exc:
         result = {"status": "error", "message": str(exc)}
-    
+
     print(json.dumps(result, ensure_ascii=False))
-    # Return 0 for success, 1 for error status
     if isinstance(result, dict):
         if result.get("status") == "success":
             return 0
         elif result.get("status") == "error":
             return 1
-        # For other results (task operations), assume success
         return 0
     return 0
 
@@ -294,12 +292,33 @@ def show_help():
     print("  archive-task <id>                 Archive completed task")
     print("  cleanup-task <id>                 Clean up completed task")
     print("  init                              Initialize project")
-    print("  sync-workspaces                   Sync workspace runtime state")
     print("  doctor                            Check installation status")
-    print("  where [--project <path>]          Print global CLI invocation example")
+    print("  where                             Print global CLI invocation example")
     print("  help                              Show this help")
     print("  exit / quit                       Exit interactive mode")
     print()
+
+
+def print_numstat(numstat: list[dict[str, object]]) -> None:
+    if not numstat:
+        return
+    print()
+    print("  Diff summary:")
+    for entry in numstat:
+        additions = entry.get("additions", 0)
+        deletions = entry.get("deletions", 0)
+        path = entry.get("path", "")
+        print(f"    {additions}\t{deletions}\t{path}")
+
+
+def script_path() -> Path:
+    """Return the absolute path of the running task.py script."""
+    return Path(__file__).resolve()
+
+
+def repo_root() -> Path:
+    """Return the just-demand source repo root (parent of .just-demand/)."""
+    return script_path().parents[2]
 
 
 def interactive_mode(root: Path):
@@ -343,24 +362,17 @@ def main() -> int:
         return 0
     
     # Otherwise, parse arguments and execute single command
+    project_root_arg, cmd_args = split_project_root(sys.argv[1:])
+    root = (project_root_arg or Path(".")).resolve()
+
     parser = build_parser()
-    args = parser.parse_args()
-    root = Path(args.root).resolve()
-    
-    # Reconstruct command args (without --root) for execute_command
-    cmd_args = []
-    i = 1
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == "--root":
-            i += 2  # Skip --root and its value
-            continue
-        elif arg.startswith("--root="):
-            i += 1  # Skip --root=value
-            continue
-        cmd_args.append(arg)
-        i += 1
-    
+    if not cmd_args:
+        parser.print_help()
+        return 1
+    if cmd_args[0] in GLOBAL_COMMANDS and project_root_arg is not None:
+        # Project directories are ignored for global commands.
+        pass
+
     return execute_command(root, cmd_args)
 
 

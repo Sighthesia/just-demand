@@ -22,12 +22,12 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Install tests: `python3 -m unittest tests.just_demand.test_install -v`
 - Plugin tests: `node --test tests/just_demand/test_opencode_plugins.mjs`
 - Validate Node package file: `python3 -m json.tool .opencode/package.json`
-- List unfinished formal tasks before execution: `just-demand --root . list-active`
-- Create intake: `just-demand --root . create-intake "<title>" "<raw request>" --session <session-id>`
-- Promote intake: `just-demand --root . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
-- Mark task status/progress/impact: `just-demand --root . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
-- Close verified work: `just-demand --root . complete-verification <task-id> passed "<summary>"`
-- Mid-task checkpoint: `just-demand --root . checkpoint-commit <task-id>`
+- List unfinished formal tasks before execution: `just-demand . list-active`
+- Create intake: `just-demand . create-intake "<title>" "<raw request>" --session <session-id>`
+- Promote intake: `just-demand . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
+- Mark task status/progress/impact: `just-demand . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
+- Close verified work: `just-demand . complete-verification <task-id> passed "<summary>"`
+- Mid-task checkpoint: `just-demand . checkpoint-commit <task-id>`
 
 ## Command Order That Matters
 
