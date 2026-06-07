@@ -117,6 +117,8 @@ Users skim. Output past ~300 characters is usually not read closely, so every ma
 
 `just-demand-verification`'s Default Final Report is the task-closure specialization of this rule; keep the two consistent.
 
+These skills describe routing; the runtime plugin enforces workflow entry and task-gated behavior.
+
 ## Skill Routing
 
 | Situation | Load |

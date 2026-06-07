@@ -16,6 +16,7 @@ Clarify the user's need before exposing workflow mechanics.
 - Keep the turn user-understandable, but do not use brevity as a reason to skip material uncertainty.
 - Prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 - Do not discuss task packages, repo maps, JSONL, context injection, or subagent mechanics unless the user is explicitly designing those mechanisms.
+- Treat intake as guidance; runtime plugins still enforce the workflow-entry gate for concrete requests without an active task.
 
 ## Process
 

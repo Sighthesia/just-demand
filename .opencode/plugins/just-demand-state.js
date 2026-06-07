@@ -43,7 +43,7 @@ const STOPWORDS = new Set([
 const SHORT_SIGNAL_WORDS = new Set(["api", "bug", "css", "db", "llm", "ui", "ux", "json", "task"])
 
 const CONCRETE_WORK_PATTERNS = [
-  /\b(request|feature|bug|regression|mismatch|correction|implement|update|add|remove|fix|refactor|change|improve)\b/i,
+  /\b(request|feature|bug|regression|mismatch|correction|implement|update|add|remove|fix|refactor|change|improve|build|create|make|support|setup|set up)\b/i,
   /\b(expected|actual|broken|fail|failing)\b/i,
 ]
 

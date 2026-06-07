@@ -428,7 +428,7 @@ test("state hard redirects concrete workflow work when no active task exists", a
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
 
   const plugin = await stateFactory({ directory: root })
-  const output = { parts: [{ type: "text", text: "Please fix the bug in the API." }] }
+  const output = { parts: [{ type: "text", text: "Please build a dashboard for alerts." }] }
 
   await plugin["chat.message"]({ sessionID: "no-active-task" }, output)
 
@@ -439,8 +439,9 @@ test("state hard redirects concrete workflow work when no active task exists", a
   assert.match(output.parts[0].text, /socratic-clarification/i)
   assert.match(output.parts[0].text, /create the intake\/task/i)
   assert.match(output.parts[0].text, /Original response:/i)
-  assert.match(output.parts[0].text, /> Please fix the bug in the API\./)
-  assert.notEqual(output.parts[0].text, "Please fix the bug in the API.")
+  assert.match(output.parts[0].text, /> Please build a dashboard for alerts\./)
+  assert.notEqual(output.parts[0].text, "Please build a dashboard for alerts.")
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
 })
 
 test("state blocks apply_patch when no active task exists", async () => {

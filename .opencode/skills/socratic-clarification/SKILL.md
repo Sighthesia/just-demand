@@ -7,6 +7,8 @@ description: Use when the user proposes a need, request, feature, design/refacto
 
 Force progressive clarification and design approval before any implementation work begins. This is a hard gate, not optional guidance.
 
+Clarification shapes the intake; the runtime plugin still owns the hard enforcement that routes concrete requests into workflow entry.
+
 This skill is the required second routing step after `using-just-demand`. If a turn changes from ordinary Q&A into concrete work, bug fixing, mismatch analysis, or correction feedback, this skill takes priority before intake, execution, or verification routing continues.
 
 If earlier turns were only informational, reset the problem model as soon as the current turn becomes a request, bug, correction, or mismatch. Do not stay on the Q&A path and drift straight to intake.
