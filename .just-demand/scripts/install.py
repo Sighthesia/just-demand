@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import difflib
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from workflow_core import ensure_workspace
 # Default OpenCode config root
 DEFAULT_CONFIG_ROOT = Path.home() / ".config" / "opencode"
 COMMANDS = {"init", "install", "update", "doctor", "uninstall"}
+PATH_ENTRY_NAME = "just-demand.cmd" if os.name == "nt" else "just-demand"
 
 # Files to deploy for global installation
 DEPLOYED_FILES = {
@@ -61,6 +63,105 @@ def get_repo_opencode_dir() -> Path:
 def get_config_root(config_root: Optional[Path] = None) -> Path:
     """Get the OpenCode config root, using provided or default."""
     return config_root or DEFAULT_CONFIG_ROOT
+
+
+def get_preferred_bin_dir() -> Path:
+    """Get a user-writable bin directory for the PATH shim."""
+    xdg_bin = os.environ.get("XDG_BIN_HOME")
+    if xdg_bin:
+        return Path(xdg_bin).expanduser()
+    if os.name == "nt":
+        return Path.home() / "bin"
+    return Path.home() / ".local" / "bin"
+
+
+def find_path_bin_dir() -> tuple[Path, bool]:
+    """Find a writable directory already on PATH, or fall back to a standard bin dir."""
+    path_dirs: list[Path] = []
+    for raw in os.environ.get("PATH", "").split(os.pathsep):
+        if not raw:
+            continue
+        candidate = Path(raw).expanduser()
+        if candidate.is_dir():
+            path_dirs.append(candidate)
+
+    for candidate in path_dirs:
+        if os.access(candidate, os.W_OK | os.X_OK):
+            return candidate, True
+
+    fallback = get_preferred_bin_dir()
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback, fallback in path_dirs
+
+
+def build_path_entry_content(repo_root: Path) -> str:
+    """Render the executable shim that forwards to the repository entrypoint."""
+    entry = (repo_root / "just-demand").resolve()
+    if os.name == "nt":
+        repo_root_cmd = str(repo_root.resolve()).replace("/", "\\")
+        entry_cmd = str(entry).replace("/", "\\")
+        return "\r\n".join(
+            [
+                "@echo off",
+                "setlocal",
+                f"set \"JUST_DEMAND_REPO_ROOT={repo_root_cmd}\"",
+                f'"{sys.executable}" "{entry_cmd}" %*',
+                "",
+            ]
+        )
+
+    return "\n".join(
+        [
+            "#!/bin/sh",
+            "# just-demand PATH entry",
+            f'exec "{entry}" "$@"',
+            "",
+        ]
+    )
+
+
+def deploy_path_entry(repo_root: Path, manifest: dict[str, Any], config_root: Path) -> tuple[bool, Optional[str], dict[str, Any]]:
+    """Create or refresh the PATH-visible just-demand shim."""
+    bin_dir, on_path = find_path_bin_dir()
+    target = bin_dir / PATH_ENTRY_NAME
+    content = build_path_entry_content(repo_root)
+    previous_entry = manifest.get("path_entry")
+    existing_text = target.read_text(encoding="utf-8") if target.exists() else None
+
+    if target.exists() and existing_text != content and not (
+        isinstance(previous_entry, dict) and previous_entry.get("path") == str(target)
+    ):
+        return False, f"Skipped existing unmanaged PATH entry: {target}", None
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if existing_text != content:
+        target.write_text(content, encoding="utf-8")
+        if os.name != "nt":
+            target.chmod(0o755)
+
+    manifest["path_entry"] = {
+        "path": str(target),
+        "source": str((repo_root / "just-demand").resolve()),
+        "on_path": on_path,
+    }
+    return existing_text != content, None, {
+        "path": str(target),
+        "on_path": on_path,
+        "created": existing_text != content,
+    }
+
+
+def remove_path_entry(manifest: dict[str, Any]) -> Optional[str]:
+    """Remove the PATH-visible just-demand shim if we manage one."""
+    path_entry = manifest.get("path_entry")
+    if not isinstance(path_entry, dict):
+        return None
+
+    target = Path(path_entry.get("path", ""))
+    if target.exists():
+        target.unlink()
+        return str(target)
+    return str(target)
 
 
 def line_numstat(before: Optional[str], after: str) -> tuple[int, int]:
@@ -239,6 +340,7 @@ def install_opencode_global(config_root: Optional[Path] = None) -> dict[str, Any
     Returns installation result.
     """
     config_root = get_config_root(config_root)
+    repo_root = get_repo_root()
     repo_opencode = get_repo_opencode_dir()
     
     manifest = load_manifest(config_root)
@@ -286,7 +388,14 @@ def install_opencode_global(config_root: Optional[Path] = None) -> dict[str, Any
                 results["numstat"].append(entry)
             if warning:
                 results["warnings"].append(warning)
-    
+
+    # Deploy a persistent PATH-visible entry for the CLI wrapper.
+    path_entry_created, path_entry_warning, path_entry = deploy_path_entry(repo_root, manifest, config_root)
+    results["path_entry"] = path_entry
+    results["path_entry_created"] = path_entry_created
+    if path_entry_warning:
+        results["warnings"].append(path_entry_warning)
+
     results["total_deployed"] = (
         results["plugins_deployed"] +
         results["agents_deployed"] +
@@ -295,12 +404,17 @@ def install_opencode_global(config_root: Optional[Path] = None) -> dict[str, Any
     )
     
     save_manifest(config_root, manifest)
+
+    path_entry_path = path_entry.get("path") if isinstance(path_entry, dict) else None
     
     return {
         "status": "success",
         "config_root": str(config_root),
         "results": results,
-        "message": f"Installed {results['total_deployed']} files to {config_root}",
+        "message": (
+            f"Installed {results['total_deployed']} files to {config_root}"
+            + (f" and PATH entry at {path_entry_path}" if path_entry_path else "")
+        ),
     }
 
 
@@ -350,6 +464,10 @@ def uninstall_opencode_global(config_root: Optional[Path] = None) -> dict[str, A
             removed_files.append(MANIFEST_FILE)
         except OSError as e:
             errors.append(f"Failed to remove manifest: {e}")
+
+    path_entry_path = remove_path_entry(manifest)
+    if path_entry_path:
+        removed_files.append(path_entry_path)
     
     # Clean up empty directories (but not the root config directory)
     dirs_to_check = ["plugins", "agents", "skills"]
@@ -367,8 +485,12 @@ def uninstall_opencode_global(config_root: Optional[Path] = None) -> dict[str, A
         "status": "success" if not errors else "partial",
         "config_root": str(config_root),
         "removed_files": removed_files,
+        "path_entry_removed": path_entry_path,
         "errors": errors,
-        "message": f"Removed {len(removed_files)} files from {config_root}",
+        "message": (
+            f"Removed {len(removed_files)} files from {config_root}"
+            + (f" and PATH entry at {path_entry_path}" if path_entry_path else "")
+        ),
     }
 
 

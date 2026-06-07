@@ -196,3 +196,12 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-05-23-fix-init-script-deployment-task (Fix init script deployment) completed with status 'done'.
   Verification summary: Switched project init to local-state-only architecture and removed workspace script copies
+
+- Task 2026-06-06-global-cli-only-workflow-entry-task (Global CLI only workflow entry) completed with status 'done'.
+  Verification summary: Removed sync-workspaces, pruned stale workflow manifest entries, and verified install/workflow/plugin test suites pass.
+
+- Task 2026-06-06-remove-root-flag-from-cli-task (Remove root flag from CLI) completed with status 'done'.
+  Verification summary: CLI now uses optional leading project-dir positional argument; --root removed; docs, plugins, and tests updated.
+
+- Task 2026-06-07-add-runtime-workflow-gate-task (Add runtime workflow gate) completed with status 'done'.
+  Verification summary: Runtime now blocks concrete requests without an active task and redirects them to workflow entry; skill text now says routing guidance is not enforcement.

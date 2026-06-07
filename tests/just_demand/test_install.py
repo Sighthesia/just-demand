@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ from install import (
     update_opencode_global,
     doctor_opencode_global,
     uninstall_opencode_global,
+    get_preferred_bin_dir,
     get_repo_root,
     get_repo_opencode_dir,
     load_manifest,
@@ -333,12 +335,94 @@ class InstallIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config_root = Path(tmp)
             install_opencode_global(config_root)
-            
+
             manifest_path = config_root / ".just-demand-manifest.json"
             self.assertTrue(manifest_path.exists())
-            
+
             manifest = load_manifest(config_root)
             self.assertGreater(len(manifest["installed_files"]), 0)
+
+    def test_install_opencode_global_creates_path_entry_in_preferred_bin_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp) / "config"
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+
+            original_path = os.environ.get("PATH", "")
+            original_xdg_bin = os.environ.get("XDG_BIN_HOME")
+            try:
+                os.environ["PATH"] = str(bin_dir)
+                os.environ.pop("XDG_BIN_HOME", None)
+
+                result = install_opencode_global(config_root)
+
+                entry = result["results"]["path_entry"]
+                self.assertEqual(Path(entry["path"]).parent, bin_dir)
+                self.assertTrue(Path(entry["path"]).exists())
+                self.assertTrue(entry["on_path"])
+                self.assertIn("PATH entry", result["message"])
+                self.assertIn("path_entry", result["results"])
+            finally:
+                os.environ["PATH"] = original_path
+                if original_xdg_bin is None:
+                    os.environ.pop("XDG_BIN_HOME", None)
+                else:
+                    os.environ["XDG_BIN_HOME"] = original_xdg_bin
+
+    def test_uninstall_removes_managed_path_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp) / "config"
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+
+            original_path = os.environ.get("PATH", "")
+            original_xdg_bin = os.environ.get("XDG_BIN_HOME")
+            try:
+                os.environ["PATH"] = str(bin_dir)
+                os.environ.pop("XDG_BIN_HOME", None)
+
+                install_result = install_opencode_global(config_root)
+                entry_path = Path(install_result["results"]["path_entry"]["path"])
+                self.assertTrue(entry_path.exists())
+
+                uninstall_result = uninstall_opencode_global(config_root)
+
+                self.assertEqual(uninstall_result["status"], "success")
+                self.assertFalse(entry_path.exists())
+                self.assertIn(str(entry_path), uninstall_result["removed_files"])
+                self.assertEqual(uninstall_result["path_entry_removed"], str(entry_path))
+            finally:
+                os.environ["PATH"] = original_path
+                if original_xdg_bin is None:
+                    os.environ.pop("XDG_BIN_HOME", None)
+                else:
+                    os.environ["XDG_BIN_HOME"] = original_xdg_bin
+
+    def test_install_preserves_existing_unmanaged_path_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp) / "config"
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            existing_entry = bin_dir / "just-demand"
+            existing_entry.write_text("#!/bin/sh\necho custom\n", encoding="utf-8")
+
+            original_path = os.environ.get("PATH", "")
+            original_xdg_bin = os.environ.get("XDG_BIN_HOME")
+            try:
+                os.environ["PATH"] = str(bin_dir)
+                os.environ.pop("XDG_BIN_HOME", None)
+
+                result = install_opencode_global(config_root)
+
+                self.assertIn("Skipped existing unmanaged PATH entry", " ".join(result["results"]["warnings"]))
+                self.assertEqual(existing_entry.read_text(encoding="utf-8"), "#!/bin/sh\necho custom\n")
+                self.assertNotIn("path_entry", load_manifest(config_root).get("installed_files", {}))
+            finally:
+                os.environ["PATH"] = original_path
+                if original_xdg_bin is None:
+                    os.environ.pop("XDG_BIN_HOME", None)
+                else:
+                    os.environ["XDG_BIN_HOME"] = original_xdg_bin
     
     def test_update_opencode_global_refreshes_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -396,16 +480,30 @@ class InstallIntegrationTests(unittest.TestCase):
             config_root = Path(tmp)
             package_json = config_root / "package.json"
             package_json.write_text('{"type":"commonjs","dependencies":{"keep":"1.0.0"}}\n', encoding="utf-8")
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
 
-            result = install_opencode_global(config_root)
-            manifest = load_manifest(config_root)
+            original_path = os.environ.get("PATH", "")
+            original_xdg_bin = os.environ.get("XDG_BIN_HOME")
+            try:
+                os.environ["PATH"] = str(bin_dir)
+                os.environ.pop("XDG_BIN_HOME", None)
 
-            self.assertEqual(result["status"], "success")
-            merged = json.loads(package_json.read_text(encoding="utf-8"))
-            self.assertEqual(merged["type"], "module")
-            self.assertEqual(merged["dependencies"], {"keep": "1.0.0"})
-            self.assertIn("package.json", manifest["installed_files"])
-            self.assertFalse(result["results"]["warnings"])
+                result = install_opencode_global(config_root)
+                manifest = load_manifest(config_root)
+
+                self.assertEqual(result["status"], "success")
+                merged = json.loads(package_json.read_text(encoding="utf-8"))
+                self.assertEqual(merged["type"], "module")
+                self.assertEqual(merged["dependencies"], {"keep": "1.0.0"})
+                self.assertIn("package.json", manifest["installed_files"])
+                self.assertFalse(result["results"]["warnings"])
+            finally:
+                os.environ["PATH"] = original_path
+                if original_xdg_bin is None:
+                    os.environ.pop("XDG_BIN_HOME", None)
+                else:
+                    os.environ["XDG_BIN_HOME"] = original_xdg_bin
 
     def test_uninstall_preserves_existing_unmanaged_package_json(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -204,6 +204,9 @@ def execute_command(root: Path, args: list[str]) -> int:
                     print(f"  Agents deployed: {results.get('agents_deployed', 0)}")
                     print(f"  Skills deployed: {results.get('skills_deployed', 0)}")
                     print(f"  Config deployed: {results.get('config_deployed', 0)}")
+                    path_entry = results.get("path_entry") or {}
+                    if path_entry.get("path"):
+                        print(f"  PATH entry: {path_entry.get('path')}")
                     print_numstat(results.get("numstat", []))
                     if results.get("warnings"):
                         print()
@@ -229,6 +232,9 @@ def execute_command(root: Path, args: list[str]) -> int:
                     print(f"  Agents deployed: {results.get('agents_deployed', 0)}")
                     print(f"  Skills deployed: {results.get('skills_deployed', 0)}")
                     print(f"  Config deployed: {results.get('config_deployed', 0)}")
+                    path_entry = results.get("path_entry") or {}
+                    if path_entry.get("path"):
+                        print(f"  PATH entry: {path_entry.get('path')}")
                     print_numstat(results.get("numstat", []))
                     if results.get("warnings"):
                         print()

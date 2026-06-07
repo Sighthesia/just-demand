@@ -35,6 +35,8 @@ Installed assets include:
 - `skills/`
 - `package.json`
 
+The installer also creates a persistent `just-demand` entry in a user-writable bin directory that is already on `PATH` when possible, so new shells can run `just-demand` directly.
+
 Restart OpenCode after installation.
 
 #### 2. Install to a custom OpenCode config root
@@ -202,6 +204,8 @@ just-demand uninstall --opencode --global --config-root "C:\Users\You\.config\op
 ```
 
 The uninstaller removes Just Demand-managed files only.
+
+It also removes the managed `just-demand` PATH entry that the installer created.
 
 ## Recommended Usage
 
