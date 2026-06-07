@@ -271,7 +271,7 @@ const buildReminderLines = (type) => {
     case "workflow_entry_required":
       return [
         "- This is concrete workflow work, but there is no active formal task yet.",
-        "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then create the intake/task before continuing.",
+        "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then `just-demand-intake` before continuing.",
       ]
     default:
       return []
@@ -370,7 +370,7 @@ const blockWorkflowEntryRequired = (text, reminderState) => {
   return [
     WORKFLOW_ENTRY_BLOCKED_HEADER,
     "- This is concrete workflow work, but there is no active formal task yet.",
-    "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then create the intake/task before continuing.",
+    "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then `just-demand-intake` before continuing.",
     "",
     "Original response:",
     quotedText,

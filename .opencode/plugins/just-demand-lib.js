@@ -4,6 +4,8 @@ import { join } from "node:path"
 const REMINDER_STATE = new Map()
 
 const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
+const WORKFLOW_SUBAGENTS = new Set(["just-demand-research", "just-demand-implement", "just-demand-check", "just-demand-docs"])
+const EXECUTION_GATED_SUBAGENTS = new Set(["just-demand-implement", "just-demand-check", "just-demand-docs"])
 const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
   "design",
   "implementation",
@@ -21,10 +23,10 @@ const WRITE_TOOL_RULES = Object.freeze([
     needsExecutionGate: () => true,
   },
   {
-    name: "task:implement-check-docs",
+    name: "task:workflow-subagent",
     label: "Task",
-    match: (toolName, args) => toolName === "task" && ["just-demand-implement", "just-demand-check", "just-demand-docs"].includes(String(args?.subagent_type || "")),
-    needsExecutionGate: () => true,
+    match: (toolName, args) => toolName === "task" && WORKFLOW_SUBAGENTS.has(getWorkflowSubagentName(args)),
+    needsExecutionGate: (args) => EXECUTION_GATED_SUBAGENTS.has(getWorkflowSubagentName(args)),
   },
   {
     name: "bash:write-like",
@@ -96,6 +98,21 @@ export const getReminderState = (directory, sessionID) => {
     REMINDER_STATE.set(key, defaultReminderState())
   }
   return REMINDER_STATE.get(key)
+}
+
+export const getWorkflowSubagentName = (args) => {
+  const candidates = [
+    args?.subagent_type,
+    args?.subagent,
+    args?.agent,
+    args?.agentName,
+    args?.agent_name,
+  ]
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim()
+    if (value.startsWith(WORKFLOW_SUBAGENT_PREFIX)) return value
+  }
+  return ""
 }
 
 export const markSubagentUnavailablePending = (directory, sessionID) => {

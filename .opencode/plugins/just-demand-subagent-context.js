@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import {
   getActiveTask,
   getMissingRequiredContextFiles,
+  getWorkflowSubagentName,
   markSubagentUnavailablePending,
   readTaskContext,
   readTaskJson,
@@ -21,7 +22,8 @@ export default async ({ directory }) => {
       if (!existsSync(workflowRoot(directory))) return
       if (String(input?.tool || "").toLowerCase() !== "task") return
       const args = output?.args
-      if (!args || !SUPPORTED.has(args.subagent_type)) return
+      const subagentName = getWorkflowSubagentName(args)
+      if (!args || !SUPPORTED.has(subagentName)) return
 
       // Skip if prompt already contains workflow context (duplicate injection protection)
       if (args.prompt && INJECTION_MARKERS.some((marker) => args.prompt.includes(marker))) {
@@ -30,18 +32,18 @@ export default async ({ directory }) => {
 
       const taskId = getActiveTask(directory)
       if (!taskId) return
-      const missing = getMissingRequiredContextFiles(directory, taskId, args.subagent_type)
+      const missing = getMissingRequiredContextFiles(directory, taskId, subagentName)
       if (missing.length > 0) {
         markSubagentUnavailablePending(directory, input?.sessionID || "main")
-        if (WRITABLE_SUBAGENTS.has(args.subagent_type)) {
+        if (WRITABLE_SUBAGENTS.has(subagentName)) {
           throw new Error(
-            `Blocked ${args.subagent_type}: missing required task context files for active task ${taskId}: ${missing.join(", ")}`,
+            `Blocked ${subagentName}: missing required task context files for active task ${taskId}: ${missing.join(", ")}`,
           )
         }
         args.prompt = `Active task: ${taskId}\n\n# BLOCKED\n\nMissing required task context files: ${missing.join(", ")}. Do not proceed until the main agent creates the required task context package files for this task.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
         return
       }
-      const context = readTaskContext(directory, taskId, args.subagent_type)
+      const context = readTaskContext(directory, taskId, subagentName)
       if (!context) return
       args.prompt = `Active task: ${taskId}\n\n# Just Demand Workflow\n\n${context}\n\n---\n\n# Execution Rules\n\nComplete the requested work in this subagent.\nDo not call the Task tool.\nDo not dispatch another subagent.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
     },

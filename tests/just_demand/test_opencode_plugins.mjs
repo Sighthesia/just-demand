@@ -8,6 +8,7 @@ import {
   buildExecutionGateError,
   getActiveTask,
   getMissingRequiredContextFiles,
+  getWorkflowSubagentName,
   listUnfinishedTasks,
   markSubagentUnavailablePending,
   getWriteToolRule,
@@ -276,6 +277,9 @@ test("getMissingRequiredContextFiles reports missing implement context files", (
 test("write tool rule table identifies write-like tools and ignores read-only bash", () => {
   assert.equal(getWriteToolRule("apply_patch", {})?.label, "apply_patch")
   assert.equal(getWriteToolRule("task", { subagent_type: "just-demand-implement" })?.label, "Task")
+  assert.equal(getWriteToolRule("task", { agent: "just-demand-implement" })?.label, "Task")
+  assert.equal(getWriteToolRule("task", { agent_name: "just-demand-check" })?.label, "Task")
+  assert.equal(getWriteToolRule("task", { subagent_type: "just-demand-research" })?.needsExecutionGate({ subagent_type: "just-demand-research" }), false)
   assert.equal(getWriteToolRule("bash", { command: "mkdir -p out && touch out/file.txt" })?.label, "bash")
   assert.equal(getWriteToolRule("bash", { command: "python3 -m unittest tests.just_demand.test_workflow_core -v" }), null)
   assert.equal(looksLikeBashWriteCommand("mkdir -p out && touch out/file.txt"), true)
@@ -285,6 +289,14 @@ test("write tool rule table identifies write-like tools and ignores read-only ba
     buildExecutionGateError("apply_patch", "task-a", ["Scope", "Approval"]),
     "Blocked apply_patch: active task task-a is not ready for execution yet. Missing or incomplete fields: Scope, Approval",
   )
+})
+
+test("workflow subagent name supports current and compatibility argument keys", () => {
+  assert.equal(getWorkflowSubagentName({ subagent_type: "just-demand-implement" }), "just-demand-implement")
+  assert.equal(getWorkflowSubagentName({ agent: "just-demand-check" }), "just-demand-check")
+  assert.equal(getWorkflowSubagentName({ agentName: "just-demand-docs" }), "just-demand-docs")
+  assert.equal(getWorkflowSubagentName({ agent_name: "just-demand-research" }), "just-demand-research")
+  assert.equal(getWorkflowSubagentName({ agent: "general" }), "")
 })
 
 // ---------------------------------------------------------------------------
@@ -437,7 +449,7 @@ test("state hard redirects concrete workflow work when no active task exists", a
   assert.match(output.parts[0].text, /Return to the workflow entry path first/i)
   assert.match(output.parts[0].text, /using-just-demand/i)
   assert.match(output.parts[0].text, /socratic-clarification/i)
-  assert.match(output.parts[0].text, /create the intake\/task/i)
+  assert.match(output.parts[0].text, /just-demand-intake/i)
   assert.match(output.parts[0].text, /Original response:/i)
   assert.match(output.parts[0].text, /> Please build a dashboard for alerts\./)
   assert.notEqual(output.parts[0].text, "Please build a dashboard for alerts.")
@@ -480,6 +492,20 @@ test("state blocks implement task dispatch when active task is not ready for exe
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
     plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }),
+    /Blocked Task: active task task-a is not ready for execution yet\./,
+  )
+})
+
+test("state blocks workflow task dispatch with real agent argument key when active task is not ready", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { agent: "just-demand-implement", prompt: "Do the work" } }),
     /Blocked Task: active task task-a is not ready for execution yet\./,
   )
 })
@@ -857,6 +883,23 @@ test("subagent-context injects context for supported subagent type", async () =>
   assert.match(output.args.prompt, /Remaining Open Questions/)
   assert.match(output.args.prompt, /# Requested Work/)
   assert.match(output.args.prompt, /Do the work/)
+})
+
+test("subagent-context injects context when runtime uses agent argument key", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task" }
+  const output = { args: { agent: "just-demand-implement", prompt: "Do the work" } }
+  await plugin["tool.execute.before"](input, output)
+  assert.match(output.args.prompt, /Active task: task-a/)
+  assert.match(output.args.prompt, /# Just Demand Workflow/)
+  assert.match(output.args.prompt, /# Implement/)
 })
 
 test("subagent-context avoids absolute path leakage for just-demand-research", async () => {
