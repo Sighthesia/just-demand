@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import fcntl
 import re
 import shutil
 import subprocess
 import tempfile
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -21,6 +23,19 @@ def utc_now() -> str:
 def slugify(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
     return cleaned or "work-item"
+
+
+def unique_readable_id(directories: list[Path], base_id: str, suffix: str = "") -> str:
+    def _exists(candidate_id: str) -> bool:
+        return any((directory / f"{candidate_id}{suffix}").exists() for directory in directories)
+
+    if not _exists(base_id):
+        return base_id
+    for _ in range(100):
+        candidate = f"{base_id}-{uuid.uuid4().hex[:6]}"
+        if not _exists(candidate):
+            return candidate
+    raise RuntimeError(f"Could not generate unique id for {base_id}")
 
 
 def workflow_dir(root: Path) -> Path:
@@ -50,6 +65,19 @@ def write_json_atomic(path: Path, data: dict[str, Any]) -> None:
         handle.write(encoded)
         temp_path = Path(handle.name)
     temp_path.replace(path)
+
+
+@contextmanager
+def workflow_mutation_lock(root: Path):
+    lock_dir = state_dir(root)
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / ".mutation.lock"
+    with lock_path.open("w", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def default_workspace_state() -> dict[str, Any]:
@@ -91,13 +119,14 @@ def ensure_workspace(root: Path) -> None:
 
 
 def next_event_seq(root: Path) -> int:
-    state_path = state_dir(root) / "state.json"
-    state = read_json(state_path)
-    next_seq = int(state.get("last_event_seq", 0)) + 1
-    state["last_event_seq"] = next_seq
-    state["updated_at"] = utc_now()
-    write_json_atomic(state_path, state)
-    return next_seq
+    with workflow_mutation_lock(root):
+        state_path = state_dir(root) / "state.json"
+        state = read_json(state_path)
+        next_seq = int(state.get("last_event_seq", 0)) + 1
+        state["last_event_seq"] = next_seq
+        state["updated_at"] = utc_now()
+        write_json_atomic(state_path, state)
+        return next_seq
 
 
 def append_workspace_event(root: Path, event_type: str, entity_type: str, entity_id: str, summary: str, **extra: Any) -> dict[str, Any]:
@@ -374,7 +403,10 @@ def promote_to_task(
         raise RuntimeError("Promotion blocked: " + " ".join(readiness_errors))
 
     date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    task_id = f"{date_prefix}-{slugify(title)}-task"
+    task_id = unique_readable_id(
+        [tasks_dir(root) / "active", tasks_dir(root) / "archive"],
+        f"{date_prefix}-{slugify(title)}-task",
+    )
 
     task_data = default_task_json(task_id, intake_id, title, goal, task_type, acceptance_criteria)
     task_data["clarification"] = build_clarification_payload(root, intake_id, task_type)
@@ -411,14 +443,16 @@ def promote_to_task(
     append_task_event(root, task_id, "task_promoted", f"Intake {intake_id} promoted to task {task_id}")
 
     # Update workspace state
-    state["current_intake_id"] = None
-    state["current_task_id"] = task_id
-    active_ids = state.get("active_task_ids", [])
-    if task_id not in active_ids:
-        active_ids.append(task_id)
-    state["active_task_ids"] = active_ids
-    state["updated_at"] = now
-    write_json_atomic(state_path, state)
+    with workflow_mutation_lock(root):
+        state = read_json(state_path)
+        state["current_intake_id"] = None
+        state["current_task_id"] = task_id
+        active_ids = state.get("active_task_ids", [])
+        if task_id not in active_ids:
+            active_ids.append(task_id)
+        state["active_task_ids"] = active_ids
+        state["updated_at"] = now
+        write_json_atomic(state_path, state)
 
     # Append workspace event
     append_workspace_event(
@@ -448,7 +482,11 @@ def promote_to_task(
 def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> dict[str, str]:
     ensure_workspace(root)
     date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    intake_id = f"{date_prefix}-{slugify(title)}-intake"
+    intake_id = unique_readable_id(
+        [state_dir(root) / "intake"],
+        f"{date_prefix}-{slugify(title)}-intake",
+        suffix=".md",
+    )
     intake_path = state_dir(root) / "intake" / f"{intake_id}.md"
     now = utc_now()
     intake_path.write_text(
@@ -507,15 +545,16 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
     )
 
     state_path = state_dir(root) / "state.json"
-    state = read_json(state_path)
-    state["current_intake_id"] = intake_id
-    state.setdefault("active_sessions", {})[session_id] = {
-        "current_intake_id": intake_id,
-        "current_task_id": None,
-        "updated_at": now,
-    }
-    state["updated_at"] = now
-    write_json_atomic(state_path, state)
+    with workflow_mutation_lock(root):
+        state = read_json(state_path)
+        state["current_intake_id"] = intake_id
+        state.setdefault("active_sessions", {})[session_id] = {
+            "current_intake_id": intake_id,
+            "current_task_id": None,
+            "updated_at": now,
+        }
+        state["updated_at"] = now
+        write_json_atomic(state_path, state)
 
     append_workspace_event(
         root,
@@ -545,56 +584,70 @@ def acquire_lock(
     purpose: str,
     ttl_seconds: int = 300,
 ) -> dict[str, Any]:
-    locks_file = locks_path(root)
-    data = read_json(locks_file)
-    now = datetime.now(timezone.utc)
+    with workflow_mutation_lock(root):
+        locks_file = locks_path(root)
+        data = read_json(locks_file)
+        now = datetime.now(timezone.utc)
 
-    for existing in data.get("locks", []):
-        if existing["scope"] == scope and existing["entity_id"] == entity_id:
-            if existing["owner"] != owner:
-                raise RuntimeError(
-                    f"Lock already held: scope={scope} entity_id={entity_id} owner={existing['owner']}"
-                )
-            # Same owner re-acquiring: release first
-            data["locks"] = [lk for lk in data["locks"] if lk["id"] != existing["id"]]
-            break
+        active_locks = []
+        for existing in data.get("locks", []):
+            expires_at = existing.get("expires_at")
+            if expires_at:
+                try:
+                    if datetime.fromisoformat(expires_at) <= now:
+                        continue
+                except ValueError:
+                    pass
+            active_locks.append(existing)
+        data["locks"] = active_locks
 
-    lock_id = f"lock-{uuid.uuid4().hex[:12]}"
-    acquired_at = now.replace(microsecond=0).isoformat()
-    expires_at = (now + timedelta(seconds=ttl_seconds)).replace(microsecond=0).isoformat()
+        for existing in data.get("locks", []):
+            if existing["scope"] == scope and existing["entity_id"] == entity_id:
+                if existing["owner"] != owner:
+                    raise RuntimeError(
+                        f"Lock already held: scope={scope} entity_id={entity_id} owner={existing['owner']}"
+                    )
+                # Same owner re-acquiring: release first
+                data["locks"] = [lk for lk in data["locks"] if lk["id"] != existing["id"]]
+                break
 
-    lock = {
-        "id": lock_id,
-        "scope": scope,
-        "entity_id": entity_id,
-        "owner": owner,
-        "purpose": purpose,
-        "acquired_at": acquired_at,
-        "expires_at": expires_at,
-    }
-    data.setdefault("locks", []).append(lock)
-    write_json_atomic(locks_file, data)
-    return lock
+        lock_id = f"lock-{uuid.uuid4().hex[:12]}"
+        acquired_at = now.replace(microsecond=0).isoformat()
+        expires_at = (now + timedelta(seconds=ttl_seconds)).replace(microsecond=0).isoformat()
+
+        lock = {
+            "id": lock_id,
+            "scope": scope,
+            "entity_id": entity_id,
+            "owner": owner,
+            "purpose": purpose,
+            "acquired_at": acquired_at,
+            "expires_at": expires_at,
+        }
+        data.setdefault("locks", []).append(lock)
+        write_json_atomic(locks_file, data)
+        return lock
 
 
 def release_lock(root: Path, lock_id: str, owner: str) -> None:
-    locks_file = locks_path(root)
-    data = read_json(locks_file)
-    target = None
-    for lk in data.get("locks", []):
-        if lk["id"] == lock_id:
-            target = lk
-            break
+    with workflow_mutation_lock(root):
+        locks_file = locks_path(root)
+        data = read_json(locks_file)
+        target = None
+        for lk in data.get("locks", []):
+            if lk["id"] == lock_id:
+                target = lk
+                break
 
-    if target is None:
-        raise RuntimeError(f"Lock not found: {lock_id}")
-    if target["owner"] != owner:
-        raise RuntimeError(
-            f"Cannot release lock owned by {target['owner']}: {lock_id}"
-        )
+        if target is None:
+            raise RuntimeError(f"Lock not found: {lock_id}")
+        if target["owner"] != owner:
+            raise RuntimeError(
+                f"Cannot release lock owned by {target['owner']}: {lock_id}"
+            )
 
-    data["locks"] = [lk for lk in data["locks"] if lk["id"] != lock_id]
-    write_json_atomic(locks_file, data)
+        data["locks"] = [lk for lk in data["locks"] if lk["id"] != lock_id]
+        write_json_atomic(locks_file, data)
 
 
 # ---------------------------------------------------------------------------
@@ -674,14 +727,15 @@ def mark_task(
     task = update_task(root, task_id, updates)
 
     state_path = state_dir(root) / "state.json"
-    state = read_json(state_path)
-    if status in {"planning", "executing", "verifying", "changes_requested", "tweaking", "debugging"}:
-        state["current_intake_id"] = None
-        state["current_task_id"] = task_id
-    elif status in {"paused", "blocked"} and state.get("current_task_id") == task_id:
-        state["current_task_id"] = None
-    state["updated_at"] = utc_now()
-    write_json_atomic(state_path, state)
+    with workflow_mutation_lock(root):
+        state = read_json(state_path)
+        if status in {"planning", "executing", "verifying", "changes_requested", "tweaking", "debugging"}:
+            state["current_intake_id"] = None
+            state["current_task_id"] = task_id
+        elif status in {"paused", "blocked"} and state.get("current_task_id") == task_id:
+            state["current_task_id"] = None
+        state["updated_at"] = utc_now()
+        write_json_atomic(state_path, state)
 
     summary_parts = [f"status={status}"]
     if progress is not None:
@@ -713,12 +767,13 @@ def mark_task(
 
 
 def update_task(root: Path, task_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-    tpath = task_path(root, task_id) / "task.json"
-    task = read_json(tpath)
-    task.update(updates)
-    task["updated_at"] = utc_now()
-    write_json_atomic(tpath, task)
-    return task
+    with workflow_mutation_lock(root):
+        tpath = task_path(root, task_id) / "task.json"
+        task = read_json(tpath)
+        task.update(updates)
+        task["updated_at"] = utc_now()
+        write_json_atomic(tpath, task)
+        return task
 
 
 def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -847,13 +902,11 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         ]
         fallback_note = None
     else:
-        # No impact scope set: commit all non-disallowed changes.
-        candidate_paths = [
-            path
-            for path in all_changed
-            if not _is_disallowed_checkpoint_path(path)
-        ]
-        fallback_note = "no impact scope set, committed all non-disallowed changes"
+        return _record_checkpoint_commit_result(
+            root,
+            task_id,
+            {"created": False, "reason": "missing_impact_scope", "paths": []},
+        )
 
     candidate_paths = list(dict.fromkeys(candidate_paths))
     if not candidate_paths:
@@ -956,32 +1009,33 @@ def cleanup_completed_task(root: Path, task_id: str) -> dict[str, Any]:
     shutil.rmtree(task_dir)
 
     # 2. Remove from workspace state
-    state_path = state_dir(root) / "state.json"
-    state = read_json(state_path)
+    with workflow_mutation_lock(root):
+        state_path = state_dir(root) / "state.json"
+        state = read_json(state_path)
 
-    active_ids = state.get("active_task_ids", [])
-    if task_id in active_ids:
-        active_ids.remove(task_id)
-    state["active_task_ids"] = active_ids
+        active_ids = state.get("active_task_ids", [])
+        if task_id in active_ids:
+            active_ids.remove(task_id)
+        state["active_task_ids"] = active_ids
 
-    if state.get("current_task_id") == task_id:
-        state["current_task_id"] = None
+        if state.get("current_task_id") == task_id:
+            state["current_task_id"] = None
 
-    # 3. Clear current_task_id in active_sessions
-    for session in state.get("active_sessions", {}).values():
-        if session.get("current_task_id") == task_id:
-            session["current_task_id"] = None
+        # 3. Clear current_task_id in active_sessions
+        for session in state.get("active_sessions", {}).values():
+            if session.get("current_task_id") == task_id:
+                session["current_task_id"] = None
 
-    state["updated_at"] = utc_now()
-    write_json_atomic(state_path, state)
+        state["updated_at"] = utc_now()
+        write_json_atomic(state_path, state)
 
-    # 4. Remove locks where entity_id matches task_id
-    locks_file = locks_path(root)
-    locks_data = read_json(locks_file)
-    locks_data["locks"] = [
-        lk for lk in locks_data.get("locks", []) if lk.get("entity_id") != task_id
-    ]
-    write_json_atomic(locks_file, locks_data)
+        # 4. Remove locks where entity_id matches task_id
+        locks_file = locks_path(root)
+        locks_data = read_json(locks_file)
+        locks_data["locks"] = [
+            lk for lk in locks_data.get("locks", []) if lk.get("entity_id") != task_id
+        ]
+        write_json_atomic(locks_file, locks_data)
 
     # 5. Append workspace event
     append_workspace_event(
@@ -1139,32 +1193,33 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
         raise RuntimeError(f"Failed to archive task {task_id}: {e}")
 
     # 3. Update workspace state
-    state_path = state_dir(root) / "state.json"
-    state = read_json(state_path)
+    with workflow_mutation_lock(root):
+        state_path = state_dir(root) / "state.json"
+        state = read_json(state_path)
 
-    active_ids = state.get("active_task_ids", [])
-    if task_id in active_ids:
-        active_ids.remove(task_id)
-    state["active_task_ids"] = active_ids
+        active_ids = state.get("active_task_ids", [])
+        if task_id in active_ids:
+            active_ids.remove(task_id)
+        state["active_task_ids"] = active_ids
 
-    if state.get("current_task_id") == task_id:
-        state["current_task_id"] = None
+        if state.get("current_task_id") == task_id:
+            state["current_task_id"] = None
 
-    # Clear current_task_id in active_sessions
-    for session in state.get("active_sessions", {}).values():
-        if session.get("current_task_id") == task_id:
-            session["current_task_id"] = None
+        # Clear current_task_id in active_sessions
+        for session in state.get("active_sessions", {}).values():
+            if session.get("current_task_id") == task_id:
+                session["current_task_id"] = None
 
-    state["updated_at"] = utc_now()
-    write_json_atomic(state_path, state)
+        state["updated_at"] = utc_now()
+        write_json_atomic(state_path, state)
 
-    # 4. Remove locks where entity_id matches task_id
-    locks_file = locks_path(root)
-    locks_data = read_json(locks_file)
-    locks_data["locks"] = [
-        lk for lk in locks_data.get("locks", []) if lk.get("entity_id") != task_id
-    ]
-    write_json_atomic(locks_file, locks_data)
+        # 4. Remove locks where entity_id matches task_id
+        locks_file = locks_path(root)
+        locks_data = read_json(locks_file)
+        locks_data["locks"] = [
+            lk for lk in locks_data.get("locks", []) if lk.get("entity_id") != task_id
+        ]
+        write_json_atomic(locks_file, locks_data)
 
     # 5. Append workspace event
     append_workspace_event(
@@ -1252,11 +1307,12 @@ def start_execution(root: Path, task_id: str, subagents: list[str]) -> dict[str,
     task = update_task(root, task_id, updates)
 
     state_path = state_dir(root) / "state.json"
-    state = read_json(state_path)
-    state["current_intake_id"] = None
-    state["current_task_id"] = task_id
-    state["updated_at"] = utc_now()
-    write_json_atomic(state_path, state)
+    with workflow_mutation_lock(root):
+        state = read_json(state_path)
+        state["current_intake_id"] = None
+        state["current_task_id"] = task_id
+        state["updated_at"] = utc_now()
+        write_json_atomic(state_path, state)
 
     append_task_event(
         root,
@@ -1302,6 +1358,12 @@ def complete_verification(
     # Check subagent may write back verification results directly.
     tpath = task_path(root, task_id)
     before_status = read_json(tpath / "task.json")["status"]
+    allowed_before_statuses = {"executing", "verifying", "changes_requested", "debugging", "tweaking"}
+    if before_status not in allowed_before_statuses:
+        raise RuntimeError(
+            f"Cannot complete verification for task {task_id}: status is '{before_status}', "
+            f"expected one of {', '.join(sorted(allowed_before_statuses))}"
+        )
     new_status = result_to_status[result]
 
     task = update_task(

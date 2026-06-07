@@ -132,6 +132,19 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(event["type"], "intake_created")
             self.assertEqual(event["entity_id"], result["intake_id"])
 
+    def test_create_intake_generates_unique_ids_for_duplicate_titles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            first = create_intake(root, "Duplicate title", "First request", "session-main")
+            second = create_intake(root, "Duplicate title", "Second request", "session-main")
+
+            self.assertNotEqual(first["intake_id"], second["intake_id"])
+            self.assertTrue(first["intake_id"].endswith("duplicate-title-intake"))
+            self.assertRegex(second["intake_id"], r"duplicate-title-intake-[0-9a-f]{6}$")
+            self.assertTrue((root / ".just-demand" / "state" / "intake" / f"{first['intake_id']}.md").is_file())
+            self.assertTrue((root / ".just-demand" / "state" / "intake" / f"{second['intake_id']}.md").is_file())
+
     def test_create_intake_includes_clarification_sections(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -199,6 +212,25 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIsNone(state["current_intake_id"])
             self.assertEqual(state["current_task_id"], result["task_id"])
             self.assertIn(result["task_id"], state["active_task_ids"])
+
+    def test_promote_generates_unique_task_ids_for_duplicate_titles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake_a = create_intake(root, "Duplicate task A", "First", "session-main")
+            intake_b = create_intake(root, "Duplicate task B", "Second", "session-main")
+            set_intake_scope(root, intake_a["intake_id"], "Scope A")
+            set_intake_scope(root, intake_b["intake_id"], "Scope B")
+            set_intake_design_artifact(root, intake_a["intake_id"])
+            set_intake_design_artifact(root, intake_b["intake_id"])
+
+            first = promote_to_task(root, intake_a["intake_id"], "Duplicate task", "Goal A", "design", ["A"])
+            second = promote_to_task(root, intake_b["intake_id"], "Duplicate task", "Goal B", "design", ["B"])
+
+            self.assertNotEqual(first["task_id"], second["task_id"])
+            self.assertTrue(first["task_id"].endswith("duplicate-task-task"))
+            self.assertRegex(second["task_id"], r"duplicate-task-task-[0-9a-f]{6}$")
+            self.assertTrue((tasks_dir(root) / "active" / first["task_id"]).is_dir())
+            self.assertTrue((tasks_dir(root) / "active" / second["task_id"]).is_dir())
 
     def test_promote_blocks_when_scope_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -289,6 +321,52 @@ class WorkflowCoreTests(unittest.TestCase):
             release_lock(root, lock_id=lock["id"], owner="session-main")
             locks = read_json(root / ".just-demand" / "state" / "locks.json")
             self.assertEqual(locks["locks"], [])
+
+    def test_expired_lock_does_not_block_new_owner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+
+            expired = acquire_lock(root, scope="task", entity_id="task-a", owner="owner-a", purpose="expired", ttl_seconds=-1)
+            self.assertEqual(expired["owner"], "owner-a")
+
+            replacement = acquire_lock(root, scope="task", entity_id="task-a", owner="owner-b", purpose="replacement")
+
+            self.assertEqual(replacement["owner"], "owner-b")
+            locks = read_json(locks_path(root))
+            self.assertEqual(len(locks["locks"]), 1)
+            self.assertEqual(locks["locks"][0]["owner"], "owner-b")
+
+    def test_concurrent_workspace_events_allocate_unique_sequences(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+
+            code = (
+                "import os, sys; "
+                "from pathlib import Path; "
+                f"sys.path.insert(0, {str(SCRIPT_DIR)!r}); "
+                "from workflow_core import append_workspace_event; "
+                f"root = Path({str(root)!r}); "
+                "[append_workspace_event(root, 'concurrent_event', 'test', f'{os.getpid()}-{i}', 'concurrent event') for i in range(20)]"
+            )
+            processes = [
+                subprocess.Popen([sys.executable, "-c", code], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                for _ in range(8)
+            ]
+
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=30)
+                self.assertEqual(process.returncode, 0, msg=f"stdout={stdout}\nstderr={stderr}")
+
+            events = [json.loads(line) for line in (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines() if line]
+            seqs = [event["seq"] for event in events]
+
+            self.assertEqual(len(seqs), 160)
+            self.assertEqual(len(set(seqs)), 160)
+            self.assertEqual(sorted(seqs), list(range(1, 161)))
+            state = read_json(state_dir(root) / "state.json")
+            self.assertEqual(state["last_event_seq"], 160)
 
     def test_lifecycle_and_validation_revision(self):
         from workflow_core import complete_verification, create_validation_revision, promote_to_task, start_execution
@@ -853,6 +931,22 @@ class WorkflowCoreTests(unittest.TestCase):
             task_dir = tasks_dir(root) / "active" / task_id
             self.assertTrue(task_dir.exists())
 
+    def test_complete_verification_rejects_invalid_lifecycle_states(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Invalid closeout", "Build invalid closeout", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Invalid closeout", "Build invalid closeout", "design", ["Invalid closeout blocked"])
+            task_id = promoted["task_id"]
+
+            with self.assertRaisesRegex(RuntimeError, "Cannot complete verification"):
+                complete_verification(root, task_id, "passed", "Should not close", auto_archive=False)
+
+            mark_task(root, task_id, "blocked")
+            with self.assertRaisesRegex(RuntimeError, "status is 'blocked'"):
+                complete_verification(root, task_id, "blocked", "Still blocked", auto_archive=False)
+
     def test_archive_task_cli_success(self):
         import subprocess
 
@@ -1328,8 +1422,8 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(task["clarification"]["approval"], "Approved by user.")
 
 
-    def test_checkpoint_commit_works_without_impact_scope(self):
-        """Checkpoint commit should fall back to all changes when impact is not set."""
+    def test_checkpoint_commit_skips_without_impact_scope(self):
+        """Checkpoint commit should require explicit impact scope."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             init_git_repo(root)
@@ -1343,17 +1437,17 @@ class WorkflowCoreTests(unittest.TestCase):
             create_validation_revision(root, task_id, "No impact.", ["C1"], ["E1"])
             start_execution(root, task_id, ["just-demand-implement"])
 
-            # Do NOT set impact — commit should fall back to all changes
+            # Do NOT set impact — checkpoint should skip to avoid unrelated changes.
             (root / "tracked.txt").write_text("updated content\n", encoding="utf-8")
 
             result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
-            self.assertTrue(result["checkpoint_commit"]["created"])
-            self.assertIn("tracked.txt", result["checkpoint_commit"]["paths"])
-            self.assertIsNone(result["checkpoint_commit"].get("reason"))
+            self.assertFalse(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"]["reason"], "missing_impact_scope")
+            self.assertEqual(result["checkpoint_commit"]["paths"], [])
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint no impact")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ chore: seed repo")
 
     def test_multiple_checkpoint_commits_per_task(self):
         """Same task should support multiple checkpoint commits over its lifecycle."""
@@ -1417,6 +1511,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             # Make a scoped change
             (root / "tracked.txt").write_text("standalone change\n", encoding="utf-8")
+            mark_task(root, task_id, "executing", impact=["tracked.txt"])
 
             script = REPO_ROOT / ".just-demand" / "scripts" / "task.py"
             result = subprocess.run(
@@ -1437,8 +1532,8 @@ class WorkflowCoreTests(unittest.TestCase):
             latest_log = git_stdout(root, "log", "--oneline", "-1")
             self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint standalone cp")
 
-    def test_checkpoint_commit_fallback_note_present_in_events(self):
-        """When no impact scope is set, the fallback_note should be recorded in events."""
+    def test_checkpoint_commit_missing_impact_reason_present_in_events(self):
+        """When no impact scope is set, the skip reason should be recorded in events."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             init_git_repo(root)
@@ -1457,11 +1552,12 @@ class WorkflowCoreTests(unittest.TestCase):
 
             result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
-            self.assertTrue(result["checkpoint_commit"]["created"])
-            self.assertEqual(
-                result["checkpoint_commit"].get("fallback_note"),
-                "no impact scope set, committed all non-disallowed changes",
-            )
+            self.assertFalse(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"].get("reason"), "missing_impact_scope")
+            task_events = [json.loads(line) for line in task_event_path(root, task_id).read_text(encoding="utf-8").splitlines() if line]
+            skipped = [event for event in task_events if event["type"] == "checkpoint_commit_skipped"]
+            self.assertEqual(len(skipped), 1)
+            self.assertIn("missing_impact_scope", skipped[0]["summary"])
 
     def test_where_cli_prints_script_path_and_repo_root(self):
         import subprocess

@@ -205,3 +205,9 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-07-add-runtime-workflow-gate-task (Add runtime workflow gate) completed with status 'done'.
   Verification summary: Runtime now blocks concrete requests without an active task and redirects them to workflow entry; skill text now says routing guidance is not enforcement.
+
+- Task 2026-06-07-harden-workflow-safety-first-batch-task (Harden workflow safety first batch) completed with status 'done'.
+  Verification summary: First-batch workflow safety hardening implemented; workflow core tests 71/71 and plugin tests 60/60 passed.
+
+- Task 2026-06-07-add-workflow-state-locks-task (Add workflow state locks) completed with status 'done'.
+  Verification summary: Second-batch workflow reliability hardening implemented; workflow core tests 73/73 and plugin tests 60/60 passed.
