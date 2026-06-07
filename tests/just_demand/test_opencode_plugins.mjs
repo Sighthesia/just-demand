@@ -6,6 +6,7 @@ import test from "node:test"
 
 import {
   buildExecutionGateError,
+  debugLog,
   getActiveTask,
   getMissingRequiredContextFiles,
   getWorkflowSubagentName,
@@ -65,6 +66,30 @@ test("readJson returns null for invalid JSON", () => {
 
 test("readJson returns null for missing file", () => {
   assert.equal(readJson("/nonexistent/path.json"), null)
+})
+
+test("debugLog is quiet by default and emits only when enabled", () => {
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  const originalError = console.error
+  const messages = []
+  console.error = (message) => messages.push(String(message))
+
+  try {
+    delete process.env.JUST_DEMAND_DEBUG
+    debugLog("quiet", { tool: "task" })
+    assert.deepEqual(messages, [])
+
+    process.env.JUST_DEMAND_DEBUG = "1"
+    debugLog("enabled", { tool: "task", args_keys: ["agent"] })
+    assert.equal(messages.length, 1)
+    assert.match(messages[0], /^\[just-demand debug\] /)
+    assert.match(messages[0], /"event":"enabled"/)
+    assert.match(messages[0], /"args_keys":\["agent"\]/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+    console.error = originalError
+  }
 })
 
 // ---------------------------------------------------------------------------

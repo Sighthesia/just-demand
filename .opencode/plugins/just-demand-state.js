@@ -2,9 +2,11 @@ import {
   buildExecutionGateError,
   getActiveTask,
   clearSubagentUnavailablePending,
+  debugLog,
   getMissingExecutionGateFields,
   getReminderState,
   getWriteToolRule,
+  getWorkflowSubagentName,
   readTaskJson,
   taskIsReadyForExecution,
   taskLooksLikeLongContextExecutionCandidate,
@@ -94,6 +96,8 @@ const extractCurrentText = (output) => {
   const outputText = joinTextParts(output?.parts)
   return [messageText, outputText].filter(Boolean).join("\n").trim()
 }
+
+const argsKeys = (args) => args && typeof args === "object" ? Object.keys(args).sort() : []
 
 const topicMemory = new Map()
 
@@ -384,28 +388,46 @@ export default async ({ directory } = {}) => {
       if (!workflowDirectory) return
 
       const toolName = String(input?.tool || "").toLowerCase()
+      debugLog("state.tool.before", {
+        tool: toolName,
+        args_keys: argsKeys(output?.args),
+        workflow_subagent: getWorkflowSubagentName(output?.args),
+      })
       const rule = getWriteToolRule(toolName, output?.args)
-      if (!rule) return
+      if (!rule) {
+        debugLog("state.tool.before.allow", { reason: "no_write_rule", tool: toolName })
+        return
+      }
 
       const taskId = getActiveTask(workflowDirectory)
       if (!taskId) {
+        debugLog("state.tool.before.block", { reason: "no_active_task", rule: rule.name, label: rule.label })
         throw new Error(buildExecutionGateError(rule.label, null, []))
       }
 
       const task = readTaskJson(workflowDirectory, taskId)
       if (!taskIsReadyForExecution(task) && rule.needsExecutionGate(output?.args)) {
         const missing = getMissingExecutionGateFields(task)
+        debugLog("state.tool.before.block", { reason: "task_not_ready", rule: rule.name, task_id: taskId, missing })
         throw new Error(buildExecutionGateError(rule.label, taskId, missing))
       }
+
+      debugLog("state.tool.before.allow", { reason: "gate_passed", rule: rule.name, task_id: taskId })
     },
 
     "chat.message": async (input, output) => {
       // Keep main-session injection lightweight: reminder only, no task state dump.
       // This layer is best-effort: some OpenCode versions do not expose usable text
       // parts to chat.message, so Layer 1 system prompt injection remains the primary path.
-      if (!output || !Array.isArray(output.parts)) return
+      if (!output || !Array.isArray(output.parts)) {
+        debugLog("state.chat.message.skip", { reason: "missing_parts" })
+        return
+      }
       const textPart = output.parts.find((part) => part?.type === "text" && typeof part.text === "string")
-      if (!textPart) return
+      if (!textPart) {
+        debugLog("state.chat.message.skip", { reason: "missing_text_part", part_types: output.parts.map((part) => part?.type).filter(Boolean) })
+        return
+      }
 
       const sessionID = typeof input?.sessionID === "string" && input.sessionID ? input.sessionID : "main"
       const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
@@ -420,6 +442,13 @@ export default async ({ directory } = {}) => {
       updateTopicTurns(`${workflowDirectory}::${sessionID}`, currentText, reminderState)
 
       const controllerDecision = buildControllerDecision(currentText, reminderState)
+      debugLog("state.chat.message.decision", {
+        session_id: sessionID,
+        active_task_id: activeTaskId || null,
+        phase: controllerDecision.phase,
+        action: controllerDecision.action,
+        reason_code: controllerDecision.reason_code,
+      })
       textPart.text = applyControllerDecision(textPart.text, reminderState, controllerDecision)
 
       if (controllerDecision.reason_code !== "subagent_retry_or_skip") {

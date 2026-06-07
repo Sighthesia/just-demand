@@ -6,6 +6,7 @@ const REMINDER_STATE = new Map()
 const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
 const WORKFLOW_SUBAGENTS = new Set(["just-demand-research", "just-demand-implement", "just-demand-check", "just-demand-docs"])
 const EXECUTION_GATED_SUBAGENTS = new Set(["just-demand-implement", "just-demand-check", "just-demand-docs"])
+const DEBUG_ENV_VALUES = new Set(["1", "true", "yes", "on"])
 const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
   "design",
   "implementation",
@@ -91,6 +92,17 @@ export const readJson = (path) => {
 }
 
 export const readTextIfExists = (path) => existsSync(path) ? readFileSync(path, "utf8") : ""
+
+export const debugLog = (event, fields = {}) => {
+  const enabled = DEBUG_ENV_VALUES.has(String(globalThis.process?.env?.JUST_DEMAND_DEBUG || "").toLowerCase())
+  if (!enabled) return
+
+  try {
+    console.error(`[just-demand debug] ${JSON.stringify({ event, ...fields })}`)
+  } catch {
+    console.error(`[just-demand debug] ${event}`)
+  }
+}
 
 export const getReminderState = (directory, sessionID) => {
   const key = reminderStateKey(directory, sessionID)
