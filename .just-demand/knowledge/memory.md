@@ -232,3 +232,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-08-strengthen-skill-only-workflow-fallback-task (Strengthen skill-only workflow fallback) completed with status 'done'.
   Verification summary: Skill-only fallback guidance now mirrors Superpowers-style bootstrap discipline: using-just-demand first, socratic-clarification second, approach approval enters task flow rather than inline editing, no-plugin writes require list-active/context checks, and guidance clearly states skills are best-effort while plugins remain hard enforcement. Plugin tests 64/64, install tests 37/37, package JSON valid.
+
+- Task 2026-06-08-optimize-subagent-task-context-task (Optimize subagent task context) completed with status 'done'.
+  Verification summary: Optimized subagent context injection to compact execution context and verified plugin tests plus package JSON.

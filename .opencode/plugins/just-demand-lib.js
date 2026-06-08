@@ -278,23 +278,18 @@ export const taskIsReadyForExecution = (task) => getMissingExecutionGateFields(t
 const renderClarificationContext = (task) => {
   const clarification = task?.clarification || {}
   const entries = [
-    ["Current Understanding", clarification.current_understanding],
-    ["Expected Behavior", clarification.expected_behavior],
-    ["Actual Behavior", clarification.actual_behavior],
-    ["Reproduction", clarification.reproduction],
+    ["Goal", clarification.final_expected_effect || clarification.expected_behavior || clarification.current_understanding],
+    ["Current Reality", [clarification.actual_behavior, clarification.reproduction].filter((value) => typeof value === "string" && value.trim()).join("\n\n")],
     ["Scope", clarification.scope],
-    ["Final Expected Effect", clarification.final_expected_effect],
-    ["Approach Options", clarification.approach_options],
     ["Chosen Approach", clarification.chosen_approach],
-    ["Final Implementation Plan", clarification.final_implementation_plan],
+    ["Implementation Plan", clarification.final_implementation_plan],
     ["Validation", clarification.validation],
-    ["Approval", clarification.approval],
   ].filter(([, value]) => typeof value === "string" && value.trim())
 
   if (entries.length === 0) return ""
 
   return [
-    "# Clarification",
+    "# Execution Context",
     "",
     ...entries.flatMap(([label, value]) => [`## ${label}`, value.trim(), ""]),
   ].join("\n").trimEnd()

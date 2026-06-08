@@ -112,7 +112,7 @@ Start workflow subagent prompts with:
 Active task: <task-id>
 ```
 
-This is a fallback for context injection failures.
+This is a fallback for context injection failures. Keep the manual Requested Work short: state the role-specific request, target repository or paths if needed, and any turn-specific instruction. Do not paste the full task package, full clarification artifact, approach options, approval text, or repeated context sections; the plugin injects the task context automatically.
 
 ## Progressive Clarification Routing
 
