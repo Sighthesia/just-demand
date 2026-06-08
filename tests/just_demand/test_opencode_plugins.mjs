@@ -22,6 +22,7 @@ import stateFactory, {
   CONTROLLER_ACTION,
   CONTROLLER_PHASE,
   buildControllerDecision,
+  textLooksLikeWorkflowEntryNarration,
 } from "../../.opencode/plugins/just-demand-state.js"
 import subagentContextFactory from "../../.opencode/plugins/just-demand-subagent-context.js"
 
@@ -396,6 +397,12 @@ test("controller decision shape exposes phase action reason and rewrite", () => 
   assert.deepEqual(executionDecision.rewrite, { mode: "replace", preserve_original: true })
 })
 
+test("workflow-entry narration detector allows command narration but not inline execution intent", () => {
+  assert.equal(textLooksLikeWorkflowEntryNarration("I am creating the workflow entry now: create-intake first, then promote, then list-active."), true)
+  assert.equal(textLooksLikeWorkflowEntryNarration("Run just-demand . --help so we can verify the help path."), true)
+  assert.equal(textLooksLikeWorkflowEntryNarration("I will implement the fix inline in the main session, then maybe run create-intake."), false)
+})
+
 // ---------------------------------------------------------------------------
 // plugin factory: subagent-context returns hooks object
 // ---------------------------------------------------------------------------
@@ -510,6 +517,27 @@ test("state hard redirects Chinese concrete workflow work when no active task ex
   assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
   assert.match(output.parts[0].text, /no active formal task yet/i)
   assert.match(output.parts[0].text, /just-demand-intake/i)
+})
+
+test("state allows workflow-entry narration when no active task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "I am creating the workflow entry now: create-intake first, then promote once the intake is clarified.",
+    "Run just-demand . --help in the repo root so we can verify the documented help path.",
+    "我现在只是说明 workflow entry 步骤：先 create-intake，再 promote，之后再看 list-active。",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+    await plugin["chat.message"]({ sessionID: `workflow-entry-narration-${index}` }, output)
+    assert.equal(output.parts[0].text, sample)
+    assert.doesNotMatch(output.parts[0].text, /workflow entry required/i)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
+  }
 })
 
 test("state chat.message skips safely when output parts are missing", async () => {

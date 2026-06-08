@@ -235,3 +235,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-08-optimize-subagent-task-context-task (Optimize subagent task context) completed with status 'done'.
   Verification summary: Optimized subagent context injection to compact execution context and verified plugin tests plus package JSON.
+
+- Task 2026-06-08-fix-workflow-entry-and-cli-consistency-task (Fix workflow entry and CLI consistency) completed with status 'done'.
+  Verification summary: Fixed CLI/help project-dir consistency, workflow-entry narration false blocks, and create-intake vs promote verification guidance; core/install/plugin tests passed.

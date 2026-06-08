@@ -61,6 +61,34 @@ const CROSS_SENTENCE_NEAR_MISS_PATTERNS = [
   /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
 ]
 
+const WORKFLOW_ENTRY_COMMAND_PATTERNS = [
+  /\bcreate-intake\b/i,
+  /\bpromote\b/i,
+  /\blist-active\b/i,
+  /\bjust-demand\b/i,
+  /(^|\s)--help\b/i,
+  /(^|\s)-h\b/i,
+]
+
+const WORKFLOW_ENTRY_NARRATION_PATTERNS = [
+  /\b(workflow\s+entry|intake\s+creation|formal\s+task\s+promotion|help\s+check|help\s+path)\b/i,
+  /\b(create|creating|created|promote|promoting|promoted|list|listing|listed|check|checking|checked|run|running|validate|validating|validated|describe|describing|described|mention|mentioned|document|documenting|explain|explaining|narrate|narrating|walk\s+through)\b/i,
+  /(创建|创建中|提升|提升为任务|列出|检查|验证|说明|描述|记录|解释|先跑|运行).*(create-intake|promote|list-active|just-demand|--help|-h)/i,
+]
+
+const INLINE_EXECUTION_INTENT_PATTERNS = [
+  /\b(implement\s+.*inline|debug\s+.*inline|finish\s+this\s+in\s+the\s+main\s+session|build\s+this\s+in\s+the\s+main\s+session|do\s+this\s+inline|main\s+session\s+.*\b(?:implement|build|fix|debug))\b/i,
+  /(直接在主会话里(?:实现|修复|调试)|主会话里(?:实现|修复|调试|做这个))/,
+]
+
+const textLooksLikeWorkflowEntryNarration = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  if (!WORKFLOW_ENTRY_COMMAND_PATTERNS.some((pattern) => pattern.test(body))) return false
+  if (INLINE_EXECUTION_INTENT_PATTERNS.some((pattern) => pattern.test(body))) return false
+  return WORKFLOW_ENTRY_NARRATION_PATTERNS.some((pattern) => pattern.test(body))
+}
+
 const normalizeWords = (text) => {
   const cleaned = String(text || "")
     .toLowerCase()
@@ -188,6 +216,15 @@ const buildControllerDecision = (text, reminderState) => {
   }
 
   if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) && !activeTask) {
+    if (textLooksLikeWorkflowEntryNarration(text)) {
+      return {
+        phase: CONTROLLER_PHASE.route,
+        action: CONTROLLER_ACTION.allow,
+        reason_code: "no_op",
+        rewrite: null,
+      }
+    }
+
     return {
       phase: CONTROLLER_PHASE.route,
       action: CONTROLLER_ACTION.block,
@@ -430,4 +467,4 @@ export default async ({ directory } = {}) => {
   }
 }
 
-export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE }
+export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE, textLooksLikeWorkflowEntryNarration }

@@ -143,11 +143,12 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 
 1. Confirm active formal work item.
 2. Run `just-demand . list-active` and inspect all unfinished tasks for conflict risk.
-3. Ensure the current task package has the required files for the intended subagent.
-4. Verify the clarification gate above passes. If not, route back to clarification.
-5. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
-6. Review subagent output before moving to the next phase.
-7. Run verification before claiming completion.
+3. Remember that `create-intake` alone will not appear in `list-active`; only promoted formal tasks do.
+4. Ensure the current task package has the required files for the intended subagent.
+5. Verify the clarification gate above passes. If not, route back to clarification.
+6. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
+7. Review subagent output before moving to the next phase.
+8. Run verification before claiming completion.
 
 ## Checkpoint Commit Policy
 

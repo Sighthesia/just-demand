@@ -33,6 +33,7 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - List unfinished formal tasks before execution: `just-demand . list-active`
 - Create intake: `just-demand . create-intake "<title>" "<raw request>" --session <session-id>`
 - Promote intake: `just-demand . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
+- Root help: `just-demand --help` or `just-demand . --help`
 - Mark task status/progress/impact: `just-demand . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
 - Close verified work: `just-demand . complete-verification <task-id> passed "<summary>"`
 - Mid-task checkpoint: `just-demand . checkpoint-commit <task-id>`
@@ -42,6 +43,7 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - After changing `.just-demand/scripts/`, run both Python test modules.
 - After changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`, run plugin tests and `python3 -m json.tool .opencode/package.json`, then restart OpenCode.
 - Before any implementation or verification dispatch, run `list-active` to inspect unfinished tasks for conflict risk.
+- `create-intake` only creates an intake. `list-active` stays empty until `promote` creates a formal task.
 - Do not report a task as complete until `complete-verification` has run. In this repo, verification closeout is a real workflow step, not wording.
 
 ## Task Context Rules

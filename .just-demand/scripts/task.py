@@ -45,11 +45,12 @@ COMMANDS = {
 }
 
 GLOBAL_COMMANDS = {"install", "update", "uninstall", "where"}
+HELP_FLAGS = {"-h", "--help"}
 
 
 def split_project_root(argv: list[str]) -> tuple[Path | None, list[str]]:
     """Split an optional leading project directory from command arguments."""
-    if len(argv) >= 2 and argv[0] not in COMMANDS and not argv[0].startswith("-") and argv[1] in COMMANDS:
+    if len(argv) >= 2 and argv[0] not in COMMANDS and not argv[0].startswith("-") and (argv[1] in COMMANDS or argv[1] in HELP_FLAGS):
         return Path(argv[0]), argv[1:]
     return None, argv
 
@@ -70,7 +71,11 @@ def print_project_invocation(project_root: Path | None, stream=None) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Just Demand task tools",
-        epilog="Use: just-demand [project-dir] <command> ...",
+        epilog=(
+            "Use: just-demand <command> ...\n"
+            "Project path form: just-demand [project-dir] <command> ...\n"
+            "Help: just-demand --help | just-demand [project-dir] --help | just-demand <command> --help"
+        ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -141,8 +146,11 @@ def execute_command(root: Path, args: list[str]) -> int:
     """Execute a single command with the given arguments."""
     try:
         parsed = build_parser().parse_args(args)
-    except SystemExit:
-        return 1
+    except SystemExit as exc:
+        code = exc.code
+        if isinstance(code, int):
+            return code
+        return 0 if code is None else 1
 
     try:
         if parsed.command == "create-intake":

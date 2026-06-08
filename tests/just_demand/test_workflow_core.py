@@ -473,6 +473,42 @@ class WorkflowCoreTests(unittest.TestCase):
             state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNotNone(state["current_intake_id"])
 
+    def test_create_intake_does_not_create_active_task_or_list_active_entry(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Agent workflow", "Build workflow", "session-main")
+
+            self.assertTrue((root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md").is_file())
+            self.assertEqual(list_unfinished_tasks(root), [])
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "list-active"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["tasks"], [])
+
+    def test_cli_help_accepts_project_dir_dot(self):
+        import subprocess
+
+        script = REPO_ROOT / "just-demand"
+        result = subprocess.run(
+            [sys.executable, str(script), ".", "--help"],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("Just Demand task tools", result.stdout)
+        self.assertIn("Project path form: just-demand [project-dir]", result.stdout)
+        self.assertIn("just-demand [project-dir] --help", result.stdout)
+        self.assertEqual(result.stderr, "")
+
     def test_cli_promote_reports_readiness_errors(self):
         import subprocess
 
