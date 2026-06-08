@@ -21,6 +21,15 @@ Execute formal work items through focused subagents and script-owned state.
 - Before dispatching a subagent or starting implementation, mark the task status with `mark`.
 - Before ending a turn with unfinished work, mark the task `paused` with current progress and known impact.
 
+### No-Plugin Fallback Gate
+
+When plugins are unavailable, disabled, or unstable, this skill is only best-effort and cannot hard-block tools. The agent must self-enforce the same preconditions before any write tool or execution subagent:
+
+1. Run `just-demand . list-active`.
+2. Confirm the intended formal task exists and is ready for execution.
+3. Confirm required context files exist for the intended `just-demand-*` subagent.
+4. If any check fails, stop and route back to `socratic-clarification` or `just-demand-intake`; do not edit inline and do not rely on plugins to catch the mistake.
+
 ### Evidence-First Execution
 
 - Evidence over stale memory. When information may be outdated or uncertain, verify against current codebase state.

@@ -17,6 +17,7 @@ Clarify the user's need before exposing workflow mechanics.
 - Prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 - Do not discuss task packages, repo maps, JSONL, context injection, or subagent mechanics unless the user is explicitly designing those mechanisms.
 - Treat intake as guidance; runtime plugins still enforce the workflow-entry gate for concrete requests without an active task.
+- In no-plugin fallback mode, intake is the required next step after approved clarification when no formal task exists. Do not treat approval of an approach as permission to edit inline.
 
 ## Process
 
@@ -26,6 +27,8 @@ Clarify the user's need before exposing workflow mechanics.
 4. Apply the final artifact from `socratic-clarification` when present.
 5. Record confirmed expectations, remaining gaps, and non-blocking questions.
 6. Promote to a formal work item only after required fields and approval are present.
+
+If plugins are unavailable, disabled, or unstable, self-enforce this transition: after clarification approval, create/promote the intake before any write tool or execution subagent. Skill-only fallback is best-effort and cannot hard-block tools, so do not rely on a later plugin rejection to catch skipped intake.
 
 Record clarification in user-language buckets that can later become task data:
 

@@ -10,6 +10,14 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Long-context implementation, research, and verification belong in `just-demand-*` subagents, not inline in the main session.
 - The user owns goals and approval; the agent owns execution, verification, and workflow closure.
 
+## Skill-Only Fallback
+
+- If OpenCode plugins are unavailable, disabled, or unstable, skill guidance is only best-effort; it cannot hard-block tools. Plugin gates remain the reliable enforcement layer.
+- Even without plugin support, every repo-work turn must start by loading `using-just-demand` when workflow rules might apply.
+- Any request, bug, correction, design/refactor, implementation approval, or Q&A-to-work pivot must then load `socratic-clarification` before intake, execution, or code edits.
+- Treat user approval of an approach as approval to enter intake/formal task flow, not permission to edit inline unless formal execution readiness is satisfied.
+- Before any write tool or execution subagent in no-plugin fallback mode, run `just-demand . list-active` and verify the required task context files exist.
+
 ## Source Of Truth
 
 - Trust executable behavior over prose: the `just-demand` CLI, `.just-demand/scripts/workflow_core.py`, and `.opencode/plugins/*.js` are the real workflow spec.

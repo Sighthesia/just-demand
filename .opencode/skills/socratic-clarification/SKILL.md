@@ -13,6 +13,8 @@ This skill is the required second routing step after `using-just-demand`. If a t
 
 If earlier turns were only informational, reset the problem model as soon as the current turn becomes a request, bug, correction, or mismatch. Do not stay on the Q&A path and drift straight to intake.
 
+In skill-only fallback mode, this skill is still only best-effort; it cannot block tools. The agent must therefore self-enforce the gate: user approval of an approach or final artifact means approval to enter intake/formal task flow, not permission to edit inline unless a formal task is already ready for execution.
+
 <HARD-GATE>
 Do NOT promote a task, dispatch a subagent, edit files, or finalize an implementation plan until you have presented a final expected effect, compared 2-3 approaches, captured the chosen approach and final implementation plan, and received explicit user approval. This applies to EVERY request regardless of perceived simplicity.
 </HARD-GATE>
@@ -57,7 +59,7 @@ You MUST complete these steps in order. Do not skip steps.
 5. **Propose 2-3 approaches** -- with trade-offs and your recommendation.
 6. **Capture final artifact** -- final expected effect, scope, anti-outcomes, chosen approach, final implementation plan, validation criteria, open questions.
 7. **Get user approval** -- explicit approval on the final artifact before any execution.
-8. **Promote or execute** -- only after approval, promote to formal task or begin execution.
+8. **Promote or execute** -- only after approval, promote to a formal task when no ready task exists; begin execution only when formal execution readiness is satisfied.
 
 ## Process Flow
 
@@ -85,7 +87,7 @@ Capture final artifact
   v
 User approves final artifact?
   |-- no --> revise artifact, re-approve
-  |-- yes --> promote to task or begin execution
+  |-- yes --> promote to task, or execute only if a formal task is already ready
 ```
 
 ## Progressive Questioning Rounds

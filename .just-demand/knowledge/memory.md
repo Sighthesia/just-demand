@@ -226,3 +226,9 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-07-add-workflow-state-locks-task (Add workflow state locks) completed with status 'done'.
   Verification summary: Second-batch workflow reliability hardening implemented; workflow core tests 73/73 and plugin tests 60/60 passed.
+
+- Task 2026-05-24-raise-socratic-clarification-priority-task (Raise socratic clarification priority) completed with status 'done'.
+  Verification summary: Shared execution gate now runs from both state and subagent-context hooks, Chinese workflow-entry routing is covered, chat.message skip path is safe, and install/plugin verification passed.
+
+- Task 2026-06-08-strengthen-skill-only-workflow-fallback-task (Strengthen skill-only workflow fallback) completed with status 'done'.
+  Verification summary: Skill-only fallback guidance now mirrors Superpowers-style bootstrap discipline: using-just-demand first, socratic-clarification second, approach approval enters task flow rather than inline editing, no-plugin writes require list-active/context checks, and guidance clearly states skills are best-effort while plugins remain hard enforcement. Plugin tests 64/64, install tests 37/37, package JSON valid.

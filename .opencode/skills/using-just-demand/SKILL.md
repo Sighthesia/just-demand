@@ -11,6 +11,29 @@ description: "Load this skill first for repo work so the correct just-demand rou
 
 If you were dispatched as a subagent to execute a specific task, skip this skill. Otherwise, load it first for repo work and follow the routing below whenever a matching workflow skill applies.
 
+## Mandatory Skill Check
+
+If there is even a small chance this turn involves repo work, workflow state, a request, a bug, a correction, a design/refactor, or execution, invoke the relevant Just Demand skill before responding or taking action. Do not inspect files, run commands, dispatch subagents, or edit code first.
+
+These thoughts mean STOP and re-run the routing rules:
+
+- "This is simple; I can just do it." Simple changes still require workflow routing.
+- "The user chose A, so I can implement now." Approach approval means enter intake/formal task flow unless execution readiness is already satisfied.
+- "I can inspect or patch first and clean up later." Reads may inform clarification, but writes wait for formal readiness.
+- "The plugins will catch mistakes." Skill-only fallback must self-enforce the process because plugins may be unavailable or unstable.
+- "This is only a follow-up." Follow-up pivots into work reset routing and require `socratic-clarification` second.
+
+## Skill-Only Fallback
+
+Skill-only fallback is best-effort. It improves behavior when plugins are unavailable, disabled, or unstable, but it cannot hard-block tools. Plugin gates remain the reliable enforcement layer.
+
+In skill-only fallback mode, before any write tool or execution subagent:
+
+1. Run `just-demand . list-active`.
+2. Confirm the relevant formal task exists and has no blocking clarification gaps.
+3. Confirm required task context files exist for the intended subagent.
+4. If no active formal task is ready, use `socratic-clarification` then `just-demand-intake`; do not edit inline.
+
 # Using Just Demand
 
 Use this repository as an OpenCode-first local agent workflow runtime.
