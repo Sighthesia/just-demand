@@ -1,14 +1,10 @@
 import {
-  buildExecutionGateError,
   getActiveTask,
   clearSubagentUnavailablePending,
   debugLog,
-  getMissingExecutionGateFields,
+  enforceExecutionGate,
   getReminderState,
-  getWriteToolRule,
-  getWorkflowSubagentName,
   readTaskJson,
-  taskIsReadyForExecution,
   taskLooksLikeLongContextExecutionCandidate,
   taskNeedsCheckpointFollowUp,
   taskNeedsVerificationCloseout,
@@ -47,6 +43,7 @@ const SHORT_SIGNAL_WORDS = new Set(["api", "bug", "css", "db", "llm", "ui", "ux"
 const CONCRETE_WORK_PATTERNS = [
   /\b(request|feature|bug|regression|mismatch|correction|implement|update|add|remove|fix|refactor|change|improve|build|create|make|support|setup|set up)\b/i,
   /\b(expected|actual|broken|fail|failing)\b/i,
+  /(请求|需求|功能|缺陷|问题|回归|不一致|修复|修正|调试|排查|实现|新增|添加|删除|移除|重构|改造|修改|更改|更新|优化|改进|支持|创建|构建|接入|设置|配置|将.+改为|把.+改成)/,
 ]
 
 const PREMISE_PATTERNS = [
@@ -387,50 +384,25 @@ export default async ({ directory } = {}) => {
       const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       if (!workflowDirectory) return
 
-      const toolName = String(input?.tool || "").toLowerCase()
-      debugLog("state.tool.before", {
-        tool: toolName,
-        args_keys: argsKeys(output?.args),
-        workflow_subagent: getWorkflowSubagentName(output?.args),
-      })
-      const rule = getWriteToolRule(toolName, output?.args)
-      if (!rule) {
-        debugLog("state.tool.before.allow", { reason: "no_write_rule", tool: toolName })
-        return
-      }
-
-      const taskId = getActiveTask(workflowDirectory)
-      if (!taskId) {
-        debugLog("state.tool.before.block", { reason: "no_active_task", rule: rule.name, label: rule.label })
-        throw new Error(buildExecutionGateError(rule.label, null, []))
-      }
-
-      const task = readTaskJson(workflowDirectory, taskId)
-      if (!taskIsReadyForExecution(task) && rule.needsExecutionGate(output?.args)) {
-        const missing = getMissingExecutionGateFields(task)
-        debugLog("state.tool.before.block", { reason: "task_not_ready", rule: rule.name, task_id: taskId, missing })
-        throw new Error(buildExecutionGateError(rule.label, taskId, missing))
-      }
-
-      debugLog("state.tool.before.allow", { reason: "gate_passed", rule: rule.name, task_id: taskId })
+      enforceExecutionGate(workflowDirectory, input?.tool, output?.args, "state.tool.before")
     },
 
     "chat.message": async (input, output) => {
+      const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       // Keep main-session injection lightweight: reminder only, no task state dump.
       // This layer is best-effort: some OpenCode versions do not expose usable text
       // parts to chat.message, so Layer 1 system prompt injection remains the primary path.
       if (!output || !Array.isArray(output.parts)) {
-        debugLog("state.chat.message.skip", { reason: "missing_parts" })
+        debugLog("state.chat.message.skip", { reason: "missing_parts" }, workflowDirectory)
         return
       }
       const textPart = output.parts.find((part) => part?.type === "text" && typeof part.text === "string")
       if (!textPart) {
-        debugLog("state.chat.message.skip", { reason: "missing_text_part", part_types: output.parts.map((part) => part?.type).filter(Boolean) })
+        debugLog("state.chat.message.skip", { reason: "missing_text_part", part_types: output.parts.map((part) => part?.type).filter(Boolean) }, workflowDirectory)
         return
       }
 
       const sessionID = typeof input?.sessionID === "string" && input.sessionID ? input.sessionID : "main"
-      const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       const activeTaskId = getActiveTask(workflowDirectory)
       const activeTask = activeTaskId ? (readTaskJson(workflowDirectory, activeTaskId) || { id: activeTaskId }) : null
       const reminderState = getReminderState(workflowDirectory, sessionID)
@@ -448,7 +420,7 @@ export default async ({ directory } = {}) => {
         phase: controllerDecision.phase,
         action: controllerDecision.action,
         reason_code: controllerDecision.reason_code,
-      })
+      }, workflowDirectory)
       textPart.text = applyControllerDecision(textPart.text, reminderState, controllerDecision)
 
       if (controllerDecision.reason_code !== "subagent_retry_or_skip") {

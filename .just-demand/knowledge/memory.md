@@ -2,6 +2,21 @@
 
 ## Decisions
 
+### D003: Duplicate critical gates across same-hook plugins
+
+Type: workflow-runtime
+Scope: workspace
+Status: accepted
+Date: 2026-06-08
+Source Task: 2026-05-24-raise-socratic-clarification-priority-task
+Supersedes: none
+
+Decision:
+Critical `tool.execute.before` enforcement must not assume every plugin registering the same hook will run in real OpenCode sessions. If another plugin on the same hook can be the only effective runtime path, the hard gate must be shared and called from that plugin before any local skip logic.
+
+Reason:
+Real debug logs showed only `just-demand-subagent-context` events for non-Task tools while `just-demand-state` gate events were absent. Duplicating the shared execution gate into the subagent-context hook prevents inline `apply_patch`, write-like `bash`, or gated workflow `Task` dispatch from bypassing formal task requirements when same-hook plugin behavior differs from isolated unit tests.
+
 ### D001: OpenCode-first local workflow
 
 Type: architecture

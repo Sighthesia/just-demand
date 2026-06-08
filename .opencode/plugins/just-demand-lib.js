@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const REMINDER_STATE = new Map()
@@ -93,14 +93,26 @@ export const readJson = (path) => {
 
 export const readTextIfExists = (path) => existsSync(path) ? readFileSync(path, "utf8") : ""
 
-export const debugLog = (event, fields = {}) => {
+export const debugLog = (event, fields = {}, directory = null) => {
   const enabled = DEBUG_ENV_VALUES.has(String(globalThis.process?.env?.JUST_DEMAND_DEBUG || "").toLowerCase())
   if (!enabled) return
 
+  let line
   try {
-    console.error(`[just-demand debug] ${JSON.stringify({ event, ...fields })}`)
+    line = JSON.stringify({ event, ...fields })
   } catch {
-    console.error(`[just-demand debug] ${event}`)
+    line = event
+  }
+
+  console.error(`[just-demand debug] ${line}`)
+
+  if (directory) {
+    try {
+      const logPath = join(workflowRoot(directory), "debug.log")
+      appendFileSync(logPath, `${line}\n`, "utf8")
+    } catch {
+      // best-effort file log
+    }
   }
 }
 
@@ -190,6 +202,37 @@ export const looksLikeBashWriteCommand = (command) => {
 }
 
 export const getWriteToolRule = (toolName, args) => WRITE_TOOL_RULES.find((rule) => rule.match(toolName, args)) || null
+
+export const enforceExecutionGate = (directory, toolName, args, logPrefix = "state.tool.before") => {
+  const normalizedToolName = String(toolName || "").toLowerCase()
+  debugLog(logPrefix, {
+    tool: normalizedToolName,
+    args_keys: args && typeof args === "object" ? Object.keys(args).sort() : [],
+    workflow_subagent: getWorkflowSubagentName(args),
+  }, directory)
+
+  const rule = getWriteToolRule(normalizedToolName, args)
+  if (!rule) {
+    debugLog(`${logPrefix}.allow`, { reason: "no_write_rule", tool: normalizedToolName }, directory)
+    return null
+  }
+
+  const taskId = getActiveTask(directory)
+  if (!taskId) {
+    debugLog(`${logPrefix}.block`, { reason: "no_active_task", rule: rule.name, label: rule.label }, directory)
+    throw new Error(buildExecutionGateError(rule.label, null, []))
+  }
+
+  const task = readTaskJson(directory, taskId)
+  if (!taskIsReadyForExecution(task) && rule.needsExecutionGate(args)) {
+    const missing = getMissingExecutionGateFields(task)
+    debugLog(`${logPrefix}.block`, { reason: "task_not_ready", rule: rule.name, task_id: taskId, missing }, directory)
+    throw new Error(buildExecutionGateError(rule.label, taskId, missing))
+  }
+
+  debugLog(`${logPrefix}.allow`, { reason: "gate_passed", rule: rule.name, task_id: taskId }, directory)
+  return rule
+}
 
 export const buildExecutionGateError = (toolLabel, taskId, missing) => {
   const suffix = taskId

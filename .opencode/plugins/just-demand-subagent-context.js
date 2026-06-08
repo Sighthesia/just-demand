@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import {
   debugLog,
+  enforceExecutionGate,
   getActiveTask,
   getMissingRequiredContextFiles,
   getWorkflowSubagentName,
@@ -23,37 +24,38 @@ export default async ({ directory }) => {
   return {
     "tool.execute.before": async (input, output) => {
       if (!existsSync(workflowRoot(directory))) {
-        debugLog("subagent.tool.before.skip", { reason: "missing_workflow_root" })
+        debugLog("subagent.tool.before.skip", { reason: "missing_workflow_root" }, directory)
         return
       }
       const toolName = String(input?.tool || "").toLowerCase()
+      enforceExecutionGate(directory, toolName, output?.args, "subagent.gate")
       if (toolName !== "task") {
-        debugLog("subagent.tool.before.skip", { reason: "not_task_tool", tool: toolName })
+        debugLog("subagent.tool.before.skip", { reason: "not_task_tool", tool: toolName }, directory)
         return
       }
       const args = output?.args
       const subagentName = getWorkflowSubagentName(args)
-      debugLog("subagent.tool.before", { args_keys: argsKeys(args), workflow_subagent: subagentName })
+      debugLog("subagent.tool.before", { args_keys: argsKeys(args), workflow_subagent: subagentName }, directory)
       if (!args || !SUPPORTED.has(subagentName)) {
-        debugLog("subagent.tool.before.skip", { reason: "unsupported_subagent", workflow_subagent: subagentName || null })
+        debugLog("subagent.tool.before.skip", { reason: "unsupported_subagent", workflow_subagent: subagentName || null }, directory)
         return
       }
 
       // Skip if prompt already contains workflow context (duplicate injection protection)
       if (args.prompt && INJECTION_MARKERS.some((marker) => args.prompt.includes(marker))) {
-        debugLog("subagent.tool.before.skip", { reason: "already_injected", workflow_subagent: subagentName })
+        debugLog("subagent.tool.before.skip", { reason: "already_injected", workflow_subagent: subagentName }, directory)
         return
       }
 
       const taskId = getActiveTask(directory)
       if (!taskId) {
-        debugLog("subagent.tool.before.skip", { reason: "no_active_task", workflow_subagent: subagentName })
+        debugLog("subagent.tool.before.skip", { reason: "no_active_task", workflow_subagent: subagentName }, directory)
         return
       }
       const missing = getMissingRequiredContextFiles(directory, taskId, subagentName)
       if (missing.length > 0) {
         markSubagentUnavailablePending(directory, input?.sessionID || "main")
-        debugLog("subagent.tool.before.block", { reason: "missing_context", task_id: taskId, workflow_subagent: subagentName, missing })
+        debugLog("subagent.tool.before.block", { reason: "missing_context", task_id: taskId, workflow_subagent: subagentName, missing }, directory)
         if (WRITABLE_SUBAGENTS.has(subagentName)) {
           throw new Error(
             `Blocked ${subagentName}: missing required task context files for active task ${taskId}: ${missing.join(", ")}`,
@@ -64,11 +66,11 @@ export default async ({ directory }) => {
       }
       const context = readTaskContext(directory, taskId, subagentName)
       if (!context) {
-        debugLog("subagent.tool.before.skip", { reason: "empty_context", task_id: taskId, workflow_subagent: subagentName })
+        debugLog("subagent.tool.before.skip", { reason: "empty_context", task_id: taskId, workflow_subagent: subagentName }, directory)
         return
       }
       args.prompt = `Active task: ${taskId}\n\n# Just Demand Workflow\n\n${context}\n\n---\n\n# Execution Rules\n\nComplete the requested work in this subagent.\nDo not call the Task tool.\nDo not dispatch another subagent.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
-      debugLog("subagent.tool.before.inject", { task_id: taskId, workflow_subagent: subagentName })
+      debugLog("subagent.tool.before.inject", { task_id: taskId, workflow_subagent: subagentName }, directory)
     },
   }
 }

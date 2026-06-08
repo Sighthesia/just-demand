@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -68,7 +68,9 @@ test("readJson returns null for missing file", () => {
   assert.equal(readJson("/nonexistent/path.json"), null)
 })
 
-test("debugLog is quiet by default and emits only when enabled", () => {
+test("debugLog is quiet by default, emits to stderr when enabled, and writes to file", () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand"), { recursive: true })
   const originalDebug = process.env.JUST_DEMAND_DEBUG
   const originalError = console.error
   const messages = []
@@ -76,15 +78,22 @@ test("debugLog is quiet by default and emits only when enabled", () => {
 
   try {
     delete process.env.JUST_DEMAND_DEBUG
-    debugLog("quiet", { tool: "task" })
+    debugLog("quiet", { tool: "task" }, root)
     assert.deepEqual(messages, [])
 
     process.env.JUST_DEMAND_DEBUG = "1"
-    debugLog("enabled", { tool: "task", args_keys: ["agent"] })
+    debugLog("enabled", { tool: "task", args_keys: ["agent"] }, root)
     assert.equal(messages.length, 1)
     assert.match(messages[0], /^\[just-demand debug\] /)
     assert.match(messages[0], /"event":"enabled"/)
     assert.match(messages[0], /"args_keys":\["agent"\]/)
+
+    const logPath = join(root, ".just-demand", "debug.log")
+    assert.equal(existsSync(logPath), true)
+    const content = readFileSync(logPath, "utf8")
+    assert.match(content, /"event":"enabled"/)
+    assert.match(content, /"args_keys":\["agent"\]/)
+    assert.equal(content.endsWith("\n"), true)
   } finally {
     if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
     else process.env.JUST_DEMAND_DEBUG = originalDebug
@@ -481,6 +490,29 @@ test("state hard redirects concrete workflow work when no active task exists", a
   assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
 })
 
+test("state hard redirects Chinese concrete workflow work when no active task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "将 bar 右键菜单从当前的弹出样式改为和 tray menu 一样的 expanded 效果。" }] }
+
+  await plugin["chat.message"]({ sessionID: "zh-no-active-task" }, output)
+
+  assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
+  assert.match(output.parts[0].text, /no active formal task yet/i)
+  assert.match(output.parts[0].text, /just-demand-intake/i)
+})
+
+test("state chat.message skips safely when output parts are missing", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  const plugin = await stateFactory({ directory: root })
+
+  await assert.doesNotReject(plugin["chat.message"]({ sessionID: "missing-parts" }, {}))
+})
+
 test("state blocks apply_patch when no active task exists", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
@@ -862,7 +894,7 @@ test("state asks retry or skip after subagent becomes unavailable", async () => 
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Implement the approved feature." } }))
 
   const toolInput = { tool: "Task" }
   const toolOutput = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
@@ -949,6 +981,7 @@ test("subagent-context throws when writable subagent required context files are 
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
@@ -985,15 +1018,42 @@ test("subagent-context skips non-supported subagent type", async () => {
   assert.equal(output.args.prompt, "Do something")
 })
 
-test("subagent-context skips when no active task", async () => {
+test("subagent-context blocks workflow implement task when no active task", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { subagent_type: "just-demand-implement", prompt: "Do work" } }
-  await plugin["tool.execute.before"](input, output)
+  await assert.rejects(
+    plugin["tool.execute.before"](input, output),
+    /Blocked Task: there is no active formal task yet\./,
+  )
   assert.equal(output.args.prompt, "Do work")
+})
+
+test("subagent-context blocks apply_patch when no active task", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const plugin = await subagentContextFactory({ directory: root })
+
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch: there is no active formal task yet\./,
+  )
+})
+
+test("subagent-context blocks write-like bash when no active task", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const plugin = await subagentContextFactory({ directory: root })
+
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+    /Blocked bash: there is no active formal task yet\./,
+  )
 })
 
 test("subagent-context skips when workflow root is missing", async () => {
@@ -1026,6 +1086,7 @@ test("subagent-context avoids duplicate injection when prompt already contains w
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   // Prompt already contains injection marker
