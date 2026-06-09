@@ -174,7 +174,21 @@ The following items must be COVERED, but coverage means a scannable mention, not
 This is the task-closure specialization of the global Output Style rule in `using-just-demand`. Users skim; output past ~300 characters is usually not read closely. Write the final report bottom-line-up-front (BLUF) and scannable:
 
 1. **First line is the conclusion.** State the outcome in one sentence before any context. The user should get the result from line one alone.
-2. **Then a few terse bullets**: what changed, verification result, remaining risk or next decision. Lead each bullet with the information-carrying word. For "what changed", describe the effect and design intent and reference changed files/symbols by name; do not paste implementation code line by line unless the user asks or a snippet is needed to pin a decision.
-3. **Default target: keep the whole report under ~300 characters.** This is a target for the main body, not a hard cut. If a required item does not fit, move it into the optional expand section below -- never drop a safety-relevant item (remaining risk, unverified area, checkpoint-commit status) just to hit the length.
+2. **Then a validation card**: expected effect, anti-outcome, checks passed, remaining risk, and user action. Keep it short.
+3. **Then a few terse bullets if needed**: what changed, verification result, remaining risk or next decision. Lead each bullet with the information-carrying word. For "what changed", describe the effect and design intent and reference changed files/symbols by name; do not paste implementation code line by line unless the user asks or a snippet is needed to pin a decision.
+4. **Default target: keep the whole report under ~300 characters.** This is a target for the main body, not a hard cut. If a required item does not fit, move it into the optional expand section below -- never drop a safety-relevant item (remaining risk, unverified area, checkpoint-commit status) just to hit the length.
+
+Use this shape by default:
+
+```text
+<Conclusion in one sentence.>
+
+Validation card:
+- Expected: <user-visible result>
+- Anti-outcome: <what should not happen>
+- Checked: <tests/review passed>
+- Risk: <remaining risk or none>
+- User action: <none / review / choose / approve>
+```
 
 Put non-essential detail (root cause, detailed tradeoffs, Minimum Viable Knowledge, analogy, full command transcripts) in an optional expand section AFTER the bullets, clearly marked so the user can stop reading once the bullets are done. Only surface that detail inline when the task involved debugging, architecture changes, new mechanisms, or the user explicitly asks for deeper analysis.

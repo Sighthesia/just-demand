@@ -250,3 +250,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-09-reduce-workflow-clarification-cognitive-load-task (Reduce workflow clarification cognitive load) completed with status 'done'.
   Verification summary: Low-reading-cost clarification artifacts implemented and verified: decision cards, MVK, validation cards, diagrams, template parsing, and tests.
+
+- Task 2026-06-09-implement-user-facing-output-contract-task (Implement user-facing output contract) completed with status 'done'.
+  Verification summary: User-facing output contract implemented and verified with workflow core, install, plugin, and package JSON checks.

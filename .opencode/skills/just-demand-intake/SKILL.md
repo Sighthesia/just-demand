@@ -46,6 +46,9 @@ Treat blocking questions as promotion blockers. Non-blocking questions may stay 
 For design and implementation work, the intake must include the final artifact before promotion:
 
 - **Decision Card**: one-sentence intent, recommended default, reason, and the user's expected action
+- **User Action**: what the user needs to do next, or "no action needed"
+- **Recommended Default**: the path the agent recommends if the user does not care
+- **Option Matrix**: compact comparison of real alternatives by best-for, pros, cons, and failure mode
 - **Final Expected Effect**: user-visible outcome in user language
 - **Approach Options**: 2-3 approaches with pros, cons, and practical failure modes; for UI/interaction work these must be meaningful user-visible alternatives, not placeholders
 - **Chosen Approach**: selected approach with brief rationale
@@ -54,6 +57,8 @@ For design and implementation work, the intake must include the final artifact b
 - **Validation**: how we will verify the result matches the expected effect
 - **Validation Card**: concise quick checks the user can scan before approval
 - **Diagram**: small Mermaid or ASCII diagram when UI, workflow, state, process, or data shape would otherwise be ambiguous
+- **Confidence**: high, medium, or low when it helps calibrate trust
+- **Escalation Reason**: why this needs user input instead of safe agent decision
 - **Approval**: explicit user approval of the final artifact
 
 Promotion is blocked for design/implementation tasks when Final Expected Effect, Chosen Approach, Final Implementation Plan, or Approval are missing.
@@ -81,6 +86,9 @@ When `socratic-clarification` has produced a final artifact, record it in this s
 
 ```text
 Decision Card: <intent, recommended default, reason, user action>
+User Action: <approve / choose / correct / no action needed>
+Recommended Default: <agent's recommended path>
+Option Matrix: <real alternatives by best-for, pros, cons, failure mode>
 Final Expected Effect: <user-visible outcome>
 Approach Options: <2-3 options with pros, cons, and failure modes>
 Chosen Approach: <selected approach and rationale>
@@ -89,6 +97,8 @@ Minimum Viable Knowledge: <plain-language terms needed for the decision>
 Validation: <how the result will be checked>
 Validation Card: <3-5 quick checks for user approval>
 Diagram: <small Mermaid/ASCII diagram, or "not needed">
+Confidence: <high|medium|low when useful>
+Escalation Reason: <why user input is needed, or "none">
 Approval: <explicit user approval or authorization>
 ```
 
@@ -116,7 +126,7 @@ Hard promotion gates by work shape:
 - design/implementation: `## Scope`, `## Final Expected Effect`, `## Chosen Approach`, `## Final Implementation Plan`, `## Approval`
 - bug/mismatch: `## Scope`, `## Expected Behavior`, `## Actual Behavior`, `## Reproduction`
 
-`## Decision Card`, `## Approach Options`, `## Minimum Viable Knowledge`, `## Validation`, `## Validation Card`, `## Diagram`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and open-question sections should also be updated when the clarification artifact provides them, but the fields above are the runtime hard gates.
+`## Decision Card`, `## User Action`, `## Recommended Default`, `## Option Matrix`, `## Approach Options`, `## Minimum Viable Knowledge`, `## Validation`, `## Validation Card`, `## Diagram`, `## Confidence`, `## Escalation Reason`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and open-question sections should also be updated when the clarification artifact provides them, but the fields above are the runtime hard gates.
 
 Recovery recipe after failed `promote`:
 
@@ -186,10 +196,11 @@ Decision card:
 - Recommended default: <what the agent recommends>
 - Why: <one practical reason>
 - User action: approve, choose another option, or correct the intent
+- Confidence: <high|medium|low when useful>
+- Escalation reason: <why the user must decide, or none>
 
-Options:
-- A: <effect>; Pros: <...>; Cons: <...>; Failure mode: <...>
-- B: <effect>; Pros: <...>; Cons: <...>; Failure mode: <...>
+Option matrix:
+| Option | Best for | Pros | Cons | Failure mode |
 
 Minimum viable knowledge:
 - <term>: <one sentence, only if needed>

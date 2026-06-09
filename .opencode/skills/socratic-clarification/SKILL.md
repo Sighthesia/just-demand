@@ -163,6 +163,8 @@ Decision card:
 - Recommended default: <the path you would take if the user does not care>
 - Why this default: <one practical reason>
 - User action: approve, choose another option, or correct the intent
+- Confidence: <high|medium|low, only when it helps calibrate trust>
+- Escalation reason: <why this needs user input instead of agent decision, or "none">
 ```
 
 - **Lead with effect, not implementation.** The first line of the proposal states what the user will be able to do, in user language. Do NOT open with an internal concern, file name, type, or dependency.
@@ -170,6 +172,15 @@ Decision card:
 - **Trade-offs describe user-facing consequences** (speed, safety, cost, what could go wrong, what it feels like), not raw technical attributes. "Smaller change, but if it crashes mid-run it may stay in auto mode" beats "reuses global Arc<Mutex> mode".
 - **Name the failure mode.** Each option should say what bad outcome it risks in practical terms, so the user is not left inferring the downside.
 - **Implementation detail (files, dependencies, internal structure, symbol names) does not belong in the main proposal.** Fold it into an optional expand section the user can skip, or omit entirely.
+
+```text
+Option matrix:
+| Option | Best for | Pros | Cons | Failure mode |
+| --- | --- | --- | --- | --- |
+| A | <when to choose it> | <benefit> | <cost> | <what wrong looks like> |
+```
+
+Use the table form when it is easier to compare. Use the shorter list form when there are only two simple options.
 
 ```text
 Approach A: <name>
@@ -260,6 +271,12 @@ Decision card:
 - Intent: <one-sentence interpretation>
 - Recommended default: <chosen path unless user changes it>
 - Why: <short rationale>
+- User action: <approve / choose / correct / no action needed>
+- Confidence: <high|medium|low when useful>
+- Escalation reason: <why the user must decide, or "none">
+
+Option matrix:
+- <2-3 choices with best-for, pros, cons, and failure mode; omit if no real choice remains>
 
 Final expected effect:
 - <user-visible outcome in user language>

@@ -134,6 +134,19 @@ Users skim. Output past ~300 characters is usually not read closely, so every ma
 
 `just-demand-verification`'s Default Final Report is the task-closure specialization of this rule; keep the two consistent.
 
+## User-Facing Output Contract
+
+For workflow turns, the first screen should help the user recognize and steer the result, not inspect the agent's full reasoning. Default to this contract:
+
+1. **First-screen answer**: what you think the user wants and what you recommend.
+2. **User action**: approve, choose another option, correct the intent, or no action needed.
+3. **Option matrix**: only when there is a real choice; compare effect, pros, cons, and failure mode.
+4. **Minimum viable knowledge**: one sentence per unfamiliar term needed for the decision.
+5. **Validation card**: what should be true, what should not happen, what was or will be checked.
+6. **Optional expansion**: implementation details, files, logs, and deeper rationale only after the decision surface.
+
+Do not ask "what should I do?" without a recommended default. If the agent can safely decide without changing user-visible behavior, cost, security, compatibility, architecture, or long-term maintenance, decide and proceed.
+
 These skills describe routing; runtime plugins enforce workflow entry and task-gated behavior.
 
 ## Skill Routing

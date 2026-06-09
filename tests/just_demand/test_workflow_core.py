@@ -78,9 +78,14 @@ def set_intake_design_artifact(
 def set_intake_low_reading_artifacts(root: Path, intake_id: str) -> None:
     intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
     replace_intake_section(intake_path, "Decision Card", "Intent: make clarification easier. Recommended default: use a concise decision card.")
+    replace_intake_section(intake_path, "User Action", "Approve the recommendation or choose another option.")
+    replace_intake_section(intake_path, "Recommended Default", "Use the concise decision-card output contract.")
+    replace_intake_section(intake_path, "Option Matrix", "A: decision card; Pros: quick; Cons: less detail; Failure mode: misses edge nuance.")
     replace_intake_section(intake_path, "Minimum Viable Knowledge", "Decision card = a short approval aid with recommendation and tradeoffs.")
     replace_intake_section(intake_path, "Validation Card", "Quick check: user can approve, reject, or adjust the recommendation without reading long analysis.")
     replace_intake_section(intake_path, "Diagram", "flowchart TD\n  Need --> Card\n  Card --> Approval")
+    replace_intake_section(intake_path, "Confidence", "high")
+    replace_intake_section(intake_path, "Escalation Reason", "Only ask when product behavior, risk, or long-term maintenance changes.")
 
 
 def init_git_repo(root: Path) -> None:
@@ -165,9 +170,14 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("## Reproduction", intake_text)
             self.assertIn("## Scope", intake_text)
             self.assertIn("## Decision Card", intake_text)
+            self.assertIn("## User Action", intake_text)
+            self.assertIn("## Recommended Default", intake_text)
+            self.assertIn("## Option Matrix", intake_text)
             self.assertIn("## Minimum Viable Knowledge", intake_text)
             self.assertIn("## Validation Card", intake_text)
             self.assertIn("## Diagram", intake_text)
+            self.assertIn("## Confidence", intake_text)
+            self.assertIn("## Escalation Reason", intake_text)
             self.assertIn("## Blocking Questions", intake_text)
             self.assertIn("## Non-Blocking Questions", intake_text)
 
@@ -246,9 +256,14 @@ class WorkflowCoreTests(unittest.TestCase):
             task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
             clarification = task["clarification"]
             self.assertIn("Recommended default", clarification["decision_card"])
+            self.assertIn("Approve the recommendation", clarification["user_action"])
+            self.assertIn("decision-card output contract", clarification["recommended_default"])
+            self.assertIn("Failure mode", clarification["option_matrix"])
             self.assertIn("Decision card", clarification["minimum_viable_knowledge"])
             self.assertIn("Quick check", clarification["validation_card"])
             self.assertIn("flowchart TD", clarification["diagram"])
+            self.assertEqual(clarification["confidence"], "high")
+            self.assertIn("Only ask", clarification["escalation_reason"])
 
     def test_promote_generates_unique_task_ids_for_duplicate_titles(self):
         with tempfile.TemporaryDirectory() as tmp:

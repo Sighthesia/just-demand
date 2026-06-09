@@ -56,6 +56,18 @@ After adding or modifying UI or a new feature, briefly list the main structure o
 
 Keep this summary short and structured. Prefer names as they appear in code. If names are unclear, propose concise labels based on the current structure.
 
+### User-Facing Execution Updates
+
+When reporting execution progress or subagent results to the user, follow the User-Facing Output Contract from `using-just-demand`:
+
+- **First-screen answer**: what changed or what is happening now.
+- **User action**: usually "none" during execution unless a real product/architecture/risk decision is needed.
+- **Recommended default**: if blocked, state the recommended next move before alternatives.
+- **Validation card**: when work is ready for review, state expected effect, anti-outcome, checks run, and remaining risk.
+- **Optional expansion**: changed files, structure summary, logs, and detailed rationale after the user-facing result.
+
+Do not make the user choose implementation details. Escalate only when the wrong guess would change user-visible behavior, architecture boundaries, compatibility, security, cost, or long-term maintenance.
+
 ## Subagent Routing
 
 - `just-demand-research`: research only; no code changes.
