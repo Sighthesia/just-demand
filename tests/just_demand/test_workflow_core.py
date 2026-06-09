@@ -75,6 +75,14 @@ def set_intake_design_artifact(
     replace_intake_section(intake_path, "Approval", approval)
 
 
+def set_intake_low_reading_artifacts(root: Path, intake_id: str) -> None:
+    intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
+    replace_intake_section(intake_path, "Decision Card", "Intent: make clarification easier. Recommended default: use a concise decision card.")
+    replace_intake_section(intake_path, "Minimum Viable Knowledge", "Decision card = a short approval aid with recommendation and tradeoffs.")
+    replace_intake_section(intake_path, "Validation Card", "Quick check: user can approve, reject, or adjust the recommendation without reading long analysis.")
+    replace_intake_section(intake_path, "Diagram", "flowchart TD\n  Need --> Card\n  Card --> Approval")
+
+
 def init_git_repo(root: Path) -> None:
     subprocess.run(["git", "init"], cwd=root, text=True, capture_output=True, check=True)
     subprocess.run(["git", "config", "user.name", "Just Demand Tests"], cwd=root, text=True, capture_output=True, check=True)
@@ -156,6 +164,10 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("## Actual Behavior", intake_text)
             self.assertIn("## Reproduction", intake_text)
             self.assertIn("## Scope", intake_text)
+            self.assertIn("## Decision Card", intake_text)
+            self.assertIn("## Minimum Viable Knowledge", intake_text)
+            self.assertIn("## Validation Card", intake_text)
+            self.assertIn("## Diagram", intake_text)
             self.assertIn("## Blocking Questions", intake_text)
             self.assertIn("## Non-Blocking Questions", intake_text)
 
@@ -213,6 +225,30 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIsNone(state["current_intake_id"])
             self.assertEqual(state["current_task_id"], result["task_id"])
             self.assertIn(result["task_id"], state["active_task_ids"])
+
+    def test_promote_carries_low_reading_clarification_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Decision cards", "Make clarification lighter", "session-main")
+            set_intake_scope(root, intake["intake_id"], "Improve clarification prompts only.")
+            set_intake_design_artifact(root, intake["intake_id"])
+            set_intake_low_reading_artifacts(root, intake["intake_id"])
+
+            promoted = promote_to_task(
+                root,
+                intake["intake_id"],
+                "Decision cards",
+                "Make clarification lighter",
+                "implementation",
+                ["Clarification artifacts are carried into task data."],
+            )
+
+            task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
+            clarification = task["clarification"]
+            self.assertIn("Recommended default", clarification["decision_card"])
+            self.assertIn("Decision card", clarification["minimum_viable_knowledge"])
+            self.assertIn("Quick check", clarification["validation_card"])
+            self.assertIn("flowchart TD", clarification["diagram"])
 
     def test_promote_generates_unique_task_ids_for_duplicate_titles(self):
         with tempfile.TemporaryDirectory() as tmp:

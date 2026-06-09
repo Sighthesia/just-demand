@@ -45,11 +45,15 @@ Treat blocking questions as promotion blockers. Non-blocking questions may stay 
 
 For design and implementation work, the intake must include the final artifact before promotion:
 
+- **Decision Card**: one-sentence intent, recommended default, reason, and the user's expected action
 - **Final Expected Effect**: user-visible outcome in user language
-- **Approach Options**: 2-3 approaches with trade-offs; for UI/interaction work these must be meaningful user-visible alternatives, not placeholders
+- **Approach Options**: 2-3 approaches with pros, cons, and practical failure modes; for UI/interaction work these must be meaningful user-visible alternatives, not placeholders
 - **Chosen Approach**: selected approach with brief rationale
 - **Final Implementation Plan**: ordered steps including verification
+- **Minimum Viable Knowledge**: one-sentence explanations for unfamiliar terms or tradeoffs the user needs to decide
 - **Validation**: how we will verify the result matches the expected effect
+- **Validation Card**: concise quick checks the user can scan before approval
+- **Diagram**: small Mermaid or ASCII diagram when UI, workflow, state, process, or data shape would otherwise be ambiguous
 - **Approval**: explicit user approval of the final artifact
 
 Promotion is blocked for design/implementation tasks when Final Expected Effect, Chosen Approach, Final Implementation Plan, or Approval are missing.
@@ -76,11 +80,15 @@ Do not ask about implementation details that are purely engineering preferences 
 When `socratic-clarification` has produced a final artifact, record it in this shape:
 
 ```text
+Decision Card: <intent, recommended default, reason, user action>
 Final Expected Effect: <user-visible outcome>
-Approach Options: <2-3 options with trade-offs>
+Approach Options: <2-3 options with pros, cons, and failure modes>
 Chosen Approach: <selected approach and rationale>
 Final Implementation Plan: <ordered implementation and verification steps>
+Minimum Viable Knowledge: <plain-language terms needed for the decision>
 Validation: <how the result will be checked>
+Validation Card: <3-5 quick checks for user approval>
+Diagram: <small Mermaid/ASCII diagram, or "not needed">
 Approval: <explicit user approval or authorization>
 ```
 
@@ -108,7 +116,7 @@ Hard promotion gates by work shape:
 - design/implementation: `## Scope`, `## Final Expected Effect`, `## Chosen Approach`, `## Final Implementation Plan`, `## Approval`
 - bug/mismatch: `## Scope`, `## Expected Behavior`, `## Actual Behavior`, `## Reproduction`
 
-`## Approach Options`, `## Validation`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and open-question sections should also be updated when the clarification artifact provides them, but the fields above are the runtime hard gates.
+`## Decision Card`, `## Approach Options`, `## Minimum Viable Knowledge`, `## Validation`, `## Validation Card`, `## Diagram`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and open-question sections should also be updated when the clarification artifact provides them, but the fields above are the runtime hard gates.
 
 Recovery recipe after failed `promote`:
 
@@ -170,6 +178,29 @@ Preferred prompts:
 - "Which choice would materially change the implementation path if guessed wrong?"
 - "Which details are nice-to-have and can stay open until execution?"
 
+Default to this low-reading-cost shape before asking the user to make a tradeoff:
+
+```text
+Decision card:
+- Intent: <one sentence>
+- Recommended default: <what the agent recommends>
+- Why: <one practical reason>
+- User action: approve, choose another option, or correct the intent
+
+Options:
+- A: <effect>; Pros: <...>; Cons: <...>; Failure mode: <...>
+- B: <effect>; Pros: <...>; Cons: <...>; Failure mode: <...>
+
+Minimum viable knowledge:
+- <term>: <one sentence, only if needed>
+
+Validation card:
+- <3-5 scannable checks>
+
+Diagram:
+- <small Mermaid/ASCII diagram when it reduces ambiguity, otherwise not needed>
+```
+
 ## Progressive Clarification Routing
 
 When the user proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch, load `socratic-clarification` before shaping or promoting work. That skill owns progressive questioning, overlooked boundary discovery, final expected effect, and final implementation plan.
@@ -203,5 +234,6 @@ Before implementation, provide a low-reading-cost validation summary:
 - One-sentence intent.
 - Five-point quick check.
 - Effect validation card when the request is visual or interaction-heavy.
+- Simple diagram when layout, workflow, state, process, or data-flow shape is easier to validate visually than in prose.
 
 For visual or interaction work, the validation card should include the intended motion/layout feel, the rejected anti-outcome, and whether any clipping/masking is a primary effect or only a safety guardrail.

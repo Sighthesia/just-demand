@@ -247,3 +247,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-09-fill-workflow-prompt-handling-gaps-task (Fill workflow prompt handling gaps) completed with status 'done'.
   Verification summary: Added prompt-layer guidance for intake completion, promote retry recovery, and current-task selection fallback; plugin tests and package validation passed.
+
+- Task 2026-06-09-reduce-workflow-clarification-cognitive-load-task (Reduce workflow clarification cognitive load) completed with status 'done'.
+  Verification summary: Low-reading-cost clarification artifacts implemented and verified: decision cards, MVK, validation cards, diagrams, template parsing, and tests.

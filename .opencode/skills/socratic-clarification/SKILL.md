@@ -88,7 +88,7 @@ Use the rounds as a state machine. Ask only the rounds that still contain unknow
 
 ### Long-Context Reset Trigger
 
-If the conversation has spent 3 or more turns on the same phenomenon, or if the user keeps providing new samples under the same assumed explanation, pause incremental answering and restate the problem model.
+If the conversation has spent 3 or more turns on the same phenomenon, or if the user keeps providing new samples under the same assumed explanation, pause incremental answering and reset the problem model before continuing.
 
 Minimum reset structure:
 
@@ -155,24 +155,41 @@ After gathering enough context, propose 2-3 different approaches with trade-offs
 
 This proposal is the highest-information moment of the turn, so it MUST follow the Output Style rules in `using-just-demand` (BLUF, scannable, user language). The user is the product manager and architect, not the implementer.
 
+Default to a low-reading-cost decision card, not a long analysis. The user should usually be able to approve, reject, or adjust the recommendation after reading one compact block.
+
+```text
+Decision card:
+- Intent: <one sentence in user language>
+- Recommended default: <the path you would take if the user does not care>
+- Why this default: <one practical reason>
+- User action: approve, choose another option, or correct the intent
+```
+
 - **Lead with effect, not implementation.** The first line of the proposal states what the user will be able to do, in user language. Do NOT open with an internal concern, file name, type, or dependency.
 - **Subject is the user or the system's observable behavior**, never the implementation artifact. Write "you get X" / "the system does Y", not "the CLI module calls Z".
 - **Trade-offs describe user-facing consequences** (speed, safety, cost, what could go wrong, what it feels like), not raw technical attributes. "Smaller change, but if it crashes mid-run it may stay in auto mode" beats "reuses global Arc<Mutex> mode".
+- **Name the failure mode.** Each option should say what bad outcome it risks in practical terms, so the user is not left inferring the downside.
 - **Implementation detail (files, dependencies, internal structure, symbol names) does not belong in the main proposal.** Fold it into an optional expand section the user can skip, or omit entirely.
 
 ```text
 Approach A: <name>
   - What you get: <user-visible effect in user language>
-  - Trade-offs: <user-facing pros/cons: speed, safety, cost, failure mode>
+  - Pros: <why this is good for the user>
+  - Cons: <what the user gives up>
+  - Failure mode: <what wrong looks like in practice>
   - Recommended: <yes/no with reasoning>
 
 Approach B: <name>
   - What you get: <user-visible effect>
-  - Trade-offs: <user-facing pros/cons>
+  - Pros: <why this is good for the user>
+  - Cons: <what the user gives up>
+  - Failure mode: <what wrong looks like in practice>
 
 Approach C: <name> (optional)
   - What you get: <user-visible effect>
-  - Trade-offs: <user-facing pros/cons>
+  - Pros: <why this is good for the user>
+  - Cons: <what the user gives up>
+  - Failure mode: <what wrong looks like in practice>
 ```
 
 Wait for the user to choose or approve your recommendation before proceeding.
@@ -239,6 +256,11 @@ Before execution, capture this artifact and get explicit user approval.
 Present it under the same Output Style rules as the approach comparison: BLUF, user language, effect first. The `Final implementation plan` is the only section that names steps; keep even those at the level of observable behavior plus referenced files/symbols by name, not line-by-line code. Push internal mechanics into an optional expand section.
 
 ```text
+Decision card:
+- Intent: <one-sentence interpretation>
+- Recommended default: <chosen path unless user changes it>
+- Why: <short rationale>
+
 Final expected effect:
 - <user-visible outcome in user language>
 
@@ -260,6 +282,14 @@ Final implementation plan:
 Validation:
 - <how we will verify the result matches the expected effect>
 
+Validation card:
+- Quick check 1: <observable expectation>
+- Quick check 2: <observable expectation>
+- Quick check 3: <observable expectation>
+
+Diagram:
+- <Mermaid or ASCII diagram when UI, workflow, state, data flow, or process shape would otherwise be ambiguous; otherwise "not needed">
+
 Open questions:
 - <any remaining non-blocking questions, or "none">
 ```
@@ -272,6 +302,24 @@ A proposal the user cannot read is a failed proposal, even if it is technically 
 - **Drop pure-symbol jargon entirely.** Symbols like `Ku`, `Tu`, `Kp/Ki/Kd`, raw type names, or internal field names carry no decision value for the user. Omit them from the main proposal.
 - **Explain a tradeoff's stakes, not just its name.** If an option is "less safe", say what unsafe looks like in practice.
 - Keep MVK proportional: one sentence per term, not a tutorial. If the user already demonstrated the knowledge, skip it.
+
+Use this compact shape when any option depends on unfamiliar terms:
+
+```text
+Minimum viable knowledge:
+- <term>: <one plain-language sentence explaining only what the user needs to decide>
+```
+
+## Diagram Trigger
+
+Use a simple diagram when it lets the user validate shape faster than prose. Prefer Mermaid or ASCII, and keep it small.
+
+- UI/layout: show the main regions and relationships.
+- Workflow/process: show the path and decision points.
+- State/mode behavior: show the states and transitions.
+- Data/API flow: show source, transform, and destination.
+
+Skip the diagram when the request is local, textual, or the diagram would repeat obvious prose.
 
 ## Question Filtering Gate
 
