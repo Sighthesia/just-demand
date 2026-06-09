@@ -17,6 +17,7 @@ from workflow_core import (
     list_unfinished_tasks,
     mark_task,
     promote_to_task,
+    select_task,
 )
 from install import (
     init_project,
@@ -39,6 +40,8 @@ COMMANDS = {
     "list-active",
     "mark",
     "promote",
+    "resume",
+    "select-task",
     "uninstall",
     "update",
     "where",
@@ -93,6 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_active = sub.add_parser("list-active", help="List all unfinished formal tasks")
     list_active.add_argument("--verbose", action="store_true", help="Include current_step and path")
+
+    select_task_parser = sub.add_parser("select-task", help="Select an unfinished formal task as current")
+    select_task_parser.add_argument("task_id", help="Task ID to make current")
+
+    resume = sub.add_parser("resume", help="Resume an unfinished formal task by selecting it as current")
+    resume.add_argument("task_id", help="Task ID to resume")
 
     mark = sub.add_parser("mark", help="Mark task status, progress, impact, and note")
     mark.add_argument("task_id", help="Task ID to mark")
@@ -162,6 +171,8 @@ def execute_command(root: Path, args: list[str]) -> int:
             result = promote_to_task(root, parsed.intake_id, parsed.title, parsed.goal, parsed.type, criteria)
         elif parsed.command == "list-active":
             result = {"tasks": list_unfinished_tasks(root, verbose=getattr(parsed, "verbose", False))}
+        elif parsed.command in {"select-task", "resume"}:
+            result = select_task(root, parsed.task_id)
         elif parsed.command == "mark":
             result = mark_task(
                 root,
@@ -300,6 +311,8 @@ def show_help():
     print("  list-active [--verbose]           List unfinished tasks")
     print("  create-intake <title> <request>   Create intake note")
     print("  promote <id> <title> <goal>       Promote intake to task")
+    print("  select-task <id>                  Select current task")
+    print("  resume <id>                       Resume/select current task")
     print("  mark <id> <status> [--progress N] Mark task status")
     print("  complete-verification <id> ...    Record verification result")
     print("  checkpoint-commit <id>            Create checkpoint commit")

@@ -44,7 +44,6 @@ const BASH_WRITE_PATTERNS = [
   /(^|[;&|])\s*tee\b/i,
   /(^|[;&|])\s*truncate\b/i,
   /(^|[;&|])\s*apply_patch\b/i,
-  />/,
 ]
 const COMPLETION_CLAIM_PATTERNS = [
   /\b(done|finished|complete(?:d)?|implemented|shipped|resolved|wrapped up)\b/i,
@@ -198,7 +197,35 @@ export const taskNeedsCheckpointFollowUp = (task) => {
 export const looksLikeBashWriteCommand = (command) => {
   const trimmed = String(command || "").trim()
   if (!trimmed) return false
-  return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed))
+   return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed)) || hasUnquotedShellRedirection(trimmed)
+}
+
+export const hasUnquotedShellRedirection = (command) => {
+  let inSingleQuote = false
+  let inDoubleQuote = false
+
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index]
+
+    if (char === "\\") {
+      if (!inSingleQuote && index + 1 < command.length) index += 1
+      continue
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote
+      continue
+    }
+
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote
+      continue
+    }
+
+    if (char === ">" && !inSingleQuote && !inDoubleQuote) return true
+  }
+
+  return false
 }
 
 export const getWriteToolRule = (toolName, args) => WRITE_TOOL_RULES.find((rule) => rule.match(toolName, args)) || null
@@ -217,27 +244,53 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
     return null
   }
 
-  const taskId = getActiveTask(directory)
-  if (!taskId) {
-    debugLog(`${logPrefix}.block`, { reason: "no_active_task", rule: rule.name, label: rule.label }, directory)
-    throw new Error(buildExecutionGateError(rule.label, null, []))
+  const gateState = getExecutionGateState(directory)
+  if (gateState.reason !== "ready") {
+    debugLog(`${logPrefix}.block`, { reason: gateState.reason, rule: rule.name, label: rule.label, active_task_count: gateState.activeTaskCount }, directory)
+    throw new Error(buildExecutionGateError(rule.label, gateState))
   }
 
+  const taskId = gateState.taskId
   const task = readTaskJson(directory, taskId)
   if (!taskIsReadyForExecution(task) && rule.needsExecutionGate(args)) {
     const missing = getMissingExecutionGateFields(task)
     debugLog(`${logPrefix}.block`, { reason: "task_not_ready", rule: rule.name, task_id: taskId, missing }, directory)
-    throw new Error(buildExecutionGateError(rule.label, taskId, missing))
+    throw new Error(buildExecutionGateError(rule.label, { reason: "task_not_ready", taskId, missing }))
   }
 
   debugLog(`${logPrefix}.allow`, { reason: "gate_passed", rule: rule.name, task_id: taskId }, directory)
   return rule
 }
 
-export const buildExecutionGateError = (toolLabel, taskId, missing) => {
-  const suffix = taskId
-    ? `active task ${taskId} is not ready for execution yet. Missing or incomplete fields: ${missing.join(", ")}`
-    : `there is no active formal task yet.`
+export const getExecutionGateState = (directory) => {
+  const activeTasks = listUnfinishedTasks(directory)
+  const taskId = getActiveTask(directory)
+  if (taskId) {
+    return { reason: "ready", taskId, activeTaskCount: activeTasks.length }
+  }
+  if (activeTasks.length > 0) {
+    return {
+      reason: "no_current_task_selected",
+      taskId: null,
+      activeTaskCount: activeTasks.length,
+      activeTaskIds: activeTasks.map((task) => task.id),
+    }
+  }
+  return { reason: "no_formal_task", taskId: null, activeTaskCount: 0, activeTaskIds: [] }
+}
+
+export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
+  const normalized = typeof gate === "object" && gate !== null
+    ? gate
+    : gate
+      ? { reason: "task_not_ready", taskId: gate, missing }
+      : { reason: "no_formal_task" }
+
+  const suffix = normalized.reason === "task_not_ready"
+    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}`
+    : normalized.reason === "no_current_task_selected"
+      ? "unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first."
+      : "there is no formal task yet."
   return `Blocked ${toolLabel}: ${suffix}`
 }
 

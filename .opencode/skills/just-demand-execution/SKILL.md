@@ -28,7 +28,8 @@ When plugins are unavailable, disabled, or unstable, this skill is only best-eff
 1. Run `just-demand . list-active`.
 2. Confirm the intended formal task exists and is ready for execution.
 3. Confirm required context files exist for the intended `just-demand-*` subagent.
-4. If any check fails, stop and route back to `socratic-clarification` or `just-demand-intake`; do not edit inline and do not rely on plugins to catch the mistake.
+4. If unfinished tasks exist but no current task is selected, recover by choosing the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>` before any write tool or dispatch.
+5. If any check still fails after selection, stop and route back to `socratic-clarification` or `just-demand-intake`; do not edit inline and do not rely on plugins to catch the mistake.
 
 ### Evidence-First Execution
 
@@ -144,11 +145,12 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 1. Confirm active formal work item.
 2. Run `just-demand . list-active` and inspect all unfinished tasks for conflict risk.
 3. Remember that `create-intake` alone will not appear in `list-active`; only promoted formal tasks do.
-4. Ensure the current task package has the required files for the intended subagent.
-5. Verify the clarification gate above passes. If not, route back to clarification.
-6. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
-7. Review subagent output before moving to the next phase.
-8. Run verification before claiming completion.
+4. If the intended task is unfinished but not currently selected, recover with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>` before continuing.
+5. Ensure the current task package has the required files for the intended subagent.
+6. Verify the clarification gate above passes. If not, route back to clarification.
+7. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
+8. Review subagent output before moving to the next phase.
+9. Run verification before claiming completion.
 
 ## Checkpoint Commit Policy
 

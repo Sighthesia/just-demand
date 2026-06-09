@@ -688,6 +688,34 @@ def list_unfinished_tasks(root: Path, verbose: bool = False) -> list[dict[str, A
     return tasks
 
 
+def select_task(root: Path, task_id: str) -> dict[str, Any]:
+    ensure_workspace(root)
+    tpath = task_path(root, task_id) / "task.json"
+    if not tpath.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(tpath)
+    status = str(task.get("status") or "")
+    if status == "done":
+        raise RuntimeError(f"Cannot select task {task_id}: task is already done")
+
+    state_path = state_dir(root) / "state.json"
+    with workflow_mutation_lock(root):
+        state = read_json(state_path)
+        active_ids = state.get("active_task_ids", [])
+        if task_id not in active_ids:
+            active_ids.append(task_id)
+        state["active_task_ids"] = active_ids
+        state["current_intake_id"] = None
+        state["current_task_id"] = task_id
+        state["updated_at"] = utc_now()
+        write_json_atomic(state_path, state)
+
+    append_task_event(root, task_id, "task_selected", f"Selected task {task_id} as current task")
+    append_workspace_event(root, "task_selected", "task", task_id, f"Selected task {task_id} as current task")
+    return {"ok": True, "task_id": task_id, "status": status, "current_task_id": task_id}
+
+
 def mark_task(
     root: Path,
     task_id: str,

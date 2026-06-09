@@ -92,6 +92,45 @@ TBD.
 Do the obvious thing.
 ```
 
+## After `create-intake`
+
+`create-intake` is only the file-creation step. The next legal move is to write the clarified artifact into the created intake markdown file at `.just-demand/state/intake/<intake-id>.md`.
+
+Minimum recovery rule:
+
+- reuse the same intake file; do not create a replacement intake just because details are still missing
+- replace placeholder sections with the approved artifact and any required bug/workflow details
+- keep blocking items under `## Blocking Questions` until they are actually answered; move resolved or optional items to `## Non-Blocking Questions` or clear them
+- treat the intake file as the source that `promote` will read; if the file is incomplete, promotion should fail
+
+For design and implementation work, the file must be filled strongly enough that these sections are no longer empty before promotion:
+
+- `## Scope`
+- `## Final Expected Effect`
+- `## Chosen Approach`
+- `## Final Implementation Plan`
+- `## Approval`
+
+For bug or mismatch work, also fill the expected-vs-actual path when applicable:
+
+- `## Expected Behavior`
+- `## Actual Behavior`
+- `## Reproduction`
+
+`## Approach Options`, `## Validation`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and deferred/open-question sections should also be updated when the clarification artifact provides them, but the fields above are the hard promotion gates called out by runtime behavior.
+
+## Promote Failure Recovery
+
+If `just-demand . promote ...` fails with missing-field or blocking-question errors, recover in place:
+
+1. Read the error text and note each named missing section or blocker.
+2. Reopen `.just-demand/state/intake/<intake-id>.md` for that same intake.
+3. Fill or correct the named sections using the approved clarification artifact; do not guess missing user intent.
+4. Clear `## Blocking Questions` only when each blocking item is truly resolved.
+5. Rerun the same `just-demand . promote ...` command after the intake file is complete.
+
+Do not paper over a failed `promote` by creating a fresh intake, skipping approval text, or treating a runtime error as permission to improvise inline execution.
+
 ## Questioning Patterns
 
 ### Bug, regression, or expected-vs-actual mismatch

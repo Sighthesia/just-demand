@@ -3,6 +3,7 @@ import {
   clearSubagentUnavailablePending,
   debugLog,
   enforceExecutionGate,
+  getExecutionGateState,
   getReminderState,
   readTaskJson,
   taskLooksLikeLongContextExecutionCandidate,
@@ -161,6 +162,8 @@ const reminderTypeFromReasonCode = (reasonCode) => {
       return reasonCode
     case "clarify_hint":
       return "clarify"
+    case "select_task_hint":
+      return "select_task_hint"
     default:
       return null
   }
@@ -216,6 +219,15 @@ const buildControllerDecision = (text, reminderState) => {
   }
 
   if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) && !activeTask) {
+    if (reminderState.hasUnselectedActiveTasks) {
+      return {
+        phase: CONTROLLER_PHASE.route,
+        action: CONTROLLER_ACTION.remind,
+        reason_code: "select_task_hint",
+        rewrite: { mode: "append" },
+      }
+    }
+
     if (textLooksLikeWorkflowEntryNarration(text)) {
       return {
         phase: CONTROLLER_PHASE.route,
@@ -308,8 +320,13 @@ const buildReminderLines = (type) => {
       ]
     case "workflow_entry_required":
       return [
-        "- This is concrete workflow work, but there is no active formal task yet.",
+        "- This is concrete workflow work, but there is no formal task yet.",
         "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then `just-demand-intake` before continuing.",
+      ]
+    case "select_task_hint":
+      return [
+        "- Unfinished formal tasks already exist, but no current task is selected.",
+        "- Run `just-demand . list-active`, then `just-demand . select-task <task-id>` (or `resume <task-id>`) before continuing write or execution work.",
       ]
     default:
       return []
@@ -407,7 +424,7 @@ const blockWorkflowEntryRequired = (text, reminderState) => {
 
   return [
     WORKFLOW_ENTRY_BLOCKED_HEADER,
-    "- This is concrete workflow work, but there is no active formal task yet.",
+    "- This is concrete workflow work, but there is no formal task yet.",
     "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then `just-demand-intake` before continuing.",
     "",
     "Original response:",
@@ -443,9 +460,11 @@ export default async ({ directory } = {}) => {
       const activeTaskId = getActiveTask(workflowDirectory)
       const activeTask = activeTaskId ? (readTaskJson(workflowDirectory, activeTaskId) || { id: activeTaskId }) : null
       const reminderState = getReminderState(workflowDirectory, sessionID)
+      const gateState = getExecutionGateState(workflowDirectory)
       reminderState.directory = workflowDirectory
       reminderState.sessionID = sessionID
       reminderState.activeTask = activeTask
+      reminderState.hasUnselectedActiveTasks = gateState.reason === "no_current_task_selected"
 
       const currentText = extractCurrentText(output)
       updateTopicTurns(`${workflowDirectory}::${sessionID}`, currentText, reminderState)

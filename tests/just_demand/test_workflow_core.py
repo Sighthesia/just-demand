@@ -26,6 +26,7 @@ from workflow_core import (
     mark_task,
     promote_to_task,
     read_json,
+    select_task,
     start_execution,
     state_dir,
     tasks_dir,
@@ -1093,6 +1094,54 @@ class WorkflowCoreTests(unittest.TestCase):
 
             state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNone(state["current_task_id"])
+
+    def test_select_task_sets_current_task_without_removing_active_tasks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake_a = create_intake(root, "Task A", "First task", "s1")
+            intake_b = create_intake(root, "Task B", "Second task", "s1")
+            set_intake_scope(root, intake_a["intake_id"], "Scope A")
+            set_intake_scope(root, intake_b["intake_id"], "Scope B")
+            set_intake_design_artifact(root, intake_a["intake_id"])
+            set_intake_design_artifact(root, intake_b["intake_id"])
+            task_a = promote_to_task(root, intake_a["intake_id"], "Task A", "Goal A", "design", ["A"])["task_id"]
+            task_b = promote_to_task(root, intake_b["intake_id"], "Task B", "Goal B", "design", ["B"])["task_id"]
+
+            mark_task(root, task_b, "paused")
+            state = read_json(root / ".just-demand" / "state" / "state.json")
+            self.assertIsNone(state["current_task_id"])
+            self.assertIn(task_a, state["active_task_ids"])
+            self.assertIn(task_b, state["active_task_ids"])
+
+            result = select_task(root, task_a)
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["current_task_id"], task_a)
+            state = read_json(root / ".just-demand" / "state" / "state.json")
+            self.assertEqual(state["current_task_id"], task_a)
+            self.assertIn(task_a, state["active_task_ids"])
+            self.assertIn(task_b, state["active_task_ids"])
+
+    def test_resume_command_selects_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Resume task", "Resume work", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            task_id = promote_to_task(root, intake["intake_id"], "Resume task", "Resume work", "design", ["Resume works"])["task_id"]
+            mark_task(root, task_id, "paused")
+            script = SCRIPT_DIR / "task.py"
+
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "resume", task_id],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(read_json(root / ".just-demand" / "state" / "state.json")["current_task_id"], task_id)
 
     def test_start_execution_sets_current_task(self):
         with tempfile.TemporaryDirectory() as tmp:

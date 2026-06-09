@@ -31,6 +31,7 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Plugin tests: `node --test tests/just_demand/test_opencode_plugins.mjs`
 - Validate Node package file: `python3 -m json.tool .opencode/package.json`
 - List unfinished formal tasks before execution: `just-demand . list-active`
+- Select or resume a task: `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`
 - Create intake: `just-demand . create-intake "<title>" "<raw request>" --session <session-id>`
 - Promote intake: `just-demand . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
 - Root help: `just-demand --help` or `just-demand . --help`
@@ -44,6 +45,9 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - After changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`, run plugin tests and `python3 -m json.tool .opencode/package.json`, then restart OpenCode.
 - Before any implementation or verification dispatch, run `list-active` to inspect unfinished tasks for conflict risk.
 - `create-intake` only creates an intake. `list-active` stays empty until `promote` creates a formal task.
+- After `create-intake`, fill the created intake markdown at `.just-demand/state/intake/<intake-id>.md`; promotion is not the next legal step until the required sections are written there.
+- If `promote` fails with missing-field or blocking-question errors, update the same intake file to fill the named sections, clear blocking questions, then rerun `just-demand . promote ...`; do not create a second intake just to recover.
+- If `list-active` shows unfinished formal tasks but no current task is selected, recover by choosing the right task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>` before dispatch or inline edits.
 - Do not report a task as complete until `complete-verification` has run. In this repo, verification closeout is a real workflow step, not wording.
 
 ## Task Context Rules

@@ -238,3 +238,12 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-08-fix-workflow-entry-and-cli-consistency-task (Fix workflow entry and CLI consistency) completed with status 'done'.
   Verification summary: Fixed CLI/help project-dir consistency, workflow-entry narration false blocks, and create-intake vs promote verification guidance; core/install/plugin tests passed.
+
+- Task 2026-06-08-fix-quoted-redirect-false-positive-in-workflow-guard-task (Fix quoted redirect false positive in workflow guard) completed with status 'done'.
+  Verification summary: Fixed bash guard false positive for quoted greater-than text in workflow-entry commands; plugin and workflow-core tests passed.
+
+- Task 2026-06-08-improve-task-selection-and-gate-messaging-task (Improve task selection and gate messaging) completed with status 'done'.
+  Verification summary: Added explicit task selection and resume commands, clarified execution-gate errors, and switched missing-current-task chat behavior to reminder-first; workflow-core and plugin tests passed.
+
+- Task 2026-06-09-fill-workflow-prompt-handling-gaps-task (Fill workflow prompt handling gaps) completed with status 'done'.
+  Verification summary: Added prompt-layer guidance for intake completion, promote retry recovery, and current-task selection fallback; plugin tests and package validation passed.
