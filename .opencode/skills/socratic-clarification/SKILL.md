@@ -5,15 +5,9 @@ description: Use when the user proposes a need, request, feature, design/refacto
 
 # Socratic Clarification
 
-Force progressive clarification and design approval before any implementation work begins. This is a hard gate, not optional guidance.
+Force progressive clarification and design approval before implementation. This is a hard gate, not optional guidance.
 
-Clarification shapes the intake; the runtime plugin still owns the hard enforcement that routes concrete requests into workflow entry.
-
-This skill is the required second routing step after `using-just-demand`. If a turn changes from ordinary Q&A into concrete work, bug fixing, mismatch analysis, or correction feedback, this skill takes priority before intake, execution, or verification routing continues.
-
-If earlier turns were only informational, reset the problem model as soon as the current turn becomes a request, bug, correction, or mismatch. Do not stay on the Q&A path and drift straight to intake.
-
-In skill-only fallback mode, this skill is still only best-effort; it cannot block tools. The agent must therefore self-enforce the gate: user approval of an approach or final artifact means approval to enter intake/formal task flow, not permission to edit inline unless a formal task is already ready for execution.
+This skill is the required second step after `using-just-demand`. When a turn pivots from Q&A into a request, bug, correction, or mismatch, reset here before intake, execution, or verification. In skill-only fallback mode, self-enforce the same rule: approval enters intake/formal-task flow, not inline editing, unless a formal task is already execution-ready.
 
 <HARD-GATE>
 Do NOT promote a task, dispatch a subagent, edit files, or finalize an implementation plan until you have presented a final expected effect, compared 2-3 approaches, captured the chosen approach and final implementation plan, and received explicit user approval. This applies to EVERY request regardless of perceived simplicity.
@@ -21,7 +15,7 @@ Do NOT promote a task, dispatch a subagent, edit files, or finalize an implement
 
 ## Anti-Pattern: "This Is Too Simple To Need Clarification"
 
-Every request goes through this process. A one-line fix, a config change, a single-function addition -- all of them. "Simple" requests are where unexamined assumptions cause the most wasted work. The clarification can be short (a few sentences for truly simple requests), but you MUST present the final artifact and get approval.
+Every request goes through this process. "Simple" requests still need a short final artifact and explicit approval.
 
 ## Anti-Rationalization Rules
 
@@ -44,9 +38,7 @@ Before continuing inside the user's frame, explicitly test:
 - whether a structural limitation or experiment flaw better explains the phenomenon
 - whether the current evidence can distinguish between a tuning problem and a wrong premise
 
-If the user's frame is weak, incomplete, or contradicted by stronger explanations, challenge the premise before proposing more detailed optimization. The goal is to prevent long conversations from collapsing into increasingly precise advice built on an unsupported assumption.
-
-For analysis, diagnosis, tuning, and experiment-review tasks, this premise check happens before fine-grained comparisons.
+If the user's frame is weak, incomplete, or contradicted by stronger explanations, challenge the premise before proposing narrower advice.
 
 ## Checklist
 

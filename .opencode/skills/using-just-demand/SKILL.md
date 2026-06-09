@@ -13,9 +13,9 @@ If you were dispatched as a subagent to execute a specific task, skip this skill
 
 ## Mandatory Skill Check
 
-If there is even a small chance this turn involves repo work, workflow state, a request, a bug, a correction, a design/refactor, or execution, invoke the relevant Just Demand skill before responding or taking action. Do not inspect files, run commands, dispatch subagents, or edit code first.
+If there is even a small chance this turn involves repo work, workflow state, a request, a bug, a correction, a design/refactor, or execution, invoke the relevant Just Demand skill before responding or taking action.
 
-These thoughts mean STOP and re-run the routing rules:
+These thoughts mean STOP and re-run routing:
 
 - "This is simple; I can just do it." Simple changes still require workflow routing.
 - "The user chose A, so I can implement now." Approach approval means enter intake/formal task flow unless execution readiness is already satisfied.
@@ -25,9 +25,7 @@ These thoughts mean STOP and re-run the routing rules:
 
 ## Skill-Only Fallback
 
-Skill-only fallback is best-effort. It improves behavior when plugins are unavailable, disabled, or unstable, but it cannot hard-block tools. Plugin gates remain the reliable enforcement layer.
-
-In skill-only fallback mode, before any write tool or execution subagent:
+Skills are best-effort; plugins are the real hard gate. When plugins are unavailable, before any write tool or execution subagent:
 
 1. Run `just-demand . list-active`.
 2. Confirm the relevant formal task exists and has no blocking clarification gaps.
@@ -40,9 +38,7 @@ Use this repository as an OpenCode-first local agent workflow runtime.
 
 ## First Move
 
-Before shaping work, identify the current situation. If the user proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch, load `socratic-clarification` first, then continue with the workflow route below.
-
-Treat this as a routing reset on every turn. Do not stay on a generic Q&A path just because earlier turns were informational. As soon as a later turn pivots into concrete work, bug fixing, or correction feedback, `socratic-clarification` becomes the next required skill.
+Treat every turn as a routing reset. If the turn proposes concrete work, bug fixing, mismatch analysis, or correction feedback, load `socratic-clarification` first, then continue with the workflow route below.
 
 ```text
 No active formal task -> use just-demand-intake.
@@ -61,9 +57,7 @@ When material uncertainty exists, clarification is not optional and not a nice-t
 - correction feedback says the result drifted but does not yet pin down the desired behavior
 - you can imagine a reasonable implementation, but a different reasonable interpretation would produce a user-visible mismatch
 
-Do not proceed just because you can guess a plausible path. Clarification is a hard gate: no task promotion, no subagent dispatch, no code edits until final expected effect and final implementation plan are approved.
-
-Do not rely on visible main-session reminder text to enforce this. The routing priority must live in the skill behavior itself: `using-just-demand` first, `socratic-clarification` second, then intake/execution/memory/verification only after that gate is satisfied.
+Do not proceed just because you can guess a plausible path. No task promotion, subagent dispatch, or code edits until final expected effect and final implementation plan are approved.
 
 When clarifying, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 
@@ -140,7 +134,7 @@ Users skim. Output past ~300 characters is usually not read closely, so every ma
 
 `just-demand-verification`'s Default Final Report is the task-closure specialization of this rule; keep the two consistent.
 
-These skills describe routing; the runtime plugin enforces workflow entry and task-gated behavior.
+These skills describe routing; runtime plugins enforce workflow entry and task-gated behavior.
 
 ## Skill Routing
 
