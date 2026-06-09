@@ -92,44 +92,31 @@ TBD.
 Do the obvious thing.
 ```
 
-## After `create-intake`
+## Intake Recovery Shortcuts
 
-`create-intake` is only the file-creation step. The next legal move is to write the clarified artifact into the created intake markdown file at `.just-demand/state/intake/<intake-id>.md`.
+`create-intake` only creates `.just-demand/state/intake/<intake-id>.md`. Before promotion, keep working in that same file.
 
-Minimum recovery rule:
+Recovery recipe after `create-intake`:
 
-- reuse the same intake file; do not create a replacement intake just because details are still missing
-- replace placeholder sections with the approved artifact and any required bug/workflow details
-- keep blocking items under `## Blocking Questions` until they are actually answered; move resolved or optional items to `## Non-Blocking Questions` or clear them
-- treat the intake file as the source that `promote` will read; if the file is incomplete, promotion should fail
+1. Reopen the same intake markdown file; do not create a replacement intake.
+2. Replace placeholders with the approved clarification artifact.
+3. Keep unresolved items in `## Blocking Questions`; clear or move them only when resolved.
+4. Promote only after the required sections below are no longer empty.
 
-For design and implementation work, the file must be filled strongly enough that these sections are no longer empty before promotion:
+Hard promotion gates by work shape:
 
-- `## Scope`
-- `## Final Expected Effect`
-- `## Chosen Approach`
-- `## Final Implementation Plan`
-- `## Approval`
+- design/implementation: `## Scope`, `## Final Expected Effect`, `## Chosen Approach`, `## Final Implementation Plan`, `## Approval`
+- bug/mismatch: `## Scope`, `## Expected Behavior`, `## Actual Behavior`, `## Reproduction`
 
-For bug or mismatch work, also fill the expected-vs-actual path when applicable:
+`## Approach Options`, `## Validation`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and open-question sections should also be updated when the clarification artifact provides them, but the fields above are the runtime hard gates.
 
-- `## Expected Behavior`
-- `## Actual Behavior`
-- `## Reproduction`
+Recovery recipe after failed `promote`:
 
-`## Approach Options`, `## Validation`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and deferred/open-question sections should also be updated when the clarification artifact provides them, but the fields above are the hard promotion gates called out by runtime behavior.
-
-## Promote Failure Recovery
-
-If `just-demand . promote ...` fails with missing-field or blocking-question errors, recover in place:
-
-1. Read the error text and note each named missing section or blocker.
-2. Reopen `.just-demand/state/intake/<intake-id>.md` for that same intake.
-3. Fill or correct the named sections using the approved clarification artifact; do not guess missing user intent.
-4. Clear `## Blocking Questions` only when each blocking item is truly resolved.
-5. Rerun the same `just-demand . promote ...` command after the intake file is complete.
-
-Do not paper over a failed `promote` by creating a fresh intake, skipping approval text, or treating a runtime error as permission to improvise inline execution.
+1. Read the error text and note each named missing field or remaining blocker.
+2. Update that same intake markdown file; do not touch `task.json` and do not create a second intake.
+3. Fill the named sections from approved user intent; ask instead of guessing.
+4. Clear `## Blocking Questions` only when each blocking item is actually resolved.
+5. Rerun the same `just-demand . promote ...` command.
 
 ## Questioning Patterns
 
