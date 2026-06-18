@@ -253,3 +253,18 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-09-implement-user-facing-output-contract-task (Implement user-facing output contract) completed with status 'done'.
   Verification summary: User-facing output contract implemented and verified with workflow core, install, plugin, and package JSON checks.
+
+- Task 2026-06-16-add-cli-next-action-hints-task (Add CLI next-action hints) completed with status 'done'.
+  Verification summary: Added structured next_actions to promote/select/resume CLI outputs, clarified long-context work in the session reminder, fixed package.json merge preservation, and verified workflow_core/install/plugin tests plus package JSON.
+
+- Task 2026-06-02-enhance-visual-interaction-workflow-prompts-task (Enhance visual interaction workflow prompts) completed with status 'done'.
+  Verification summary: Visible-effect approval card guidance added for UI/layout/animation workflow outputs; plugin tests, package JSON validation, and diff whitespace checks passed
+
+- Task 2026-06-16-generalize-diagram-approval-cards-task (Generalize diagram approval cards) completed with status 'done'.
+  Verification summary: Diagram-intent approval card guidance added for flowcharts, architecture diagrams, state diagrams, and data-flow/API diagrams; plugin tests, package JSON validation, and diff whitespace checks passed
+
+- Task 2026-06-09-analyze-workflow-prompt-completeness-task (Analyze workflow prompt completeness) completed with status 'done'.
+  Verification summary: Research identified a post-approval code-investigation gap when plugin guardrails are degraded and recommended minimal prompt-layer plus plugin-layer fixes.
+
+- Task 2026-06-18-close-post-approval-workflow-drift-gap-task (Close post-approval workflow drift gap) completed with status 'done'.
+  Verification summary: Post-approval code-investigation drift guard implemented and verified: prompt fallback now treats codebase investigation as execution work before promotion; state plugin blocks English/Chinese code-investigation intent without a formal task; plugin tests 80/80 and package JSON validation passed.

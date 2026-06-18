@@ -62,6 +62,34 @@ const CROSS_SENTENCE_NEAR_MISS_PATTERNS = [
   /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
 ]
 
+const CODE_INVESTIGATION_INTENT_PATTERNS = [
+  // "inspect the code/codebase/source" — allow optional adjective before target
+  /\b(inspect)\s+(?:the\s+)?(?:\w+\s+)?(?:code|codebase|source)\b/i,
+  // "trace through the code/implementation" / "trace the code"
+  /\b(trace)\s+(?:through\s+)?(?:the\s+)?(?:\w+\s+)?(?:code|codebase|source|implementation)\b/i,
+  // "search the codebase/source"
+  /\b(search)\s+(?:the\s+)?(?:\w+\s+)?(?:codebase|source)\b/i,
+  // "read through/over the code/source/files/implementation" / "read the code"
+  /\bread\s+(?:(?:through|over)\s+)?(?:the\s+)?(?:\w+\s+)?(?:code|source|files|implementation)\b/i,
+  // "look/go through the code/source/files/implementation"
+  /\b(?:look|go)\s+(?:through|over)\s+(?:the\s+)?(?:\w+\s+)?(?:code|source|files|implementation)\b/i,
+  // "look at the code/codebase/source/implementation"
+  /\blook\s+at\s+(?:the\s+)?(?:\w+\s+)?(?:code|codebase|source|implementation)\b/i,
+  // "investigate the codebase/implementation/code"
+  /\binvestigate\s+(?:the\s+)?(?:\w+\s+)?(?:codebase|implementation|code)\b/i,
+  // Chinese: inspect/check/search/trace/read  code/source/codebase/files
+  /(?:查看|检查|搜索|跟踪|阅读|检索)\s*(?:一下|一遍)?\s*(?:代码|源码|代码库|源文件|文件)/i,
+]
+
+const NEUTRAL_ANALYSIS_PATTERNS = [
+  // Self-described neutral analysis: "just reporting/analyzing/reviewing..."
+  /\bjust\s+(?:reporting|analyzing|reviewing|documenting|narrating|explaining|summarizing|describing)\b/i,
+  // Negated implementation intent: "not proposing/planning to implement/change..."
+  /\bnot\s+(?:proposing|planning|intending|trying)\s+to\s+(?:implement|change|fix|build|modify|edit)\b/i,
+  // Explicit "no action/change/work" — optionally followed by "needed/required"
+  /\bno\s+(?:action|change|work)(?:\s+(?:needed|required|planned))?\b/i,
+]
+
 const WORKFLOW_ENTRY_COMMAND_PATTERNS = [
   /\bcreate-intake\b/i,
   /\bpromote\b/i,
@@ -88,6 +116,18 @@ const textLooksLikeWorkflowEntryNarration = (text) => {
   if (!WORKFLOW_ENTRY_COMMAND_PATTERNS.some((pattern) => pattern.test(body))) return false
   if (INLINE_EXECUTION_INTENT_PATTERNS.some((pattern) => pattern.test(body))) return false
   return WORKFLOW_ENTRY_NARRATION_PATTERNS.some((pattern) => pattern.test(body))
+}
+
+const textLooksLikeCodeInvestigationIntent = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  return CODE_INVESTIGATION_INTENT_PATTERNS.some((pattern) => pattern.test(body))
+}
+
+const textLooksLikeNeutralAnalysis = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  return NEUTRAL_ANALYSIS_PATTERNS.some((pattern) => pattern.test(body))
 }
 
 const normalizeWords = (text) => {
@@ -218,7 +258,18 @@ const buildControllerDecision = (text, reminderState) => {
     }
   }
 
-  if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) && !activeTask) {
+  // Neutral analysis/status-summary text should not be blocked even if it
+  // contains concrete work words incidentally (e.g. "not proposing to implement").
+  if (textLooksLikeNeutralAnalysis(text)) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.allow,
+      reason_code: "no_op",
+      rewrite: null,
+    }
+  }
+
+  if ((CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) || textLooksLikeCodeInvestigationIntent(text)) && !activeTask) {
     if (reminderState.hasUnselectedActiveTasks) {
       return {
         phase: CONTROLLER_PHASE.route,
@@ -486,4 +537,4 @@ export default async ({ directory } = {}) => {
   }
 }
 
-export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE, textLooksLikeWorkflowEntryNarration }
+export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE, textLooksLikeCodeInvestigationIntent, textLooksLikeNeutralAnalysis, textLooksLikeWorkflowEntryNarration }

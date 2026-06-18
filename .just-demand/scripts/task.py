@@ -49,6 +49,19 @@ COMMANDS = {
 
 GLOBAL_COMMANDS = {"install", "update", "uninstall", "where"}
 HELP_FLAGS = {"-h", "--help"}
+TASK_SELECTION_NEXT_ACTIONS = [
+    "Run `just-demand . list-active` before execution.",
+    "If execution needs broad code reading, 3+ files, multi-step research/debugging, or extended verification, dispatch a just-demand-* subagent.",
+    "Confirm required task context files exist before implementation or verification.",
+]
+
+
+def with_task_selection_next_actions(result: dict) -> dict:
+    """Attach concise, machine-readable workflow guidance to task selection results."""
+    if isinstance(result, dict):
+        result = dict(result)
+        result["next_actions"] = TASK_SELECTION_NEXT_ACTIONS
+    return result
 
 
 def split_project_root(argv: list[str]) -> tuple[Path | None, list[str]]:
@@ -168,11 +181,13 @@ def execute_command(root: Path, args: list[str]) -> int:
             result = create_checkpoint_commit(root, parsed.task_id)
         elif parsed.command == "promote":
             criteria = parsed.acceptance or ["The formal task package exists and can be executed."]
-            result = promote_to_task(root, parsed.intake_id, parsed.title, parsed.goal, parsed.type, criteria)
+            result = with_task_selection_next_actions(
+                promote_to_task(root, parsed.intake_id, parsed.title, parsed.goal, parsed.type, criteria)
+            )
         elif parsed.command == "list-active":
             result = {"tasks": list_unfinished_tasks(root, verbose=getattr(parsed, "verbose", False))}
         elif parsed.command in {"select-task", "resume"}:
-            result = select_task(root, parsed.task_id)
+            result = with_task_selection_next_actions(select_task(root, parsed.task_id))
         elif parsed.command == "mark":
             result = mark_task(
                 root,

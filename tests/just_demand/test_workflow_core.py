@@ -1192,7 +1192,57 @@ class WorkflowCoreTests(unittest.TestCase):
 
             payload = json.loads(result.stdout)
             self.assertTrue(payload["ok"])
+            self.assertIn("next_actions", payload)
+            self.assertTrue(any("list-active" in action for action in payload["next_actions"]))
+            self.assertTrue(any("just-demand-* subagent" in action for action in payload["next_actions"]))
             self.assertEqual(read_json(root / ".just-demand" / "state" / "state.json")["current_task_id"], task_id)
+
+    def test_cli_promote_and_select_task_include_next_actions_as_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI hints", "Add task guidance", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            script = SCRIPT_DIR / "task.py"
+
+            promote_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    str(root),
+                    "promote",
+                    intake["intake_id"],
+                    "CLI hints",
+                    "Add task guidance",
+                    "--type",
+                    "implementation",
+                    "--acceptance",
+                    "CLI output includes next actions.",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            promote_payload = json.loads(promote_result.stdout)
+            task_id = promote_payload["task_id"]
+            self.assertIn("next_actions", promote_payload)
+            self.assertTrue(any("list-active" in action for action in promote_payload["next_actions"]))
+            self.assertTrue(any("3+ files" in action for action in promote_payload["next_actions"]))
+            self.assertTrue(any("context files" in action for action in promote_payload["next_actions"]))
+
+            mark_task(root, task_id, "paused")
+            select_result = subprocess.run(
+                [sys.executable, str(script), str(root), "select-task", task_id],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            select_payload = json.loads(select_result.stdout)
+            self.assertTrue(select_payload["ok"])
+            self.assertIn("next_actions", select_payload)
+            self.assertEqual(select_payload["next_actions"], promote_payload["next_actions"])
 
     def test_start_execution_sets_current_task(self):
         with tempfile.TemporaryDirectory() as tmp:

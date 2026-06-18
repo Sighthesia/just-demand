@@ -20,6 +20,7 @@ These thoughts mean STOP and re-run routing:
 - "This is simple; I can just do it." Simple changes still require workflow routing.
 - "The user chose A, so I can implement now." Approach approval means enter intake/formal task flow unless execution readiness is already satisfied.
 - "I can inspect or patch first and clean up later." Reads may inform clarification, but writes wait for formal readiness.
+- "I can inspect the codebase first to prepare." Codebase investigation is also execution work and waits for a formal task.
 - "The plugins will catch mistakes." Skill-only fallback must self-enforce the process because plugins may be unavailable or unstable.
 - "This is only a follow-up." Follow-up pivots into work reset routing and require `socratic-clarification` second.
 
@@ -31,6 +32,7 @@ Skills are best-effort; plugins are the real hard gate. When plugins are unavail
 2. Confirm the relevant formal task exists and has no blocking clarification gaps.
 3. Confirm required task context files exist for the intended subagent.
 4. If no active formal task is ready, use `socratic-clarification` then `just-demand-intake`; do not edit inline.
+5. Codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) outside a formal task is also execution work — do not proceed with it in no-plugin fallback; return to intake/promotion.
 
 # Using Just Demand
 
@@ -138,12 +140,26 @@ Users skim. Output past ~300 characters is usually not read closely, so every ma
 
 For workflow turns, the first screen should help the user recognize and steer the result, not inspect the agent's full reasoning. Default to this contract:
 
-1. **First-screen answer**: what you think the user wants and what you recommend.
+1. **First-screen answer**: the expected user-visible effect or observed phenomenon, plus what you recommend.
 2. **User action**: approve, choose another option, correct the intent, or no action needed.
 3. **Option matrix**: only when there is a real choice; compare effect, pros, cons, and failure mode.
 4. **Minimum viable knowledge**: one sentence per unfamiliar term needed for the decision.
-5. **Validation card**: what should be true, what should not happen, what was or will be checked.
+5. **Visible acceptance**: what the user can see, feel, or operate to confirm the result. Routine tests, builds, lint, JSON validation, and diff checks are mandatory agent work; omit them from the first screen unless they failed or need user action.
 6. **Optional expansion**: implementation details, files, logs, and deeper rationale only after the decision surface.
+
+For UI, layout, animation, reveal, overflow, clipping, masking, or quality/feel work, use a visible-effect card by default:
+
+- **Expected phenomenon first**: make the target screen behavior the first readable item.
+- **Current-vs-target diagram**: include a small ASCII diagram when size, padding, anchor, parent-container impact, overflow, reveal, or motion shape matters.
+- **Touchpoints**: keep scope to one short line naming concrete files, modules, or components when known, plus any explicit exclusion.
+- **Visible side effect**: describe what the user may see on screen. Do not use risk text to introduce an alternate unchosen solution.
+
+For flowcharts, architecture diagrams, state diagrams, data-flow/API diagrams, or other explanatory diagrams, use a diagram-intent card by default:
+
+- **Diagram meaning first**: state what relationship, process, boundary, ownership, state transition, or data direction the diagram is meant to express.
+- **Sketch before prose**: include a compact ASCII or Mermaid sketch when the diagram shape is easier to validate visually than in text.
+- **Diagram acceptance**: state what the user should be able to identify from the diagram, such as entry points, branches, module boundaries, owners, states, transitions, sources, transforms, or destinations.
+- **Expression side effect**: name what the chosen diagram simplification emphasizes, hides, collapses, or intentionally leaves out.
 
 Do not ask "what should I do?" without a recommended default. If the agent can safely decide without changing user-visible behavior, cost, security, compatibility, architecture, or long-term maintenance, decide and proceed.
 

@@ -24,6 +24,7 @@ import stateFactory, {
   CONTROLLER_ACTION,
   CONTROLLER_PHASE,
   buildControllerDecision,
+  textLooksLikeCodeInvestigationIntent,
   textLooksLikeWorkflowEntryNarration,
 } from "../../.opencode/plugins/just-demand-state.js"
 import subagentContextFactory from "../../.opencode/plugins/just-demand-subagent-context.js"
@@ -437,6 +438,160 @@ test("workflow-entry narration detector allows command narration but not inline 
 })
 
 // ---------------------------------------------------------------------------
+// code investigation intent detector
+// ---------------------------------------------------------------------------
+test("textLooksLikeCodeInvestigationIntent detects English code investigation proposals", () => {
+  const samples = [
+    "Let me inspect the codebase first.",
+    "I need to read through the source files.",
+    "Let me search the codebase for similar patterns.",
+    "I should trace the implementation first.",
+    "Let me look at the existing implementation.",
+    "Investigate the codebase before proceeding.",
+    "I will read the code to understand the structure.",
+    "Let me look through the code to find the right place.",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeCodeInvestigationIntent(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeCodeInvestigationIntent detects Chinese code investigation proposals", () => {
+  const samples = [
+    "我先查看一下代码。",
+    "让我检查一下源码。",
+    "我需要搜索一下代码库。",
+    "让我阅读一下代码文件。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeCodeInvestigationIntent(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeCodeInvestigationIntent does not fire on neutral analysis or workflow entry narration", () => {
+  const samples = [
+    "Quick status: I compared the tradeoffs and the analysis still points to option A.",
+    "Summary: I am just documenting the reasoning and next steps; no action is needed yet.",
+    "I am reviewing the current state and explaining the tradeoffs, not asking for any action yet.",
+    "I am creating the workflow entry now: create-intake first, then promote, then list-active.",
+    "Run just-demand . --help so we can verify the documented help path.",
+    "I am looking at this from a product perspective, not the code.",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeCodeInvestigationIntent(sample), false, `Expected false for: "${sample}"`)
+  }
+})
+
+test("controller decision blocks code investigation intent when no active task", () => {
+  const englishSamples = [
+    "Let me inspect the codebase first.",
+    "I need to read through the source files.",
+    "Let me search the codebase for similar patterns.",
+    "I should trace the implementation first.",
+    "Let me look at the existing implementation.",
+    "Investigate the codebase before proceeding.",
+  ]
+  for (const sample of englishSamples) {
+    const decision = buildControllerDecision(sample, { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
+    assert.equal(decision.phase, CONTROLLER_PHASE.route)
+    assert.equal(decision.action, CONTROLLER_ACTION.block)
+    assert.equal(decision.reason_code, "workflow_entry_required")
+  }
+})
+
+test("controller decision blocks Chinese code investigation intent when no active task", () => {
+  const decision = buildControllerDecision("我先查看一下代码，了解一下当前的实现。", {
+    activeTask: null,
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+  assert.equal(decision.phase, CONTROLLER_PHASE.route)
+  assert.equal(decision.action, CONTROLLER_ACTION.block)
+  assert.equal(decision.reason_code, "workflow_entry_required")
+})
+
+test("controller decision allows workflow entry narration that mentions code investigation", () => {
+  // The text matches code investigation patterns, but the workflow entry narration
+  // takes precedence because it contains workflow entry commands.
+  const samples = [
+    "I am creating the workflow entry: run create-intake, then promote, then the code work happens in the subagent.",
+    "Let me create the intake first: create-intake, then promote, then inspect the codebase inside the formal task.",
+  ]
+  for (const sample of samples) {
+    const decision = buildControllerDecision(sample, { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
+    assert.equal(decision.phase, CONTROLLER_PHASE.route)
+    assert.equal(decision.action, CONTROLLER_ACTION.allow)
+    assert.equal(decision.reason_code, "no_op")
+  }
+})
+
+test("state blocks English code investigation intent when no formal task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "Let me inspect the codebase first to understand how it works.",
+    "I need to read through the source files before implementing.",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+    await plugin["chat.message"]({ sessionID: `code-investigation-en-${index}` }, output)
+
+    assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
+    assert.match(output.parts[0].text, /no formal task yet/i)
+    assert.match(output.parts[0].text, /just-demand-intake/i)
+    assert.match(output.parts[0].text, /Original response:/i)
+    assert.match(output.parts[0].text, /> /)
+    assert.notEqual(output.parts[0].text, sample)
+  }
+})
+
+test("state blocks Chinese code investigation intent when no formal task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "我先查看一下代码，了解一下当前的实现。",
+    "让我检查一下源码再决定怎么改。",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+    await plugin["chat.message"]({ sessionID: `code-investigation-zh-${index}` }, output)
+
+    assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
+    assert.match(output.parts[0].text, /no formal task yet/i)
+    assert.match(output.parts[0].text, /just-demand-intake/i)
+  }
+})
+
+test("state allows neutral analysis that mentions code", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "I reviewed the code and the structure seems reasonable, but I am just reporting, not proposing to implement anything.",
+    "Quick analysis: the current implementation path is straightforward and needs no change.",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+    await plugin["chat.message"]({ sessionID: `neutral-code-${index}` }, output)
+
+    assert.equal(output.parts[0].text, sample)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand workflow entry required\]/i)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
+  }
+})
+
+// ---------------------------------------------------------------------------
 // plugin factory: subagent-context returns hooks object
 // ---------------------------------------------------------------------------
 test("subagent-context factory returns hooks object with tool.execute.before", async () => {
@@ -462,6 +617,7 @@ test("session-start does not inject workflow bootstrap into system prompt", asyn
   assert.match(output.system[1], /Load using-just-demand first/i)
   assert.match(output.system[1], /socratic-clarification second/i)
   assert.match(output.system[1], /Use just-demand subagents proactively/i)
+  assert.match(output.system[1], /Long-context work means broad code reading, 3\+ files/i)
   assert.doesNotMatch(output.system[1], /<workflow-state>/i)
 })
 

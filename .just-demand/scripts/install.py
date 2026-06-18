@@ -276,6 +276,8 @@ def deploy_config_file(source: Path, target: Path, manifest: dict[str, Any], con
         merged = dict(existing)
         changed = False
         for key, value in desired.items():
+            if key != "type":
+                continue
             if merged.get(key) != value:
                 merged[key] = value
                 changed = True

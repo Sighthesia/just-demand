@@ -54,8 +54,14 @@ For design and implementation work, the intake must include the final artifact b
 - **Chosen Approach**: selected approach with brief rationale
 - **Final Implementation Plan**: ordered steps including verification
 - **Minimum Viable Knowledge**: one-sentence explanations for unfamiliar terms or tradeoffs the user needs to decide
-- **Validation**: how we will verify the result matches the expected effect
-- **Validation Card**: concise quick checks the user can scan before approval
+- **Touchpoints**: short concrete files/modules/components when known, plus explicit exclusions; this complements the formal `Scope` field and keeps user-facing scope readable
+- **Visible Acceptance**: what the user can see, feel, or operate to confirm the result; routine tests/build/lint are mandatory agent work and should not dominate the first-screen approval card unless they fail or need user action
+- **Visible Side Effect**: expected screen or operational side effects, not alternate unchosen approaches
+- **Diagram Intent**: for flowcharts, architecture diagrams, state diagrams, data-flow/API diagrams, or other explanatory diagrams, what the diagram is meant to communicate
+- **Diagram Acceptance**: what the user should be able to identify from the diagram, such as entry points, branches, boundaries, owners, states, transitions, sources, transforms, or destinations
+- **Expression Side Effect**: what the diagram emphasizes, collapses, hides, or intentionally omits
+- **Validation**: engineering checks and review steps for the task record or final report, secondary to visible acceptance in user-facing approval cards
+- **Validation Card**: concise observable checks the user can scan before approval
 - **Diagram**: small Mermaid or ASCII diagram when UI, workflow, state, process, or data shape would otherwise be ambiguous
 - **Confidence**: high, medium, or low when it helps calibrate trust
 - **Escalation Reason**: why this needs user input instead of safe agent decision
@@ -90,10 +96,16 @@ User Action: <approve / choose / correct / no action needed>
 Recommended Default: <agent's recommended path>
 Option Matrix: <real alternatives by best-for, pros, cons, failure mode>
 Final Expected Effect: <user-visible outcome>
+Touchpoints: <short concrete files/modules/components when known, plus explicit exclusions>
 Approach Options: <2-3 options with pros, cons, and failure modes>
 Chosen Approach: <selected approach and rationale>
 Final Implementation Plan: <ordered implementation and verification steps>
 Minimum Viable Knowledge: <plain-language terms needed for the decision>
+Visible Acceptance: <visible or operational checks the user can evaluate>
+Visible Side Effect: <expected screen/operational side effects, or none>
+Diagram Intent: <what an explanatory diagram is meant to communicate, if applicable>
+Diagram Acceptance: <what the user can identify from the diagram, if applicable>
+Expression Side Effect: <what the diagram emphasizes, collapses, hides, or intentionally omits>
 Validation: <how the result will be checked>
 Validation Card: <3-5 quick checks for user approval>
 Diagram: <small Mermaid/ASCII diagram, or "not needed">
@@ -126,7 +138,7 @@ Hard promotion gates by work shape:
 - design/implementation: `## Scope`, `## Final Expected Effect`, `## Chosen Approach`, `## Final Implementation Plan`, `## Approval`
 - bug/mismatch: `## Scope`, `## Expected Behavior`, `## Actual Behavior`, `## Reproduction`
 
-`## Decision Card`, `## User Action`, `## Recommended Default`, `## Option Matrix`, `## Approach Options`, `## Minimum Viable Knowledge`, `## Validation`, `## Validation Card`, `## Diagram`, `## Confidence`, `## Escalation Reason`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and open-question sections should also be updated when the clarification artifact provides them, but the fields above are the runtime hard gates.
+`## Decision Card`, `## User Action`, `## Recommended Default`, `## Option Matrix`, `## Touchpoints`, `## Approach Options`, `## Minimum Viable Knowledge`, `## Visible Acceptance`, `## Visible Side Effect`, `## Diagram Intent`, `## Diagram Acceptance`, `## Expression Side Effect`, `## Validation`, `## Validation Card`, `## Diagram`, `## Confidence`, `## Escalation Reason`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and open-question sections should also be updated when the clarification artifact provides them, but the fields above are the runtime hard gates.
 
 Recovery recipe after failed `promote`:
 
@@ -205,12 +217,64 @@ Option matrix:
 Minimum viable knowledge:
 - <term>: <one sentence, only if needed>
 
+For UI/layout/animation work, use a visible-effect card instead of a generic engineering-plan card:
+
+Recommended: <one sentence describing the visible effect>
+
+Current:
++-- <component/region> h=<current height> --+
+| <current visible problem>                  |
++--------------------------------------------+
+
+Target:
++-- <component/region> h=<target/content> ---+
+| padTop=<value or existing variable>         |
+| <primary content>                           |
+| <secondary/revealed content>                |
+| padBottom=<value or existing variable>      |
++--------------------------------------------+
+<parent or surrounding region effect>
+
+Touchpoints: `<file/module>` and `<component>`; not changing <explicit exclusion>.
+Visible acceptance: <1-2 visible or operational checks>.
+Visible side effect: <expected on-screen side effect, or none>.
+
 Validation card:
-- <3-5 scannable checks>
+- <observable checks; routine tests/build/lint are agent obligations and can be moved to optional detail unless failed>
 
 Diagram:
 - <small Mermaid/ASCII diagram when it reduces ambiguity, otherwise not needed>
 ```
+
+For flowcharts, architecture diagrams, state diagrams, data-flow/API diagrams, or other explanatory diagrams, use a diagram-intent card instead of a generic engineering-plan card:
+
+```text
+Recommended: this diagram will show <core relationship/process/boundary/state/data direction>.
+
+Current / problem:
++-------------+      ?
+| A           | ---> |
++-------------+      |
+  Missing boundary, owner, branch, state, or data direction
+
+Target:
++-------------+   <relation/flow>   +-------------+
+| A: role     |  ---------------->  | B: role     |
++-------------+                     +-------------+
+       |                                   |
+       +-- <owner / branch / state note> --+
+
+Touchpoints: `<module/doc>` and `<diagram area>`; not changing <explicit exclusion>.
+Diagram acceptance: <what the user can identify from the diagram>.
+Expression side effect: <what is emphasized, collapsed, hidden, or intentionally omitted>.
+```
+
+Diagram acceptance cues:
+
+- Flowchart: entry point, decision points, success path, failure/rollback path, terminal states.
+- Architecture diagram: module boundaries, dependency direction, ownership, external systems, trust/security boundary when relevant.
+- State diagram: states, transitions, triggers, guards, terminal/error states.
+- Data-flow/API diagram: source, transform, destination, data owner, protocol/API boundary, trust/security boundary when relevant.
 
 ## Progressive Clarification Routing
 
@@ -248,3 +312,7 @@ Before implementation, provide a low-reading-cost validation summary:
 - Simple diagram when layout, workflow, state, process, or data-flow shape is easier to validate visually than in prose.
 
 For visual or interaction work, the validation card should include the intended motion/layout feel, the rejected anti-outcome, and whether any clipping/masking is a primary effect or only a safety guardrail.
+
+For approval surfaces, prefer `Visible acceptance` and `Visible side effect` labels over broad `Validation` and `Risk` labels. Keep engineering verification in the task record or final report unless it failed or needs user action.
+
+For diagram approval surfaces, prefer `Diagram acceptance` and `Expression side effect` labels over broad `Validation` and `Risk` labels. Keep engineering verification in the task record or final report unless it failed or needs user action.

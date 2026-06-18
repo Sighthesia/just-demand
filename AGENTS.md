@@ -16,6 +16,7 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Even without plugin support, every repo-work turn must start by loading `using-just-demand` when workflow rules might apply.
 - Any request, bug, correction, design/refactor, implementation approval, or Q&A-to-work pivot must then load `socratic-clarification` before intake, execution, or code edits.
 - Treat user approval of an approach as approval to enter intake/formal task flow, not permission to edit inline unless formal execution readiness is satisfied.
+- Post-approval/pre-promotion codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) is also execution work and must wait for a formal task. In no-plugin fallback, this behavior is mandatory: do not read or inspect codebase files outside a formal task context.
 - Before any write tool or execution subagent in no-plugin fallback mode, run `just-demand . list-active` and verify the required task context files exist.
 
 ## Source Of Truth
