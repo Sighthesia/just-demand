@@ -270,21 +270,22 @@ const buildControllerDecision = (text, reminderState) => {
   }
 
   if ((CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) || textLooksLikeCodeInvestigationIntent(text)) && !activeTask) {
+    const workflowEntryNarration = textLooksLikeWorkflowEntryNarration(text)
+    if (workflowEntryNarration) {
+      return {
+        phase: CONTROLLER_PHASE.route,
+        action: CONTROLLER_ACTION.allow,
+        reason_code: "no_op",
+        rewrite: null,
+      }
+    }
+
     if (reminderState.hasUnselectedActiveTasks) {
       return {
         phase: CONTROLLER_PHASE.route,
         action: CONTROLLER_ACTION.remind,
         reason_code: "select_task_hint",
         rewrite: { mode: "append" },
-      }
-    }
-
-    if (textLooksLikeWorkflowEntryNarration(text)) {
-      return {
-        phase: CONTROLLER_PHASE.route,
-        action: CONTROLLER_ACTION.allow,
-        reason_code: "no_op",
-        rewrite: null,
       }
     }
 

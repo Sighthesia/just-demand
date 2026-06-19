@@ -431,6 +431,20 @@ test("controller decision shape exposes phase action reason and rewrite", () => 
   assert.deepEqual(executionDecision.rewrite, { mode: "replace", preserve_original: true })
 })
 
+test("controller decision allows workflow-entry narration before select-task hint when active tasks exist", () => {
+  const decision = buildControllerDecision(
+    "I am creating the workflow entry now: create-intake first, then promote, then list-active.",
+    { activeTask: null, hasUnselectedActiveTasks: true, same_topic_turns: 0, subagent_unavailable_pending: false },
+  )
+
+  assert.deepEqual(decision, {
+    phase: CONTROLLER_PHASE.route,
+    action: CONTROLLER_ACTION.allow,
+    reason_code: "no_op",
+    rewrite: null,
+  })
+})
+
 test("workflow-entry narration detector allows command narration but not inline execution intent", () => {
   assert.equal(textLooksLikeWorkflowEntryNarration("I am creating the workflow entry now: create-intake first, then promote, then list-active."), true)
   assert.equal(textLooksLikeWorkflowEntryNarration("Run just-demand . --help so we can verify the help path."), true)
@@ -589,6 +603,27 @@ test("state allows neutral analysis that mentions code", async () => {
     assert.doesNotMatch(output.parts[0].text, /\[just-demand workflow entry required\]/i)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
   }
+})
+
+test("state allows workflow-entry narration when active tasks exist but no current task is selected", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "active", "task-a"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  writeFileSync(
+    join(root, ".just-demand", "state", "active", "task-a", "task.json"),
+    JSON.stringify({ id: "task-a", title: "Task A", status: "paused" }),
+  )
+
+  const plugin = await stateFactory({ directory: root })
+  const sample = "I am creating the workflow entry now: create-intake first, then promote, then list-active."
+  const output = { parts: [{ type: "text", text: sample }] }
+
+  await plugin["chat.message"]({ sessionID: "workflow-entry-with-unselected-task" }, output)
+
+  assert.equal(output.parts[0].text, sample)
+  assert.doesNotMatch(output.parts[0].text, /select-task/i)
+  assert.doesNotMatch(output.parts[0].text, /workflow entry required/i)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
 })
 
 // ---------------------------------------------------------------------------
