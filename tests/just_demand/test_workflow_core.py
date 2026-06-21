@@ -24,10 +24,12 @@ from workflow_core import (
     list_unfinished_tasks,
     locks_path,
     mark_task,
+    parse_markdown_clarification_fields,
     promote_to_task,
     read_json,
     select_task,
     start_execution,
+    start_verification,
     state_dir,
     tasks_dir,
     task_event_path,
@@ -188,6 +190,214 @@ class WorkflowCoreTests(unittest.TestCase):
             intake_path = root / ".just-demand" / "state" / "intake" / f"{result['intake_id']}.md"
             intake_text = intake_path.read_text(encoding="utf-8")
             self.assertRegex(intake_text, r"## Scope\n\n## Anti-Outcome")
+
+    # -----------------------------------------------------------------------
+    # update_intake_section
+    # -----------------------------------------------------------------------
+
+    def test_update_intake_section_updates_body_in_place(self):
+        from workflow_core import update_intake_section
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_intake(root, "Test intake", "Raw request text", "session-main")
+            intake_id = result["intake_id"]
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
+
+            # Initially Scope is empty
+            initial_text = intake_path.read_text(encoding="utf-8")
+            self.assertIn("## Scope\n\n## Anti-Outcome", initial_text)
+
+            # Update the Scope section
+            up_result = update_intake_section(root, intake_id, "Scope", "Confirmed scope.")
+
+            self.assertTrue(up_result["ok"])
+            self.assertEqual(up_result["intake_id"], intake_id)
+            self.assertEqual(up_result["section"], "Scope")
+            self.assertEqual(up_result["body"], "Confirmed scope.")
+
+            # Verify the file was updated in place
+            updated_text = intake_path.read_text(encoding="utf-8")
+            self.assertIn("## Scope\nConfirmed scope.\n\n", updated_text)
+            # Other sections remain intact
+            self.assertIn("## Raw Request\nRaw request text\n\n", updated_text)
+
+    def test_update_intake_section_preserves_adjoining_sections(self):
+        from workflow_core import update_intake_section
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_intake(root, "Adjoining test", "Raw text", "session-main")
+            intake_id = result["intake_id"]
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
+
+            # Update a middle section
+            update_intake_section(root, intake_id, "Approach Options", "Approach A: direct.")
+
+            text = intake_path.read_text(encoding="utf-8")
+            # Adjoining empty sections should still appear with their headings
+            self.assertIn("## Approach Options\nApproach A: direct.\n\n", text)
+            # The next section heading should still be present
+            self.assertIn("## Chosen Approach\n\n## Final Implementation Plan", text)
+
+    def test_update_intake_section_missing_intake_raises(self):
+        from workflow_core import update_intake_section
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            with self.assertRaises(FileNotFoundError):
+                update_intake_section(root, "nonexistent-intake", "Scope", "value")
+
+    def test_update_intake_section_unknown_section_raises(self):
+        from workflow_core import update_intake_section
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Unknown section test", "Raw", "session-main")
+            intake_id = intake["intake_id"]
+
+            with self.assertRaisesRegex(ValueError, "Unknown intake section"):
+                update_intake_section(root, intake_id, "Nonexistent Section", "value")
+
+    def test_update_intake_section_blank_values_preserved(self):
+        """Updating a section to empty string should clear it (not break format)."""
+        from workflow_core import update_intake_section
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_intake(root, "Blank update test", "Raw", "session-main")
+            intake_id = result["intake_id"]
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
+
+            # Start with a non-empty value, then clear it
+            update_intake_section(root, intake_id, "Validation Card", "Some content")
+            update_intake_section(root, intake_id, "Validation Card", "")
+
+            text = intake_path.read_text(encoding="utf-8")
+            # Section heading should still exist; next section heading should follow
+            self.assertIn("## Validation Card", text)
+            self.assertIn("## Diagram", text)
+            # The section body should not contain the old content
+            self.assertNotIn("Some content", text)
+
+    def test_update_intake_section_supports_multi_line_values(self):
+        from workflow_core import update_intake_section
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_intake(root, "Multi-line", "Raw", "session-main")
+            intake_id = result["intake_id"]
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
+
+            multi_line = "- Step 1\n- Step 2\n- Step 3"
+            update_intake_section(root, intake_id, "Reproduction", multi_line)
+
+            text = intake_path.read_text(encoding="utf-8")
+            self.assertIn("- Step 1", text)
+            self.assertIn("- Step 2", text)
+            # Ensure the section boundary is intact
+            self.assertRegex(text, r"## Reproduction\n- Step 1\n- Step 2\n- Step 3\n\n## Scope")
+
+    def test_promotion_observes_updated_intake_sections(self):
+        """After update_intake_section, promote_to_task should read the updated values."""
+        from workflow_core import update_intake_section
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(
+                root,
+                "Updated intake",
+                "Use updated section values",
+                "session-main",
+            )
+            intake_id = intake["intake_id"]
+
+            # Fill required sections via update_intake_section
+            update_intake_section(root, intake_id, "Scope", "Updated scope for promotion check.")
+            update_intake_section(root, intake_id, "Final Expected Effect", "Updated: user sees the result.")
+            update_intake_section(root, intake_id, "Chosen Approach", "Updated approach.")
+            update_intake_section(root, intake_id, "Final Implementation Plan", "1. Updated\n2. Test")
+            update_intake_section(root, intake_id, "Approval", "Updated approval.")
+
+            # Promote and verify updated values appear in task clarification
+            promoted = promote_to_task(
+                root,
+                intake_id=intake_id,
+                title="Updated intake",
+                goal="Verify updated sections flow through promotion",
+                task_type="design",
+                acceptance_criteria=["Updated sections appear in task data."],
+            )
+
+            task = read_json(
+                root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json"
+            )
+            self.assertEqual(task["clarification"]["scope"], "Updated scope for promotion check.")
+            self.assertEqual(task["clarification"]["final_expected_effect"], "Updated: user sees the result.")
+            self.assertEqual(task["clarification"]["chosen_approach"], "Updated approach.")
+            self.assertEqual(task["clarification"]["final_implementation_plan"], "1. Updated\n2. Test")
+            self.assertEqual(task["clarification"]["approval"], "Updated approval.")
+
+    def test_cli_update_intake_section_success(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI section update", "Raw", "session-main")
+            intake_id = intake["intake_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-intake-section", intake_id, "Scope", "CLI-updated scope."],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["intake_id"], intake_id)
+            self.assertEqual(payload["section"], "Scope")
+            self.assertEqual(payload["body"], "CLI-updated scope.")
+
+            # Verify file
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
+            text = intake_path.read_text(encoding="utf-8")
+            self.assertIn("## Scope\nCLI-updated scope.\n\n", text)
+
+    def test_cli_update_intake_section_missing_intake(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-intake-section", "nonexistent-intake", "Scope", "value"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Intake not found", payload["message"])
+
+    def test_cli_update_intake_section_unknown_section(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Unknown CLI section", "Raw", "session-main")
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-intake-section", intake["intake_id"], "Bogus Section", "value"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Unknown intake section", payload["message"])
 
 
     def test_promote_intake_to_task_creates_formal_package(self):
@@ -1835,6 +2045,1320 @@ class WorkflowCoreTests(unittest.TestCase):
             )
             # No project state, so no hint should be emitted
             self.assertNotIn("Project invocation:", result.stderr)
+
+    # -----------------------------------------------------------------------
+    # task_is_ready_for_execution
+    # -----------------------------------------------------------------------
+
+    def test_task_is_ready_for_execution_ready_design(self):
+        from workflow_core import task_is_ready_for_execution
+
+        task = {
+            "type": "design",
+            "clarification": {
+                "scope": "Settings flow only.",
+                "blocking_questions": [],
+                "final_expected_effect": "User can save settings.",
+                "chosen_approach": "Approach A.",
+                "final_implementation_plan": "1. Add handler",
+                "approval": "Approved.",
+            },
+        }
+        self.assertTrue(task_is_ready_for_execution(task))
+
+    def test_task_is_ready_for_execution_missing_scope(self):
+        from workflow_core import task_is_ready_for_execution
+
+        task = {
+            "type": "design",
+            "clarification": {
+                "scope": "",
+                "blocking_questions": [],
+                "final_expected_effect": "User can save settings.",
+                "chosen_approach": "Approach A.",
+                "final_implementation_plan": "1. Add handler",
+                "approval": "Approved.",
+            },
+        }
+        self.assertFalse(task_is_ready_for_execution(task))
+
+    def test_task_is_ready_for_execution_blocking_questions(self):
+        from workflow_core import task_is_ready_for_execution
+
+        task = {
+            "type": "design",
+            "clarification": {
+                "scope": "Settings flow only.",
+                "blocking_questions": ["Should this affect the undo stack?"],
+                "final_expected_effect": "User can save settings.",
+                "chosen_approach": "Approach A.",
+                "final_implementation_plan": "1. Add handler",
+                "approval": "Approved.",
+            },
+        }
+        self.assertFalse(task_is_ready_for_execution(task))
+
+    def test_task_is_ready_for_execution_missing_design_fields(self):
+        from workflow_core import task_is_ready_for_execution
+
+        task = {
+            "type": "design",
+            "clarification": {
+                "scope": "Settings flow only.",
+                "blocking_questions": [],
+                "final_expected_effect": "",
+                "chosen_approach": "",
+                "final_implementation_plan": "",
+                "approval": "",
+            },
+        }
+        self.assertFalse(task_is_ready_for_execution(task))
+
+    def test_task_is_ready_for_execution_bugfix_needs_expected_actual_reproduction(self):
+        from workflow_core import task_is_ready_for_execution
+
+        task = {
+            "type": "bugfix",
+            "clarification": {
+                "scope": "Save flow.",
+                "blocking_questions": [],
+                "expected_behavior": "Save succeeds.",
+                "actual_behavior": "Save fails.",
+                "reproduction": "1. Click save.",
+            },
+        }
+        self.assertTrue(task_is_ready_for_execution(task))
+
+        task["clarification"]["expected_behavior"] = ""
+        self.assertFalse(task_is_ready_for_execution(task))
+
+    # -----------------------------------------------------------------------
+    # get_missing_execution_fields
+    # -----------------------------------------------------------------------
+
+    def test_get_missing_execution_fields_scope_only(self):
+        from workflow_core import get_missing_execution_fields
+
+        task = {
+            "type": "design",
+            "clarification": {
+                "scope": "",
+                "blocking_questions": [],
+                "final_expected_effect": "Works.",
+                "chosen_approach": "A.",
+                "final_implementation_plan": "1. Do it",
+                "approval": "Approved.",
+            },
+        }
+        self.assertEqual(get_missing_execution_fields(task), ["Scope"])
+
+    def test_get_missing_execution_fields_all_design_fields(self):
+        from workflow_core import get_missing_execution_fields
+
+        task = {
+            "type": "design",
+            "clarification": {
+                "scope": "",
+                "blocking_questions": [],
+                "final_expected_effect": "",
+                "chosen_approach": "",
+                "final_implementation_plan": "",
+                "approval": "",
+            },
+        }
+        missing = get_missing_execution_fields(task)
+        self.assertIn("Scope", missing)
+        self.assertIn("Final Expected Effect", missing)
+        self.assertIn("Chosen Approach", missing)
+        self.assertIn("Final Implementation Plan", missing)
+        self.assertIn("Approval", missing)
+
+    def test_get_missing_execution_fields_blocking_questions(self):
+        from workflow_core import get_missing_execution_fields
+
+        task = {
+            "type": "bugfix",
+            "clarification": {
+                "scope": "Save flow.",
+                "blocking_questions": ["Should this affect undo?"],
+                "expected_behavior": "Save works.",
+                "actual_behavior": "Save fails.",
+                "reproduction": "1. Click save.",
+            },
+        }
+        self.assertIn("Blocking Questions", get_missing_execution_fields(task))
+
+    def test_get_missing_execution_fields_returns_empty_for_ready_bugfix(self):
+        from workflow_core import get_missing_execution_fields
+
+        task = {
+            "type": "bugfix",
+            "clarification": {
+                "scope": "Save flow.",
+                "blocking_questions": [],
+                "expected_behavior": "Save works.",
+                "actual_behavior": "Save fails.",
+                "reproduction": "1. Click save.",
+            },
+        }
+        self.assertEqual(get_missing_execution_fields(task), [])
+
+    def test_get_missing_execution_fields_returns_empty_for_ready_design(self):
+        from workflow_core import get_missing_execution_fields
+
+        task = {
+            "type": "design",
+            "clarification": {
+                "scope": "Settings.",
+                "blocking_questions": [],
+                "final_expected_effect": "User can save.",
+                "chosen_approach": "A.",
+                "final_implementation_plan": "1. Add handler.",
+                "approval": "Approved.",
+            },
+        }
+        self.assertEqual(get_missing_execution_fields(task), [])
+
+    # -----------------------------------------------------------------------
+    # show_task_readiness
+    # -----------------------------------------------------------------------
+
+    def test_show_task_readiness_ready_design(self):
+        from workflow_core import show_task_readiness
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Readiness ready", "Ready task", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Readiness ready", "Ready task", "design", ["Ready"])
+            task_id = promoted["task_id"]
+
+            result = show_task_readiness(root, task_id)
+            self.assertEqual(result["task_id"], task_id)
+            self.assertEqual(result["status"], "planning")
+            self.assertTrue(result["ready"])
+            self.assertEqual(result["missing"], [])
+            self.assertTrue(result["writes_allowed"])
+            self.assertIn("execution-ready", result["recommended_recovery"])
+
+    def test_show_task_readiness_not_ready_missing_fields(self):
+        from workflow_core import show_task_readiness, write_json_atomic
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Not ready", "Not ready task", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Not ready", "Not ready", "implementation", ["Not ready"])
+            task_id = promoted["task_id"]
+
+            # Clear chosen_approach to make the task not-ready while keeping it active
+            task_path = tasks_dir(root) / "active" / task_id / "task.json"
+            task = read_json(task_path)
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_path, task)
+
+            result = show_task_readiness(root, task_id)
+            self.assertEqual(result["task_id"], task_id)
+            self.assertFalse(result["ready"])
+            self.assertIn("Chosen Approach", result["missing"])
+            self.assertTrue(result["writes_allowed"])
+            self.assertIn("update-clarification", result["recommended_recovery"])
+
+    def test_show_task_readiness_writes_not_allowed_in_paused(self):
+        from workflow_core import mark_task, show_task_readiness
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Paused readiness", "Paused task", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Paused readiness", "Paused task", "design", ["Paused"])
+            task_id = promoted["task_id"]
+
+            mark_task(root, task_id, "paused")
+            result = show_task_readiness(root, task_id)
+            self.assertEqual(result["status"], "paused")
+            self.assertFalse(result["writes_allowed"])
+            self.assertIn("change status", result["recommended_recovery"])
+
+    def test_show_task_readiness_writes_not_allowed_in_blocked(self):
+        from workflow_core import mark_task, show_task_readiness
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Blocked readiness", "Blocked task", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Blocked readiness", "Blocked task", "design", ["Blocked"])
+            task_id = promoted["task_id"]
+
+            mark_task(root, task_id, "blocked")
+            result = show_task_readiness(root, task_id)
+            self.assertEqual(result["status"], "blocked")
+            self.assertFalse(result["writes_allowed"])
+            self.assertIn("change status", result["recommended_recovery"])
+
+    def test_show_task_readiness_writes_not_allowed_in_done(self):
+        from workflow_core import complete_verification, create_validation_revision, show_task_readiness, start_execution
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Done readiness", "Done task", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Done readiness", "Done task", "design", ["Done"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Done readiness.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-implement"])
+            complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            result = show_task_readiness(root, task_id)
+            self.assertEqual(result["status"], "done")
+            self.assertFalse(result["writes_allowed"])
+            self.assertIn("complete", result["recommended_recovery"])
+
+    def test_show_task_readiness_missing_task(self):
+        from workflow_core import show_task_readiness
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+
+            with self.assertRaises(FileNotFoundError):
+                show_task_readiness(root, "nonexistent-task")
+
+    def test_show_task_readiness_cli_ready(self):
+        import subprocess
+
+        from workflow_core import promote_to_task
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI readiness", "CLI ready", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "CLI readiness", "CLI ready", "design", ["CLI ready"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "show-readiness", task_id],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["task_id"], task_id)
+            self.assertTrue(payload["ready"])
+            self.assertEqual(payload["missing"], [])
+            self.assertTrue(payload["writes_allowed"])
+            self.assertIn("task_id", payload)
+            self.assertIn("status", payload)
+            self.assertIn("write_allowed_statuses", payload)
+
+    def test_show_task_readiness_cli_missing_task(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "show-readiness", "nonexistent-task"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("not found", payload["message"])
+
+    # -----------------------------------------------------------------------
+    # update_task_clarification
+    # -----------------------------------------------------------------------
+
+    def test_update_task_clarification_string_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Clarify update", "Test update", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Clarify update", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["scope"], "Confirmed implementation scope.")
+
+            from workflow_core import update_task_clarification
+
+            result = update_task_clarification(root, task_id, {"scope": "Updated scope."})
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["task_id"], task_id)
+            self.assertTrue(result["ready"])
+
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["scope"], "Updated scope.")
+
+    def test_update_task_clarification_fills_missing_fields_and_becomes_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Fill gaps", "Test fill gaps", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            # Fill Final Expected Effect
+            for heading, body in [
+                ("Final Expected Effect", "User sees the expected result."),
+                ("Chosen Approach", "Approach A: direct."),
+                ("Final Implementation Plan", "1. Implement\n2. Verify"),
+                ("Approval", "Approved."),
+            ]:
+                replace_intake_section(intake_path, heading, body)
+
+            promoted = promote_to_task(root, intake["intake_id"], "Fill gaps", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Now strip a critical field to simulate incomplete task
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            from workflow_core import update_task_clarification, task_is_ready_for_execution
+
+            self.assertFalse(task_is_ready_for_execution(task))
+
+            result = update_task_clarification(root, task_id, {"chosen_approach": "Approach A: direct."})
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["ready"])
+            self.assertEqual(result["missing"], [])
+
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["chosen_approach"], "Approach A: direct.")
+
+    def test_update_task_clarification_invalid_field_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Invalid field", "Test invalid", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Invalid field", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            from workflow_core import update_task_clarification
+
+            with self.assertRaisesRegex(ValueError, "Unknown clarification field"):
+                update_task_clarification(root, task_id, {"nonexistent_field": "value"})
+
+    def test_update_task_clarification_regenerates_open_questions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Open questions", "Test OQ", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Open questions", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            task_dir = tasks_dir(root) / "active" / task_id
+            oq_path = task_dir / "open_questions.md"
+            # Should start empty (no non_blocking_questions)
+            self.assertNotIn("Should this feature", oq_path.read_text(encoding="utf-8"))
+
+            from workflow_core import update_task_clarification
+
+            update_task_clarification(root, task_id, {"non_blocking_questions": '["Should this feature be optional?"]'})
+            oq_content = oq_path.read_text(encoding="utf-8")
+            self.assertIn("Should this feature be optional?", oq_content)
+            self.assertIn("Remaining Open Questions", oq_content)
+
+    def test_update_task_clarification_nonexistent_task_raises(self):
+        from workflow_core import update_task_clarification
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            with self.assertRaises(FileNotFoundError):
+                update_task_clarification(root, "nonexistent-task", {"scope": "Test"})
+
+    def test_update_task_clarification_blocked_on_done_status(self):
+        from workflow_core import complete_verification, update_task_clarification
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Done task", "Test done", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Done task", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            from workflow_core import start_execution
+
+            start_execution(root, task_id, ["just-demand-implement"])
+            complete_verification(root, task_id, "passed", "Done", auto_archive=False)
+
+            with self.assertRaises(RuntimeError):
+                update_task_clarification(root, task_id, {"scope": "Updated."})
+
+    # -----------------------------------------------------------------------
+    # update-clarification CLI
+    # -----------------------------------------------------------------------
+
+    def test_cli_update_clarification_success(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI update", "Test CLI update", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "CLI update", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Strip chosen_approach to make task non-ready
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--field", "chosen_approach=Approach A: direct."],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["ready"])
+            self.assertEqual(payload["missing"], [])
+
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["chosen_approach"], "Approach A: direct.")
+
+    def test_cli_update_clarification_multiple_fields(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI multi", "Test multi CLI update", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            for heading, body in [
+                ("Final Expected Effect", "User sees result."),
+                ("Chosen Approach", "Approach A: direct."),
+                ("Final Implementation Plan", "1. Implement\n2. Verify"),
+                ("Approval", "Approved."),
+            ]:
+                replace_intake_section(intake_path, heading, body)
+            promoted = promote_to_task(root, intake["intake_id"], "CLI multi", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Strip all design fields
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["final_expected_effect"] = ""
+            task["clarification"]["chosen_approach"] = ""
+            task["clarification"]["final_implementation_plan"] = ""
+            task["clarification"]["approval"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [
+                    sys.executable, str(script), str(root), "update-clarification", task_id,
+                    "--field", "final_expected_effect=User sees the result.",
+                    "--field", "chosen_approach=Approach A.",
+                    "--field", "final_implementation_plan=1. Do it.",
+                    "--field", "approval=Approved.",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["ready"])
+
+    def test_cli_update_clarification_unknown_field_rejected(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI unknown", "Test unknown", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "CLI unknown", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--field", "bogus_field=value"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Unknown clarification field", payload["message"])
+
+    def test_cli_update_clarification_invalid_field_format(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI format", "Test format", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "CLI format", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--field", "no_equals"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Invalid --field format", result.stdout)
+
+    # -----------------------------------------------------------------------
+    # update-clarification --from-file
+    # -----------------------------------------------------------------------
+
+    def test_cli_update_clarification_from_file_updates_fields(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "From file", "Test from file", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            for heading, body in [
+                ("Final Expected Effect", "User sees result."),
+                ("Chosen Approach", "Approach A: direct."),
+                ("Final Implementation Plan", "1. Implement\n2. Verify"),
+                ("Approval", "Approved."),
+            ]:
+                replace_intake_section(intake_path, heading, body)
+            promoted = promote_to_task(root, intake["intake_id"], "From file", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Strip fields to make task non-ready
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["final_expected_effect"] = ""
+            task["clarification"]["chosen_approach"] = ""
+            task["clarification"]["final_implementation_plan"] = ""
+            task["clarification"]["approval"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            # Write a JSON file with all fields
+            clar_file = root / "clar-update.json"
+            clar_file.write_text(json.dumps({
+                "final_expected_effect": "User sees the feature.",
+                "chosen_approach": "Approach A: direct impl.",
+                "final_implementation_plan": "1. Do it.",
+                "approval": "Approved.",
+            }), encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", str(clar_file)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["ready"])
+            self.assertEqual(payload["missing"], [])
+
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["final_expected_effect"], "User sees the feature.")
+            self.assertEqual(task["clarification"]["chosen_approach"], "Approach A: direct impl.")
+
+    def test_cli_update_clarification_from_file_with_list_fields(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "From file list", "Test from file list", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "From file list", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Strip chosen_approach to make non-ready; add blocking questions via file
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            clar_file = root / "clar-list.json"
+            clar_file.write_text(json.dumps({
+                "chosen_approach": "Approach A: direct.",
+                "blocking_questions": ["Should this affect undo?"],
+            }), encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", str(clar_file)],
+                text=True,
+                capture_output=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertFalse(payload["ready"])
+            self.assertIn("Blocking Questions", payload["missing"])
+
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["blocking_questions"], ["Should this affect undo?"])
+
+    def test_cli_update_clarification_from_file_and_field_override(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "From file override", "Test override", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            for heading, body in [
+                ("Final Expected Effect", "User sees result."),
+                ("Chosen Approach", "Approach A: direct."),
+                ("Final Implementation Plan", "1. Implement\n2. Verify"),
+                ("Approval", "Approved."),
+            ]:
+                replace_intake_section(intake_path, heading, body)
+            promoted = promote_to_task(root, intake["intake_id"], "From file override", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Strip only chosen_approach to test override — leave other required fields intact
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            # File sets a value (and fills other required fields for readiness),
+            # --field overrides the file value for the same key
+            clar_file = root / "clar-override.json"
+            clar_file.write_text(json.dumps({
+                "chosen_approach": "Approach from file.",
+                "scope": "Scope from file.",
+            }), encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [
+                    sys.executable, str(script), str(root), "update-clarification", task_id,
+                    "--from-file", str(clar_file),
+                    "--field", "chosen_approach=Approach from CLI override.",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["ready"])
+
+            task = read_json(task_dir / "task.json")
+            # --field wins over --from-file for same key
+            self.assertEqual(task["clarification"]["chosen_approach"], "Approach from CLI override.")
+            # --from-file sets values that --field doesn't touch
+            self.assertEqual(task["clarification"]["scope"], "Scope from file.")
+
+    def test_cli_update_clarification_from_file_missing_path(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Missing file", "Test missing", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Missing file", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", "/nonexistent/path.json"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Clarification file not found", payload["message"])
+
+    def test_cli_update_clarification_from_file_invalid_json(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Invalid json", "Test invalid json", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Invalid json", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            clar_file = root / "bad.json"
+            clar_file.write_text("this is not json", encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", str(clar_file)],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("not valid JSON", payload["message"])
+
+    def test_cli_update_clarification_from_file_non_object(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Non object", "Test non object", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Non object", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            clar_file = root / "array.json"
+            clar_file.write_text('["this", "is", "an", "array"]', encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", str(clar_file)],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("must contain a JSON object", payload["message"])
+
+    def test_cli_update_clarification_from_file_rejects_unknown_fields(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Unknown field", "Test unknown field", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Unknown field", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            clar_file = root / "unknown.json"
+            clar_file.write_text(json.dumps({
+                "scope": "Updated scope.",
+                "nonexistent_field": "should be rejected",
+            }), encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", str(clar_file)],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Unknown clarification field", payload["message"])
+
+    # -----------------------------------------------------------------------
+    # update-clarification --from-file markdown section import
+    # -----------------------------------------------------------------------
+
+    def test_parse_markdown_clarification_fields_basic(self):
+        """parse_markdown_clarification_fields maps recognised headings."""
+        text = """\
+## Scope
+Test scope content
+
+## Chosen Approach
+Approach B: markdown import.
+
+## Final Expected Effect
+User sees the feature.
+"""
+        fields = parse_markdown_clarification_fields(text)
+        self.assertEqual(fields["scope"], "Test scope content")
+        self.assertEqual(fields["chosen_approach"], "Approach B: markdown import.")
+        self.assertEqual(fields["final_expected_effect"], "User sees the feature.")
+
+    def test_parse_markdown_clarification_fields_with_lists(self):
+        """Blocking/Non-Blocking Questions headings become list fields."""
+        text = """\
+## Scope
+Works with lists.
+
+## Blocking Questions
+- What about undo?
+- Does it handle empty state?
+
+## Non-Blocking Questions
+- Could we improve perf later?
+"""
+        fields = parse_markdown_clarification_fields(text)
+        self.assertEqual(fields["scope"], "Works with lists.")
+        self.assertEqual(fields["blocking_questions"], ["What about undo?", "Does it handle empty state?"])
+        self.assertEqual(fields["non_blocking_questions"], ["Could we improve perf later?"])
+
+    def test_parse_markdown_clarification_fields_empty(self):
+        """Empty text raises RuntimeError."""
+        with self.assertRaises(RuntimeError) as ctx:
+            parse_markdown_clarification_fields("")
+        self.assertIn("No markdown sections", str(ctx.exception))
+
+    def test_parse_markdown_clarification_fields_no_matches(self):
+        """Text with ## headings but none recognised raises RuntimeError."""
+        text = """\
+## Totally Unknown Heading
+Some body text.
+
+## Another Bogus Section
+More text.
+"""
+        with self.assertRaises(RuntimeError) as ctx:
+            parse_markdown_clarification_fields(text)
+        self.assertIn("No recognised clarification headings", str(ctx.exception))
+
+    def test_parse_markdown_clarification_fields_expected_outcome_alias(self):
+        """Expected Outcome maps to expected_behavior (same as Expected Behavior)."""
+        text = """\
+## Scope
+Alias test.
+
+## Expected Outcome
+The system should do X.
+"""
+        fields = parse_markdown_clarification_fields(text)
+        self.assertEqual(fields["expected_behavior"], "The system should do X.")
+
+    def test_parse_markdown_clarification_fields_open_questions_alias(self):
+        """Open Questions maps to non_blocking_questions (same as Non-Blocking Questions)."""
+        text = """\
+## Scope
+Alias test.
+
+## Open Questions
+- Question one?
+- Question two?
+"""
+        fields = parse_markdown_clarification_fields(text)
+        self.assertEqual(fields["non_blocking_questions"], ["Question one?", "Question two?"])
+
+    def test_cli_update_clarification_from_markdown_file(self):
+        """--from-file with a ##-section markdown file works."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "MD file", "Test from markdown", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            for heading, body in [
+                ("Final Expected Effect", "User sees result."),
+                ("Chosen Approach", "Approach A."),
+                ("Final Implementation Plan", "1. Impl"),
+                ("Approval", "Approved."),
+            ]:
+                replace_intake_section(intake_path, heading, body)
+            promoted = promote_to_task(root, intake["intake_id"], "MD file", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Strip fields to make non-ready
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["final_expected_effect"] = ""
+            task["clarification"]["chosen_approach"] = ""
+            task["clarification"]["final_implementation_plan"] = ""
+            task["clarification"]["approval"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            # Write a markdown section file
+            md_file = root / "clar-update.md"
+            md_file.write_text("""\
+## Scope
+Updated scope from markdown.
+
+## Final Expected Effect
+User sees the shiny new feature.
+
+## Chosen Approach
+Approach from markdown file.
+
+## Final Implementation Plan
+1. Write code
+2. Test
+
+## Approval
+Approved by review.
+""", encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", str(md_file)],
+                text=True, capture_output=True, check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["ready"])
+            self.assertEqual(payload["missing"], [])
+            reloaded = read_json(task_dir / "task.json")
+            self.assertEqual(reloaded["clarification"]["scope"], "Updated scope from markdown.")
+            self.assertEqual(reloaded["clarification"]["final_expected_effect"], "User sees the shiny new feature.")
+
+    def test_cli_update_clarification_from_markdown_with_list_fields(self):
+        """Markdown file with Blocking Questions heading works."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "MD lists", "Test md lists", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "MD lists", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            md_file = root / "clar-list.md"
+            md_file.write_text("""\
+## Chosen Approach
+Approach B: markdown.
+
+## Blocking Questions
+- Should this affect undo?
+- Does it handle race conditions?
+""", encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", str(md_file)],
+                text=True, capture_output=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            # Blocking questions present -> not ready
+            self.assertFalse(payload["ready"])
+            self.assertIn("Blocking Questions", payload["missing"])
+            reloaded = read_json(task_dir / "task.json")
+            self.assertEqual(reloaded["clarification"]["blocking_questions"],
+                             ["Should this affect undo?", "Does it handle race conditions?"])
+
+    def test_cli_update_clarification_from_markdown_unknown_headings_ignored(self):
+        """Unknown headings in markdown are silently ignored (not rejected)."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "MD unknown", "Test unknown headings", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            for heading, body in [
+                ("Final Expected Effect", "User sees result."),
+                ("Chosen Approach", "Approach A."),
+                ("Final Implementation Plan", "1. Impl"),
+                ("Approval", "Approved."),
+            ]:
+                replace_intake_section(intake_path, heading, body)
+            promoted = promote_to_task(root, intake["intake_id"], "MD unknown", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Strip a field
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            # Write markdown with a mix of recognised and unknown headings
+            md_file = root / "clar-unknown.md"
+            md_file.write_text("""\
+## Chosen Approach
+Approach from file.
+
+## Random Notes
+This is an unknown heading body.
+
+## User Preference
+Some preference text.
+""", encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--from-file", str(md_file)],
+                text=True, capture_output=True, check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            reloaded = read_json(task_dir / "task.json")
+            self.assertEqual(reloaded["clarification"]["chosen_approach"], "Approach from file.")
+            # Unknown headings did not create fields
+            self.assertNotIn("Random Notes", reloaded["clarification"])
+
+    def test_cli_update_clarification_from_markdown_then_field_override(self):
+        """--field overrides markdown file values for same key."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "MD override", "Test md override", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            for heading, body in [
+                ("Final Expected Effect", "User sees result."),
+                ("Chosen Approach", "Approach A."),
+                ("Final Implementation Plan", "1. Impl"),
+                ("Approval", "Approved."),
+            ]:
+                replace_intake_section(intake_path, heading, body)
+            promoted = promote_to_task(root, intake["intake_id"], "MD override", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            # Strip chosen_approach only
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            md_file = root / "clar-override.md"
+            md_file.write_text("""\
+## Scope
+Scope from markdown.
+
+## Chosen Approach
+Approach from markdown (should be overridden).
+""", encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [
+                    sys.executable, str(script), str(root), "update-clarification", task_id,
+                    "--from-file", str(md_file),
+                    "--field", "chosen_approach=Approach from CLI wins.",
+                ],
+                text=True, capture_output=True, check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["ready"])
+            reloaded = read_json(task_dir / "task.json")
+            # --field wins
+            self.assertEqual(reloaded["clarification"]["chosen_approach"], "Approach from CLI wins.")
+            # --from-file values preserved
+            self.assertEqual(reloaded["clarification"]["scope"], "Scope from markdown.")
+
+    # -----------------------------------------------------------------------
+    # start_verification
+    # -----------------------------------------------------------------------
+
+    def test_start_verification_from_executing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "SV exec", "Start verification", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "SV exec", "Start verification", "design", ["SV works"])
+            task_id = promoted["task_id"]
+
+            start_execution(root, task_id, ["just-demand-implement"])
+            result = start_verification(root, task_id)
+
+            self.assertEqual(result["status"], "verifying")
+            task = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertEqual(task["status"], "verifying")
+
+    def test_start_verification_from_tweaking(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "SV tweak", "Start verification", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "SV tweak", "Start verification", "design", ["SV tweak works"])
+            task_id = promoted["task_id"]
+
+            mark_task(root, task_id, "tweaking")
+            result = start_verification(root, task_id)
+
+            self.assertEqual(result["status"], "verifying")
+
+    def test_start_verification_from_debugging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "SV debug", "Start verification", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "SV debug", "Start verification", "design", ["SV debug works"])
+            task_id = promoted["task_id"]
+
+            mark_task(root, task_id, "debugging")
+            result = start_verification(root, task_id)
+
+            self.assertEqual(result["status"], "verifying")
+
+    def test_start_verification_blocked_from_planning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "SV plan", "Start verification", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "SV plan", "Start verification", "design", ["SV plan blocked"])
+            task_id = promoted["task_id"]
+
+            with self.assertRaisesRegex(RuntimeError, "Cannot start verification"):
+                start_verification(root, task_id)
+
+    def test_start_verification_blocked_from_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "SV done", "Start verification", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "SV done", "Start verification", "design", ["SV done blocked"])
+            task_id = promoted["task_id"]
+
+            start_execution(root, task_id, ["just-demand-implement"])
+            complete_verification(root, task_id, "passed", "Done", auto_archive=False)
+
+            with self.assertRaisesRegex(RuntimeError, "Cannot start verification"):
+                start_verification(root, task_id)
+
+    def test_start_verification_cli_success(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "SV CLI", "Start verification via CLI", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "SV CLI", "Start verification via CLI", "design", ["SV CLI works"])
+            task_id = promoted["task_id"]
+
+            start_execution(root, task_id, ["just-demand-implement"])
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "start-verification", task_id],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["status"], "verifying")
+
+    def test_start_verification_cli_blocked_from_planning(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "SV CLI plan", "Start verification via CLI", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "SV CLI plan", "Start verification via CLI", "design", ["SV CLI plan blocked"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "start-verification", task_id],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Cannot start verification", payload["message"])
+
+    # -----------------------------------------------------------------------
+    # intake_readiness_errors: recommends update-intake-section
+    # -----------------------------------------------------------------------
+
+    def test_intake_readiness_errors_recommends_update_intake_section(self):
+        """intake_readiness_errors must recommend update-intake-section for empty fields."""
+        from workflow_core import intake_readiness_errors
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Readiness recommendation", "Test recommendation", "session-main")
+
+            # Design intake with no fields filled
+            errors = intake_readiness_errors(root, intake["intake_id"], "design")
+            self.assertGreater(len(errors), 0)
+
+            # Every missing-field error should recommend update-intake-section
+            for error in errors:
+                with self.subTest(error=error):
+                    self.assertIn("update-intake-section", error,
+                                  f"Error should recommend update-intake-section: {error}")
+
+    def test_intake_readiness_bug_errors_recommend_update_intake_section(self):
+        """Bug-related readiness errors must also recommend update-intake-section."""
+        from workflow_core import intake_readiness_errors
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Bug readiness", "Bug: broken save", "session-main")
+
+            # Bug intake with no bug fields filled
+            errors = intake_readiness_errors(root, intake["intake_id"], "bugfix")
+            self.assertGreater(len(errors), 0)
+
+            # Expected Behavior, Actual Behavior, Reproduction should all recommend update-intake-section
+            for error in errors:
+                with self.subTest(error=error):
+                    if "is required" in error:
+                        self.assertIn("update-intake-section", error,
+                                      f"Bug error should recommend update-intake-section: {error}")
+
+    def test_intake_readiness_promote_error_shows_recommendation(self):
+        """The RuntimeError from promote_to_task should include update-intake-section."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Promote recommendation", "Test promote recommendation", "session-main")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "promote", intake["intake_id"],
+                 "Promote recommendation", "Test promote", "--type", "design", "--acceptance", "Works"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            # The error message must recommend update-intake-section
+            self.assertIn("update-intake-section", payload["message"])
+
+    def test_update_intake_section_fallback_still_succeeds(self):
+        """Direct patch/edit of intake file (the fallback) must still succeed."""
+        from workflow_core import update_intake_section
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Fallback intake", "Test fallback", "session-main")
+            intake_id = intake["intake_id"]
+
+            # Use the preferred command path — this must succeed
+            result = update_intake_section(root, intake_id, "Scope", "Updated via update-intake-section command.")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["body"], "Updated via update-intake-section command.")
+
+            # Verify the intake file was updated
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
+            text = intake_path.read_text(encoding="utf-8")
+            self.assertIn("Updated via update-intake-section command.", text)
 
 
 if __name__ == "__main__":

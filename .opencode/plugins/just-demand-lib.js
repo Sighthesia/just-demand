@@ -37,6 +37,17 @@ const WRITE_TOOL_RULES = Object.freeze([
   },
 ])
 
+const INTAKE_PATH_MARKER = ".just-demand/state/intake/"
+
+const WRITE_ALLOWED_STATUSES = new Set([
+  "planning",
+  "executing",
+  "verifying",
+  "changes_requested",
+  "tweaking",
+  "debugging",
+])
+
 const BASH_WRITE_PATTERNS = [
   /(^|[;&|])\s*(?:mkdir|touch|rm|mv|cp|ln|install|chmod|chown)\b/i,
   /(^|[;&|])\s*git\s+(?:add|commit|amend|reset|clean|stash|checkout|switch|merge|rebase)\b/i,
@@ -76,7 +87,19 @@ const defaultReminderState = () => ({
   same_topic_turns: 0,
   last_reminder_type: null,
   subagent_unavailable_pending: false,
+  intake_fallback_warning_shown: false,
 })
+
+const _intakeFallbackRecentlyUsed = new Map()
+
+export const consumeIntakeFallbackPending = (directory) => {
+  const key = workflowRoot(directory)
+  if (_intakeFallbackRecentlyUsed.has(key)) {
+    _intakeFallbackRecentlyUsed.delete(key)
+    return true
+  }
+  return false
+}
 
 const reminderStateKey = (directory, sessionID) => `${workflowRoot(directory)}::${sessionID || "main"}`
 
@@ -228,6 +251,48 @@ export const hasUnquotedShellRedirection = (command) => {
   return false
 }
 
+export const isIntakeFilePath = (filePath) => {
+  if (!filePath || typeof filePath !== "string") return false
+  const normalized = filePath.replace(/\\/g, "/")
+  return normalized.includes(INTAKE_PATH_MARKER)
+}
+
+export const getApplyPatchTargetPath = (args) => {
+  const patchText = String(args?.patchText || args?.patches || args?.diff || "").trim()
+  if (!patchText) return null
+
+  // Standard format: "*** Update File: path/to/file"
+  const standardMatch = patchText.match(/\*\*\*\s*Update\s+File:\s+(.+?)(?:\n|$)/)
+  if (standardMatch) return standardMatch[1].trim()
+
+  // Unified diff format: "--- a/path/to/file"
+  const unifiedMatch = patchText.match(/^---\s+(?:a\/)?(.+?)$/m)
+  if (unifiedMatch) return unifiedMatch[1].trim()
+
+  return null
+}
+
+export const looksLikeIntakeOperation = (toolName, args) => {
+  if (!args || typeof args !== "object") return false
+
+  if (toolName === "apply_patch") {
+    const targetPath = getApplyPatchTargetPath(args)
+    return isIntakeFilePath(targetPath)
+  }
+
+  if (toolName === "bash") {
+    const command = String(args?.command || "").trim()
+    if (!command) return false
+    // Check for shell redirection to an intake file
+    const redirectMatch = command.match(/[>]\s*(['"]?)((?:\.\.\/)*\.just-demand\/state\/intake\/[^'">\s]+)\1/)
+    if (redirectMatch) return isIntakeFilePath(redirectMatch[2])
+    // Broader match: command references intake path directly
+    if (command.includes(INTAKE_PATH_MARKER)) return true
+  }
+
+  return false
+}
+
 export const getWriteToolRule = (toolName, args) => WRITE_TOOL_RULES.find((rule) => rule.match(toolName, args)) || null
 
 export const enforceExecutionGate = (directory, toolName, args, logPrefix = "state.tool.before") => {
@@ -244,6 +309,19 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
     return null
   }
 
+  // Intake file operations bypass the execution gate entirely as a fallback path.
+  // The preferred intake editing path is `update-intake-section` via the CLI.
+  // Direct intake markdown edits remain available for recovery but the command
+  // path is recommended for routine clarification updates.
+  if (looksLikeIntakeOperation(normalizedToolName, args)) {
+    debugLog(`${logPrefix}.allow`, { reason: "intake_path_allowed", rule: rule.name, tool: normalizedToolName, note: "prefer update-intake-section CLI command for intake edits" }, directory)
+    // Record that intake fallback was used so the next chat.message can emit a
+    // concise one-time preference reminder pointing to update-intake-section.
+    _intakeFallbackRecentlyUsed.set(workflowRoot(directory), true)
+    return rule
+  }
+
+  // Gate 1: Is there a selected active task?
   const gateState = getExecutionGateState(directory)
   if (gateState.reason !== "ready") {
     debugLog(`${logPrefix}.block`, { reason: gateState.reason, rule: rule.name, label: rule.label, active_task_count: gateState.activeTaskCount }, directory)
@@ -252,7 +330,20 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
 
   const taskId = gateState.taskId
   const task = readTaskJson(directory, taskId)
-  if (!taskIsReadyForExecution(task) && rule.needsExecutionGate(args)) {
+  const taskStatus = String(task?.status || "").toLowerCase()
+
+  // Gate 2: Is the task in a write-allowed status?
+  // Only applies to tools that need the execution gate (e.g., non-writable
+  // subagents like research pass through).
+  if (rule.needsExecutionGate(args) && !WRITE_ALLOWED_STATUSES.has(taskStatus)) {
+    debugLog(`${logPrefix}.block`, { reason: "status_not_allowed", rule: rule.name, task_id: taskId, status: taskStatus }, directory)
+    throw new Error(buildExecutionGateError(rule.label, { reason: "status_not_allowed", taskId, status: taskStatus }))
+  }
+
+  // Gate 3: Execution readiness check.
+  // Non-ready tasks are blocked from write tools. Use the dedicated
+  // `update-clarification` CLI command to fill required clarification fields.
+  if (rule.needsExecutionGate(args) && !taskIsReadyForExecution(task)) {
     const missing = getMissingExecutionGateFields(task)
     debugLog(`${logPrefix}.block`, { reason: "task_not_ready", rule: rule.name, task_id: taskId, missing }, directory)
     throw new Error(buildExecutionGateError(rule.label, { reason: "task_not_ready", taskId, missing }))
@@ -287,10 +378,12 @@ export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
       : { reason: "no_formal_task" }
 
   const suffix = normalized.reason === "task_not_ready"
-    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}`
-    : normalized.reason === "no_current_task_selected"
-      ? "unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first."
-      : "there is no formal task yet."
+    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}. Use \`just-demand . update-clarification ${normalized.taskId} --field <name>="<value>"\` or \`--from-file <path>\` to fill pending fields.`
+    : normalized.reason === "status_not_allowed"
+      ? `active task ${normalized.taskId} is in status '${normalized.status}', which does not allow writes. Allowed statuses: planning, executing, verifying, changes_requested, tweaking, debugging.`
+      : normalized.reason === "no_current_task_selected"
+        ? "unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first."
+        : "there is no formal task yet."
   return `Blocked ${toolLabel}: ${suffix}`
 }
 

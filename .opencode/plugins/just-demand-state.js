@@ -1,4 +1,5 @@
 import {
+  consumeIntakeFallbackPending,
   getActiveTask,
   clearSubagentUnavailablePending,
   debugLog,
@@ -11,6 +12,7 @@ import {
   taskNeedsVerificationCloseout,
   textLooksLikeCompletionClaim,
   updateReminderState,
+  workflowRoot,
 } from "./just-demand-lib.js"
 
 const REMINDER_HEADER = "[just-demand reminder]"
@@ -380,6 +382,11 @@ const buildReminderLines = (type) => {
         "- Unfinished formal tasks already exist, but no current task is selected.",
         "- Run `just-demand . list-active`, then `just-demand . select-task <task-id>` (or `resume <task-id>`) before continuing write or execution work.",
       ]
+    case "intake_fallback":
+      return [
+        "- Prefer `update-intake-section` via the CLI for routine intake edits.",
+        "- Raw file fallback still works but is meant for recovery—use the CLI path when possible.",
+      ]
     default:
       return []
   }
@@ -530,6 +537,18 @@ export default async ({ directory } = {}) => {
         reason_code: controllerDecision.reason_code,
       }, workflowDirectory)
       textPart.text = applyControllerDecision(textPart.text, reminderState, controllerDecision)
+
+      // One-time per-session intake fallback warning: if the tool execution gate
+      // detected an intake fallback on the previous tool call, surface a concise
+      // reminder pointing to update-intake-section as the preferred path.
+      if (consumeIntakeFallbackPending(workflowDirectory)) {
+        if (!reminderState.intake_fallback_warning_shown) {
+          updateReminderState(workflowDirectory, sessionID, (state) => {
+            state.intake_fallback_warning_shown = true
+          })
+          textPart.text = appendReminder(textPart.text, reminderState, "intake_fallback")
+        }
+      }
 
       if (controllerDecision.reason_code !== "subagent_retry_or_skip") {
         clearSubagentUnavailablePending(workflowDirectory, sessionID)

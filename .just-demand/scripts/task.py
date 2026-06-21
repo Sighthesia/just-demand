@@ -6,6 +6,7 @@ import json
 import shlex
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from workflow_core import (
@@ -16,8 +17,13 @@ from workflow_core import (
     create_intake,
     list_unfinished_tasks,
     mark_task,
+    parse_markdown_clarification_fields,
     promote_to_task,
     select_task,
+    show_task_readiness,
+    start_verification,
+    update_intake_section,
+    update_task_clarification,
 )
 from install import (
     init_project,
@@ -42,8 +48,12 @@ COMMANDS = {
     "promote",
     "resume",
     "select-task",
+    "show-readiness",
+    "start-verification",
     "uninstall",
     "update",
+    "update-clarification",
+    "update-intake-section",
     "where",
 }
 
@@ -54,6 +64,20 @@ TASK_SELECTION_NEXT_ACTIONS = [
     "If execution needs broad code reading, 3+ files, multi-step research/debugging, or extended verification, dispatch a just-demand-* subagent.",
     "Confirm required task context files exist before implementation or verification.",
 ]
+
+
+def _parse_field_args(raw_fields: list[str]) -> dict[str, str]:
+    """Parse --field key=value arguments into a dict."""
+    fields: dict[str, str] = {}
+    for raw in raw_fields:
+        if "=" not in raw:
+            raise ValueError(f"Invalid --field format: '{raw}'. Expected key=value")
+        key, _, value = raw.partition("=")
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Empty key in --field '{raw}'")
+        fields[key] = value
+    return fields
 
 
 def with_task_selection_next_actions(result: dict) -> dict:
@@ -132,6 +156,9 @@ def build_parser() -> argparse.ArgumentParser:
     archive = sub.add_parser("archive-task", help="Archive a completed task to tasks/archive/")
     archive.add_argument("task_id", help="Task ID to archive (must be status 'done')")
 
+    start_verif = sub.add_parser("start-verification", help="Transition a task from executing/tweaking/debugging toward verification")
+    start_verif.add_argument("task_id", help="Task ID to transition to verification")
+
     complete = sub.add_parser("complete-verification", help="Record verification result and optionally create a checkpoint commit")
     complete.add_argument("task_id", help="Task ID to complete verification for")
     complete.add_argument("result", choices=["passed", "failed", "blocked"])
@@ -159,6 +186,19 @@ def build_parser() -> argparse.ArgumentParser:
     uninstall.add_argument("--global", action="store_true", dest="global_uninstall", help="Uninstall globally")
     uninstall.add_argument("--config-root", default=None, help="OpenCode config root (default: ~/.config/opencode)")
 
+    update_clar = sub.add_parser("update-clarification", help="Update clarification fields on an active task to resolve readiness gaps")
+    update_clar.add_argument("task_id", help="Task ID to update")
+    update_clar.add_argument("--field", action="append", default=[], help="Clarification field to update (format: key=value, repeatable)")
+    update_clar.add_argument("--from-file", default=None, help="Path to a JSON object file or a markdown section file (## headings) containing clarification field updates")
+
+    update_intake_sec = sub.add_parser("update-intake-section", help="Update a named section in an existing intake markdown file")
+    update_intake_sec.add_argument("intake_id", help="Intake ID to update")
+    update_intake_sec.add_argument("section", help="Section heading name (e.g. 'Scope', 'Chosen Approach')")
+    update_intake_sec.add_argument("value", help="New body content for the section")
+
+    show_readiness = sub.add_parser("show-readiness", help="Show readiness diagnostics for a task")
+    show_readiness.add_argument("task_id", help="Task ID to check readiness for")
+
     sub.add_parser("where", help="Print the global CLI path and invocation example")
 
     return parser
@@ -177,8 +217,41 @@ def execute_command(root: Path, args: list[str]) -> int:
     try:
         if parsed.command == "create-intake":
             result = create_intake(root, parsed.title, parsed.raw_request, parsed.session)
+        elif parsed.command == "update-intake-section":
+            result = update_intake_section(root, parsed.intake_id, parsed.section, parsed.value)
         elif parsed.command == "checkpoint-commit":
             result = create_checkpoint_commit(root, parsed.task_id)
+        elif parsed.command == "update-clarification":
+            fields: dict[str, Any] = {}
+            # Load from-file first (base), then --field overrides on top
+            if parsed.from_file:
+                from_path = Path(parsed.from_file)
+                if not from_path.is_file():
+                    raise RuntimeError(f"Clarification file not found: {from_path}")
+                raw_text = from_path.read_text(encoding="utf-8")
+                try:
+                    raw = json.loads(raw_text)
+                except json.JSONDecodeError:
+                    # Not valid JSON — try markdown section parsing
+                    try:
+                        raw = parse_markdown_clarification_fields(raw_text)
+                    except RuntimeError as md_err:
+                        raise RuntimeError(
+                            f"Invalid clarification file: not valid JSON "
+                            f"and markdown parsing failed: {md_err}"
+                        )
+                if not isinstance(raw, dict):
+                    raise RuntimeError(
+                        f"Clarification file must contain a JSON object "
+                        f"or markdown sections, got {type(raw).__name__}"
+                    )
+                fields.update(raw)
+            if parsed.field:
+                field_args = _parse_field_args(parsed.field)
+                fields.update(field_args)
+            result = update_task_clarification(root, parsed.task_id, fields)
+        elif parsed.command == "start-verification":
+            result = start_verification(root, parsed.task_id)
         elif parsed.command == "promote":
             criteria = parsed.acceptance or ["The formal task package exists and can be executed."]
             result = with_task_selection_next_actions(
@@ -305,6 +378,8 @@ def execute_command(root: Path, args: list[str]) -> int:
             else:
                 config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = uninstall_opencode_global(config_root)
+        elif parsed.command == "show-readiness":
+            result = show_task_readiness(root, parsed.task_id)
         else:
             raise RuntimeError(f"Unsupported command: {parsed.command}")
     except Exception as exc:
@@ -333,6 +408,8 @@ def show_help():
     print("  checkpoint-commit <id>            Create checkpoint commit")
     print("  archive-task <id>                 Archive completed task")
     print("  cleanup-task <id>                 Clean up completed task")
+    print("  update-clarification <id>          Update task clarification fields (JSON or ## markdown file via --from-file)")
+    print("  show-readiness <id>                Show task readiness diagnostics and recovery guidance")
     print("  init                              Initialize project")
     print("  doctor                            Check installation status")
     print("  where                             Print global CLI invocation example")

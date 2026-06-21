@@ -191,6 +191,20 @@ VALID_TASK_STATUSES = frozenset({
 })
 MARKABLE_TASK_STATUSES = VALID_TASK_STATUSES - {"done"}
 
+# Statuses that allow write/modification actions.
+# Planning is included for task-package clarification recovery:
+# the task can be edited to fill required clarification fields without
+# already being fully execution-ready.
+# Paused and blocked tasks should not receive edits until resumed/unblocked.
+WRITE_ALLOWED_STATUSES = frozenset({
+    "planning",
+    "executing",
+    "verifying",
+    "changes_requested",
+    "tweaking",
+    "debugging",
+})
+
 
 def default_task_json(
     task_id: str,
@@ -377,30 +391,126 @@ def build_clarification_payload(root: Path, intake_id: str, task_type: str) -> d
     }
 
 
+# Heading-to-field mapping for markdown import into clarification.
+# Mirrors the mapping in build_clarification_payload.
+MARKDOWN_TO_CLARIFICATION_FIELD: dict[str, str] = {
+    "Current Understanding": "current_understanding",
+    "Expected Behavior": "expected_behavior",
+    "Expected Outcome": "expected_behavior",
+    "Actual Behavior": "actual_behavior",
+    "Reproduction": "reproduction",
+    "Scope": "scope",
+    "Decision Card": "decision_card",
+    "User Action": "user_action",
+    "Recommended Default": "recommended_default",
+    "Option Matrix": "option_matrix",
+    "Final Expected Effect": "final_expected_effect",
+    "Approach Options": "approach_options",
+    "Chosen Approach": "chosen_approach",
+    "Final Implementation Plan": "final_implementation_plan",
+    "Minimum Viable Knowledge": "minimum_viable_knowledge",
+    "Validation": "validation",
+    "Validation Card": "validation_card",
+    "Diagram": "diagram",
+    "Confidence": "confidence",
+    "Escalation Reason": "escalation_reason",
+    "Approval": "approval",
+}
+
+
+def parse_markdown_clarification_fields(text: str) -> dict[str, Any]:
+    """Parse a markdown/intake-style section file into clarification fields.
+
+    Recognizes ``## Heading`` sections, maps known headings to clarification
+    field names via MARKDOWN_TO_CLARIFICATION_FIELD, and handles list-typed
+    fields (Blocking Questions, Non-Blocking Questions, Open Questions) via
+    parse_question_block. Unknown headings are silently ignored.
+
+    Raises:
+        RuntimeError: If no ``##`` sections are found or no recognised
+            clarification headings match.
+    """
+    sections = parse_markdown_sections(text)
+    if not sections:
+        raise RuntimeError(
+            "No markdown sections (## Heading) found in file. "
+            "Provide a file with ## headings or a JSON object."
+        )
+
+    fields: dict[str, Any] = {}
+    for heading, body in sections.items():
+        stripped_heading = heading.strip()
+        # List-type headings
+        if stripped_heading == "Blocking Questions":
+            fields["blocking_questions"] = parse_question_block(body)
+            continue
+        if stripped_heading in ("Non-Blocking Questions", "Open Questions"):
+            fields["non_blocking_questions"] = parse_question_block(body)
+            continue
+        # Scalar headings
+        field_name = MARKDOWN_TO_CLARIFICATION_FIELD.get(stripped_heading)
+        if field_name is not None:
+            fields[field_name] = body.strip()
+            # continue (implicit)
+
+    if not fields:
+        known = sorted(MARKDOWN_TO_CLARIFICATION_FIELD.keys())
+        raise RuntimeError(
+            f"No recognised clarification headings found in markdown file. "
+            f"Known headings: {', '.join(known)}"
+        )
+
+    return fields
+
+
 def intake_readiness_errors(root: Path, intake_id: str, task_type: str) -> list[str]:
     clarification = build_clarification_payload(root, intake_id, task_type)
     errors: list[str] = []
     if not clarification["scope"].strip():
-        errors.append("Scope is required before promotion.")
+        errors.append(
+            "Scope is required before promotion. "
+            "Prefer `just-demand . update-intake-section <intake-id> \"Scope\" \"<value>\"` to fill it."
+        )
     if clarification["needs_bug_clarification"]:
         if not clarification["expected_behavior"].strip():
-            errors.append("Expected Behavior is required for bug or mismatch work before promotion.")
+            errors.append(
+                "Expected Behavior is required for bug or mismatch work before promotion. "
+                "Prefer `just-demand . update-intake-section <intake-id> \"Expected Behavior\" \"<value>\"` to fill it."
+            )
         if not clarification["actual_behavior"].strip():
-            errors.append("Actual Behavior is required for bug or mismatch work before promotion.")
+            errors.append(
+                "Actual Behavior is required for bug or mismatch work before promotion. "
+                "Prefer `just-demand . update-intake-section <intake-id> \"Actual Behavior\" \"<value>\"` to fill it."
+            )
         if not clarification["reproduction"].strip():
-            errors.append("Reproduction is required for bug or mismatch work before promotion.")
+            errors.append(
+                "Reproduction is required for bug or mismatch work before promotion. "
+                "Prefer `just-demand . update-intake-section <intake-id> \"Reproduction\" \"<value>\"` to fill it."
+            )
     # Hard gate for design and implementation tasks: final expected effect,
     # chosen approach, final implementation plan, and approval are required.
     design_impl_types = {"design", "implementation", "feature", "feat", "refactor", "architecture"}
     if task_type.strip().lower() in design_impl_types:
         if not clarification["final_expected_effect"].strip():
-            errors.append("Final Expected Effect is required for design or implementation work before promotion.")
+            errors.append(
+                "Final Expected Effect is required for design or implementation work before promotion. "
+                "Prefer `just-demand . update-intake-section <intake-id> \"Final Expected Effect\" \"<value>\"` to fill it."
+            )
         if not clarification["chosen_approach"].strip():
-            errors.append("Chosen Approach is required for design or implementation work before promotion.")
+            errors.append(
+                "Chosen Approach is required for design or implementation work before promotion. "
+                "Prefer `just-demand . update-intake-section <intake-id> \"Chosen Approach\" \"<value>\"` to fill it."
+            )
         if not clarification["final_implementation_plan"].strip():
-            errors.append("Final Implementation Plan is required for design or implementation work before promotion.")
+            errors.append(
+                "Final Implementation Plan is required for design or implementation work before promotion. "
+                "Prefer `just-demand . update-intake-section <intake-id> \"Final Implementation Plan\" \"<value>\"` to fill it."
+            )
         if not clarification["approval"].strip():
-            errors.append("Approval is required for design or implementation work before promotion.")
+            errors.append(
+                "Approval is required for design or implementation work before promotion. "
+                "Prefer `just-demand . update-intake-section <intake-id> \"Approval\" \"<value>\"` to fill it."
+            )
     if clarification["blocking_questions"]:
         errors.append("Blocking Questions must be cleared before promotion.")
     return errors
@@ -504,6 +614,69 @@ def promote_to_task(
         intake_md.write_text("".join(lines), encoding="utf-8")
 
     return {"task_id": task_id, "path": str(final_dir)}
+
+
+def update_intake_section(root: Path, intake_id: str, section_name: str, value: str) -> dict[str, Any]:
+    """Update a named section in an existing intake markdown file in place.
+
+    Args:
+        root: Project root path.
+        intake_id: Intake id (filename stem within state/intake/).
+        section_name: Section heading name (e.g. "Scope", "Chosen Approach").
+        value: New body content for the section.
+
+    Returns:
+        Dict with ok, intake_id, section, and the updated section body.
+
+    Raises:
+        FileNotFoundError: If the intake markdown file does not exist.
+        ValueError: If section_name is not a known intake section.
+        RuntimeError: If the section heading is not found in the file content.
+    """
+    ensure_workspace(root)
+    intake_path = state_dir(root) / "intake" / f"{intake_id}.md"
+    if not intake_path.is_file():
+        raise FileNotFoundError(f"Intake not found: {intake_id}")
+
+    known_sections = set(INTAKE_SECTION_ORDER)
+    if section_name.strip() not in known_sections:
+        raise ValueError(
+            f"Unknown intake section: '{section_name}'. "
+            f"Known sections: {', '.join(INTAKE_SECTION_ORDER)}"
+        )
+
+    text = intake_path.read_text(encoding="utf-8")
+    section_name_escaped = re.escape(section_name.strip())
+    pattern = re.compile(
+        rf"(^## {section_name_escaped}\n)(.*?)(?=^## |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    if not pattern.search(text):
+        raise RuntimeError(
+            f"Section '## {section_name.strip()}' not found in intake {intake_id}"
+        )
+
+    new_body = value.strip()
+    updated = pattern.sub(
+        lambda match: f"{match.group(1)}{new_body}\n\n",
+        text,
+    )
+    intake_path.write_text(updated, encoding="utf-8")
+
+    append_workspace_event(
+        root,
+        "intake_section_updated",
+        "intake",
+        intake_id,
+        f"Updated section '{section_name.strip()}' on intake {intake_id}",
+    )
+
+    return {
+        "ok": True,
+        "intake_id": intake_id,
+        "section": section_name.strip(),
+        "body": new_body,
+    }
 
 
 def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> dict[str, str]:
@@ -610,6 +783,269 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
         after_status="clarifying",
     )
     return {"intake_id": intake_id, "path": str(intake_path)}
+
+
+# ---------------------------------------------------------------------------
+# Execution readiness
+# ---------------------------------------------------------------------------
+
+
+def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
+    """Check if a task has all required clarification fields for execution.
+
+    Mirrors the JS taskIsReadyForExecution logic so both runtimes agree
+    on what execution readiness means.
+    """
+    clarification = task.get("clarification", {}) or {}
+    missing = []
+
+    if not str(clarification.get("scope", "") or "").strip():
+        missing.append("Scope")
+
+    blocking_questions = clarification.get("blocking_questions", []) or []
+    if isinstance(blocking_questions, list) and len(blocking_questions) > 0:
+        missing.append("Blocking Questions")
+
+    task_type = str(task.get("type", "") or "").strip().lower()
+    bug_types = {"bug", "bugfix", "fix", "incident"}
+    design_types = {"design", "implementation", "feature", "feat", "refactor", "architecture"}
+
+    needs_bug = task_type in bug_types or bool(clarification.get("needs_bug_clarification", False))
+    if needs_bug:
+        if not str(clarification.get("expected_behavior", "") or "").strip():
+            missing.append("Expected Behavior")
+        if not str(clarification.get("actual_behavior", "") or "").strip():
+            missing.append("Actual Behavior")
+        if not str(clarification.get("reproduction", "") or "").strip():
+            missing.append("Reproduction")
+
+    if task_type in design_types:
+        if not str(clarification.get("final_expected_effect", "") or "").strip():
+            missing.append("Final Expected Effect")
+        if not str(clarification.get("chosen_approach", "") or "").strip():
+            missing.append("Chosen Approach")
+        if not str(clarification.get("final_implementation_plan", "") or "").strip():
+            missing.append("Final Implementation Plan")
+        if not str(clarification.get("approval", "") or "").strip():
+            missing.append("Approval")
+
+    return len(missing) == 0
+
+
+def get_missing_execution_fields(task: dict[str, Any]) -> list[str]:
+    """Return list of missing required clarification field names for this task.
+
+    Mirrors the JS getMissingExecutionGateFields logic so both runtimes agree
+    on what is missing for execution readiness.
+    """
+    clarification = task.get("clarification", {}) or {}
+    missing: list[str] = []
+
+    if not str(clarification.get("scope", "") or "").strip():
+        missing.append("Scope")
+
+    blocking_questions = clarification.get("blocking_questions", []) or []
+    if isinstance(blocking_questions, list) and len(blocking_questions) > 0:
+        missing.append("Blocking Questions")
+
+    task_type = str(task.get("type", "") or "").strip().lower()
+    bug_types = {"bug", "bugfix", "fix", "incident"}
+    design_types = {"design", "implementation", "feature", "feat", "refactor", "architecture"}
+
+    needs_bug = task_type in bug_types or bool(clarification.get("needs_bug_clarification", False))
+    if needs_bug:
+        if not str(clarification.get("expected_behavior", "") or "").strip():
+            missing.append("Expected Behavior")
+        if not str(clarification.get("actual_behavior", "") or "").strip():
+            missing.append("Actual Behavior")
+        if not str(clarification.get("reproduction", "") or "").strip():
+            missing.append("Reproduction")
+
+    if task_type in design_types:
+        if not str(clarification.get("final_expected_effect", "") or "").strip():
+            missing.append("Final Expected Effect")
+        if not str(clarification.get("chosen_approach", "") or "").strip():
+            missing.append("Chosen Approach")
+        if not str(clarification.get("final_implementation_plan", "") or "").strip():
+            missing.append("Final Implementation Plan")
+        if not str(clarification.get("approval", "") or "").strip():
+            missing.append("Approval")
+
+    return missing
+
+
+# ---------------------------------------------------------------------------
+# Readiness diagnostics
+# ---------------------------------------------------------------------------
+
+
+def show_task_readiness(root: Path, task_id: str) -> dict[str, Any]:
+    """Return structured readiness diagnostics for a task.
+
+    Read-only: does not mutate any state.
+
+    Returns a dict with:
+      - task_id
+      - status: current status string
+      - ready: bool, whether the task is execution-ready
+      - missing: list of missing field names (empty when ready)
+      - writes_allowed: bool, whether writes are allowed in current status
+      - write_allowed_statuses: list of statuses that allow writes
+      - recommended_recovery: str, next recovery step suggestion
+    """
+    ensure_workspace(root)
+    tpath = task_path(root, task_id) / "task.json"
+    if not tpath.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(tpath)
+    status = task.get("status", "unknown")
+    ready = task_is_ready_for_execution(task)
+    missing = [] if ready else get_missing_execution_fields(task)
+    writes_allowed = status in WRITE_ALLOWED_STATUSES
+
+    # Determine recommended recovery step
+    recommended_recovery: str
+    if status == "done":
+        recommended_recovery = "No recovery needed — task is complete."
+    elif not writes_allowed:
+        recommended_recovery = (
+            f"Recovery: change status to a writable status first "
+            f"(e.g., `mark {task_id} planning`), then run "
+            f"`update-clarification {task_id} --field key=value`."
+        )
+    elif not ready:
+        recommended_recovery = (
+            f"Recovery: run `update-clarification {task_id} --field key=value` "
+            f"for each missing field. "
+            f"Missing fields: {', '.join(missing)}"
+        )
+    else:
+        recommended_recovery = (
+            "Task is execution-ready. "
+            "Start execution when ready."
+        )
+
+    return {
+        "task_id": task_id,
+        "status": status,
+        "ready": ready,
+        "missing": missing,
+        "writes_allowed": writes_allowed,
+        "write_allowed_statuses": sorted(WRITE_ALLOWED_STATUSES),
+        "recommended_recovery": recommended_recovery,
+    }
+
+
+CLARIFICATION_UPDATE_FIELDS = frozenset({
+    "current_understanding",
+    "expected_behavior",
+    "actual_behavior",
+    "reproduction",
+    "scope",
+    "decision_card",
+    "user_action",
+    "recommended_default",
+    "option_matrix",
+    "final_expected_effect",
+    "approach_options",
+    "chosen_approach",
+    "final_implementation_plan",
+    "minimum_viable_knowledge",
+    "validation",
+    "validation_card",
+    "diagram",
+    "confidence",
+    "escalation_reason",
+    "approval",
+    "blocking_questions",
+    "non_blocking_questions",
+})
+
+
+def update_task_clarification(root: Path, task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Update clarification fields on an active task and refresh derived package files.
+
+    Args:
+        root: Project root path.
+        task_id: Active task id.
+        fields: Dict of field_name -> value. String values for most fields;
+            for list-typed fields (blocking_questions, non_blocking_questions),
+            accepts a JSON array string or a Python list.
+
+    Returns:
+        Dict with ok, task_id, ready, missing fields, and the task data.
+
+    Raises:
+        FileNotFoundError if task does not exist.
+        RuntimeError if task status does not allow updates.
+        ValueError if an unknown field name is given.
+    """
+    ensure_workspace(root)
+    tpath = task_path(root, task_id)
+    task_json_path = tpath / "task.json"
+    if not task_json_path.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(task_json_path)
+    status = task.get("status", "")
+    if status not in WRITE_ALLOWED_STATUSES:
+        raise RuntimeError(
+            f"Cannot update clarification for task {task_id}: "
+            f"status is '{status}'. "
+            f"Allowed statuses: {', '.join(sorted(WRITE_ALLOWED_STATUSES))}"
+        )
+
+    clarification = dict(task.get("clarification", {}) or {})
+
+    for key, value in fields.items():
+        if key not in CLARIFICATION_UPDATE_FIELDS:
+            raise ValueError(f"Unknown clarification field: {key}")
+
+        if key in {"blocking_questions", "non_blocking_questions"}:
+            if isinstance(value, list):
+                parsed = value
+            elif isinstance(value, str):
+                try:
+                    parsed = json.loads(value)
+                    if not isinstance(parsed, list):
+                        parsed = [value]
+                except (json.JSONDecodeError, TypeError):
+                    parsed = [value]
+            else:
+                parsed = [str(value)]
+            clarification[key] = parsed
+        else:
+            clarification[key] = str(value).strip()
+
+    task["clarification"] = clarification
+    update_task(root, task_id, {"clarification": clarification})
+
+    # Regenerate open_questions.md from non_blocking_questions
+    non_blocking = clarification.get("non_blocking_questions", []) or []
+    open_questions_path = tpath / "open_questions.md"
+    open_questions_path.write_text(
+        render_open_questions_markdown(non_blocking if isinstance(non_blocking, list) else []),
+        encoding="utf-8",
+    )
+
+    append_task_event(
+        root,
+        task_id,
+        "clarification_updated",
+        f"Updated clarification fields: {', '.join(sorted(fields.keys()))}",
+    )
+
+    task = read_json(task_json_path)
+    ready = task_is_ready_for_execution(task)
+    missing = get_missing_execution_fields(task) if not ready else []
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "ready": ready,
+        "missing": missing,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1517,3 +1953,25 @@ def complete_verification(
             result_data["archive_error"] = archive_error
 
     return result_data
+
+
+def start_verification(root: Path, task_id: str) -> dict[str, Any]:
+    """Transition a task from executing/tweaking/debugging toward verification.
+
+    This creates an explicit post-write transition so the task does not remain
+    open for unrestricted edits after implementation or debugging completes.
+    After this transition, the task should move toward verification closeout.
+    """
+    tpath = task_path(root, task_id)
+    task = read_json(tpath / "task.json")
+    allowed_pre = {"executing", "tweaking", "debugging"}
+
+    before_status = task.get("status")
+    if before_status not in allowed_pre:
+        raise RuntimeError(
+            f"Cannot start verification for {task_id}: "
+            f"status is '{before_status}', "
+            f"expected one of {', '.join(sorted(allowed_pre))}"
+        )
+
+    return mark_task(root, task_id, "verifying", note="Starting verification phase")

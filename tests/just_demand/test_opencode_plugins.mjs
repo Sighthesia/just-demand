@@ -6,12 +6,16 @@ import test from "node:test"
 
 import {
   buildExecutionGateError,
+  consumeIntakeFallbackPending,
   debugLog,
   getActiveTask,
   getExecutionGateState,
   getMissingRequiredContextFiles,
   getWorkflowSubagentName,
+  isIntakeFilePath,
+  getApplyPatchTargetPath,
   listUnfinishedTasks,
+  looksLikeIntakeOperation,
   markSubagentUnavailablePending,
   getWriteToolRule,
   hasUnquotedShellRedirection,
@@ -340,8 +344,69 @@ test("write tool rule table identifies write-like tools and ignores read-only ba
   )
   assert.equal(
     buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-a", missing: ["Scope", "Approval"] }),
-    "Blocked apply_patch: active task task-a is not ready for execution yet. Missing or incomplete fields: Scope, Approval",
+    'Blocked apply_patch: active task task-a is not ready for execution yet. Missing or incomplete fields: Scope, Approval. Use `just-demand . update-clarification task-a --field <name>="<value>"` or `--from-file <path>` to fill pending fields.',
   )
+})
+
+// ---------------------------------------------------------------------------
+// lib: intake path detection
+// ---------------------------------------------------------------------------
+test("isIntakeFilePath detects intake file paths", () => {
+  assert.equal(isIntakeFilePath(".just-demand/state/intake/some-intake.md"), true)
+  assert.equal(isIntakeFilePath(".just-demand/state/intake/2026-06-21-my-intake.md"), true)
+  assert.equal(isIntakeFilePath("/absolute/path/.just-demand/state/intake/file.md"), true)
+  assert.equal(isIntakeFilePath("src/app.js"), false)
+  assert.equal(isIntakeFilePath(".just-demand/state/active/task-a/task.json"), false)
+  assert.equal(isIntakeFilePath(".just-demand/state/locks.json"), false)
+  assert.equal(isIntakeFilePath(null), false)
+  assert.equal(isIntakeFilePath(""), false)
+})
+
+test("getApplyPatchTargetPath extracts file path from standard patch format", () => {
+  const args = { patchText: "*** Update File: .just-demand/state/intake/demo-intake.md\nSome content\n*** End Patch" }
+  assert.equal(getApplyPatchTargetPath(args), ".just-demand/state/intake/demo-intake.md")
+})
+
+test("getApplyPatchTargetPath extracts file path from unified diff format", () => {
+  const args = { patchText: "--- a/.just-demand/state/intake/demo-intake.md\n+++ b/.just-demand/state/intake/demo-intake.md\n@@ -1 +1 @@\n-old\n+new" }
+  assert.equal(getApplyPatchTargetPath(args), ".just-demand/state/intake/demo-intake.md")
+})
+
+test("getApplyPatchTargetPath returns null for non-matching args", () => {
+  assert.equal(getApplyPatchTargetPath({ patchText: "some random text" }), null)
+  assert.equal(getApplyPatchTargetPath({}), null)
+  assert.equal(getApplyPatchTargetPath(null), null)
+})
+
+test("getApplyPatchTargetPath handles path with diff content markers", () => {
+  const args = { patchText: "*** Update File: .just-demand/state/intake/test-intake.md\n## Updates\n- Change scope\n*** End Patch" }
+  assert.equal(getApplyPatchTargetPath(args), ".just-demand/state/intake/test-intake.md")
+})
+
+test("looksLikeIntakeOperation detects apply_patch targeting intake file", () => {
+  const args = { patchText: "*** Update File: .just-demand/state/intake/my-intake.md\ncontent\n*** End Patch" }
+  assert.equal(looksLikeIntakeOperation("apply_patch", args), true)
+})
+
+test("looksLikeIntakeOperation does not fire for non-intake apply_patch", () => {
+  const args = { patchText: "*** Update File: src/app.js\ncontent\n*** End Patch" }
+  assert.equal(looksLikeIntakeOperation("apply_patch", args), false)
+})
+
+test("looksLikeIntakeOperation detects bash redirection to intake file", () => {
+  const args = { command: "echo '## Scope\nTesting' >> .just-demand/state/intake/demo.md" }
+  assert.equal(looksLikeIntakeOperation("bash", args), true)
+})
+
+test("looksLikeIntakeOperation does not fire for bash commands with non-intake redirection", () => {
+  const args = { command: "just-demand . list-active > /tmp/tasks.txt" }
+  assert.equal(looksLikeIntakeOperation("bash", args), false)
+})
+
+test("looksLikeIntakeOperation returns false for non-matching tools", () => {
+  assert.equal(looksLikeIntakeOperation("Task", { subagent_type: "just-demand-implement" }), false)
+  assert.equal(looksLikeIntakeOperation("apply_patch", {}), false)
+  assert.equal(looksLikeIntakeOperation("bash", {}), false)
 })
 
 test("getExecutionGateState distinguishes no formal task from no selected current task", () => {
@@ -804,6 +869,58 @@ test("state blocks apply_patch when no formal task exists", async () => {
   )
 })
 
+test("state allows apply_patch targeting intake file without formal task", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { args: { patchText: "*** Update File: .just-demand/state/intake/demo-intake.md\n## Scope\nClarify the feature boundary.\n*** End Patch" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, output),
+  )
+})
+
+test("state allows apply_patch targeting intake file when active tasks exist but no current task selected", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "paused", clarification: { scope: "Scoped" } }))
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { args: { patchText: "*** Update File: .just-demand/state/intake/demo-intake.md\n## Scope\nClarify the feature boundary.\n*** End Patch" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, output),
+  )
+})
+
+test("state still blocks apply_patch on non-intake file when no formal task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: src/app.js\n*** End Patch" } }),
+    /Blocked apply_patch: there is no formal task yet\./,
+  )
+})
+
+test("state still blocks bash redirect to non-intake file when no formal task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "just-demand . list-active > /tmp/tasks.txt" } }),
+    /Blocked bash: there is no formal task yet\./,
+  )
+})
+
 test("state blocks apply_patch when unfinished tasks exist but no current task is selected", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -819,12 +936,12 @@ test("state blocks apply_patch when unfinished tasks exist but no current task i
   )
 })
 
-test("state blocks apply_patch when active task is not ready for execution", async () => {
+test("state blocks apply_patch when active task is not ready for execution (past planning)", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "executing", clarification: { scope: "" } }))
 
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
@@ -833,12 +950,12 @@ test("state blocks apply_patch when active task is not ready for execution", asy
   )
 })
 
-test("state blocks implement task dispatch when active task is not ready for execution", async () => {
+test("state blocks implement task dispatch when active task is not ready for execution (past planning)", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "executing", clarification: { scope: "" } }))
 
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
@@ -847,12 +964,12 @@ test("state blocks implement task dispatch when active task is not ready for exe
   )
 })
 
-test("state blocks workflow task dispatch with real agent argument key when active task is not ready", async () => {
+test("state blocks workflow task dispatch with real agent argument key when active task is not ready (past planning)", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "executing", clarification: { scope: "" } }))
 
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
@@ -861,12 +978,12 @@ test("state blocks workflow task dispatch with real agent argument key when acti
   )
 })
 
-test("state blocks write-like bash commands when active task is not ready for execution", async () => {
+test("state blocks write-like bash commands when active task is not ready for execution (past planning)", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "executing", clarification: { scope: "" } }))
 
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
@@ -901,12 +1018,12 @@ test("state allows quoted greater-than inside create-intake arguments", async ()
   assert.equal(output.args.command, "just-demand . create-intake \"Redirect threshold\" \"Investigate p95 > 100ms\" --session test-session")
 })
 
-test("state still blocks real shell redirection outside quotes", async () => {
+test("state still blocks real shell redirection outside quotes (past planning)", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "executing", clarification: { scope: "" } }))
 
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
@@ -1245,7 +1362,7 @@ test("subagent-context injects context for supported subagent type", async () =>
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Should the old shortcut still work?\n")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { expected_behavior: "Shortcut triggers the action.", actual_behavior: "Shortcut is ignored.", reproduction: "Press the shortcut once.", scope: "Keyboard shortcut handling.", non_blocking_questions: ["Should the old shortcut still work?"] } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { expected_behavior: "Shortcut triggers the action.", actual_behavior: "Shortcut is ignored.", reproduction: "Press the shortcut once.", scope: "Keyboard shortcut handling.", non_blocking_questions: ["Should the old shortcut still work?"] } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
@@ -1271,7 +1388,7 @@ test("subagent-context injects context when runtime uses agent argument key", as
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { agent: "just-demand-implement", prompt: "Do the work" } }
@@ -1303,7 +1420,7 @@ test("subagent-context throws when writable subagent required context files are 
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
@@ -1366,6 +1483,18 @@ test("subagent-context blocks apply_patch when no formal task", async () => {
   )
 })
 
+test("subagent-context allows apply_patch targeting intake file when no formal task", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const plugin = await subagentContextFactory({ directory: root })
+
+  const output = { args: { patchText: "*** Update File: .just-demand/state/intake/demo-intake.md\n## Scope\nSome scope.\n*** End Patch" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, output),
+  )
+})
+
 test("subagent-context blocks write-like bash when no formal task", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
@@ -1408,7 +1537,7 @@ test("subagent-context avoids duplicate injection when prompt already contains w
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   // Prompt already contains injection marker
@@ -1418,4 +1547,267 @@ test("subagent-context avoids duplicate injection when prompt already contains w
   // Should not add duplicate injection
   assert.equal(output.args.prompt, `${existingContext}\n\nDo the work`)
   assert.doesNotMatch(output.args.prompt, /Active task: task-a/)
+})
+
+// ---------------------------------------------------------------------------
+// Execution gate: status-based gating and planning deadlock recovery
+// ---------------------------------------------------------------------------
+test("state blocks writes during planning when clarification is incomplete (uses update-clarification instead)", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  // Planning status with empty scope: previously allowed as deadlock recovery,
+  // now blocked — the agent must use `update-clarification` CLI command first.
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "planning", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch: active task task-a is not ready for execution yet/,
+  )
+})
+
+test("state blocks apply_patch when task status is done", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "done" }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch: active task task-a is in status 'done', which does not allow writes\./,
+  )
+})
+
+test("state blocks apply_patch when task status is blocked", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "blocked" }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch: active task task-a is in status 'blocked', which does not allow writes\./,
+  )
+})
+
+test("state blocks apply_patch when task status is paused", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "paused" }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch: active task task-a is in status 'paused', which does not allow writes\./,
+  )
+})
+
+test("enforceExecutionGate error message lists allowed statuses for status_not_allowed", () => {
+  const error = buildExecutionGateError("apply_patch", { reason: "status_not_allowed", taskId: "task-a", status: "done" })
+  assert.match(error, /status 'done', which does not allow writes/)
+  assert.match(error, /planning, executing, verifying, changes_requested, tweaking, debugging/)
+})
+
+test("update-clarification bash command is not write-like and passes through gate naturally", () => {
+  assert.equal(looksLikeBashWriteCommand("just-demand . update-clarification task-a --field scope=\"New scope\""), false)
+  assert.equal(looksLikeBashWriteCommand("just-demand . update-clarification task-a --field chosen_approach=\"Approach A\" --field approval=\"Approved\""), false)
+  assert.equal(getWriteToolRule("bash", { command: "just-demand . update-clarification task-a --field scope=\"New scope\"" }), null)
+})
+
+test("task_not_ready error message mentions update-clarification as recovery command", () => {
+  const error = buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-b", missing: ["Scope"] })
+  assert.match(error, /update-clarification/)
+  assert.match(error, /task-b/)
+  assert.match(error, /Missing or incomplete fields/)
+  assert.match(error, /Scope/)
+})
+
+// ---------------------------------------------------------------------------
+// Preference signaling: intake fallback warns about preferred path
+// ---------------------------------------------------------------------------
+
+test("intake gate comment notes update-intake-section as preferred path", () => {
+  // This test verifies the intent is documented in the enforcement logic.
+  // We read the source to confirm the comment mentions the preference.
+  const source = readFileSync(new URL("../../.opencode/plugins/just-demand-lib.js", import.meta.url), "utf8")
+  assert.match(source, /update-intake-section/)
+  assert.match(source, /preferred intake editing path/)
+  assert.match(source, /fallback path/)
+})
+
+test("intake fallback still succeeds without formal task", async () => {
+  // apply_patch targeting intake file must still pass when no formal task exists
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const plugin = await stateFactory({ directory: root })
+
+  const output = { args: { patchText: "*** Update File: .just-demand/state/intake/demo-intake.md\n## Scope\nFallback edit.\n*** End Patch" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, output),
+  )
+})
+
+test("intake fallback still succeeds with unselected active tasks", async () => {
+  // When active tasks exist but no current task is selected, intake edits must still work
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "paused", clarification: { scope: "Scoped" } }))
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { args: { patchText: "*** Update File: .just-demand/state/intake/demo-intake.md\n## Scope\nFallback edit with unselected tasks.\n*** End Patch" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, output),
+  )
+})
+
+test("non-intake writes still blocked without formal task", async () => {
+  // Non-intake write tools must still be blocked when no formal task exists
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: src/app.js\n*** End Patch" } }),
+    /Blocked apply_patch: there is no formal task yet\./,
+  )
+})
+
+test("non-intake bash writes still blocked without formal task", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+    /Blocked bash: there is no formal task yet\./,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Intake fallback one-time warning
+// ---------------------------------------------------------------------------
+
+test("consumeIntakeFallbackPending returns false when no fallback was used", () => {
+  const root = makeRoot()
+  assert.equal(consumeIntakeFallbackPending(root), false)
+})
+
+test("consumeIntakeFallbackPending returns true after intake operation passes gate", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  await plugin["tool.execute.before"](
+    { tool: "apply_patch" },
+    { args: { patchText: "*** Update File: .just-demand/state/intake/demo.md\nContent\n*** End Patch" } },
+  )
+
+  assert.equal(consumeIntakeFallbackPending(root), true)
+})
+
+test("consumeIntakeFallbackPending clears after consumption", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  await plugin["tool.execute.before"](
+    { tool: "apply_patch" },
+    { args: { patchText: "*** Update File: .just-demand/state/intake/demo.md\nContent\n*** End Patch" } },
+  )
+
+  // First consumption should return true
+  assert.equal(consumeIntakeFallbackPending(root), true)
+  // Second consumption should return false (already consumed)
+  assert.equal(consumeIntakeFallbackPending(root), false)
+})
+
+test("intake fallback warning appears once in chat.message after intake gate", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // Simulate tool execution that triggers intake fallback
+  await plugin["tool.execute.before"](
+    { tool: "apply_patch" },
+    { args: { patchText: "*** Update File: .just-demand/state/intake/demo.md\n## Scope\nFallback edit.\n*** End Patch" } },
+  )
+
+  // The next chat.message should contain the intake fallback warning
+  const output = { parts: [{ type: "text", text: "Let me update the intake scope." }] }
+  await plugin["chat.message"]({ sessionID: "intake-warning-test" }, output)
+
+  assert.match(output.parts[0].text, /\[just-demand reminder\]/)
+  assert.match(output.parts[0].text, /update-intake-section/)
+  assert.match(output.parts[0].text, /Raw file fallback still works/)
+})
+
+test("intake fallback warning does not repeat on second intake use", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state", "intake"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // First intake operation
+  await plugin["tool.execute.before"](
+    { tool: "apply_patch" },
+    { args: { patchText: "*** Update File: .just-demand/state/intake/demo.md\n## Scope\nFirst fallback.\n*** End Patch" } },
+  )
+
+  // First chat.message: warning should appear
+  const firstOutput = { parts: [{ type: "text", text: "Continue" }] }
+  await plugin["chat.message"]({ sessionID: "intake-dedup-test" }, firstOutput)
+  assert.match(firstOutput.parts[0].text, /\[just-demand reminder\]/)
+  assert.match(firstOutput.parts[0].text, /update-intake-section/)
+
+  // Second intake operation
+  await plugin["tool.execute.before"](
+    { tool: "apply_patch" },
+    { args: { patchText: "*** Update File: .just-demand/state/intake/demo.md\n## Scope\nSecond fallback.\n*** End Patch" } },
+  )
+
+  // Second chat.message: warning should NOT appear (one-time per session)
+  const secondOutput = { parts: [{ type: "text", text: "Continue" }] }
+  await plugin["chat.message"]({ sessionID: "intake-dedup-test" }, secondOutput)
+  assert.doesNotMatch(secondOutput.parts[0].text, /\[just-demand reminder\]/)
+  assert.doesNotMatch(secondOutput.parts[0].text, /update-intake-section/)
+})
+
+test("state still blocks non-intake writes even after intake fallback warning", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // Trigger intake fallback first
+  await plugin["tool.execute.before"](
+    { tool: "apply_patch" },
+    { args: { patchText: "*** Update File: .just-demand/state/intake/demo.md\n## Scope\nFallback edit.\n*** End Patch" } },
+  )
+
+  // Non-intake writes must still be blocked
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: src/app.js\n*** End Patch" } }),
+    /Blocked apply_patch: there is no formal task yet\./,
+  )
 })
