@@ -17,6 +17,36 @@ Critical `tool.execute.before` enforcement must not assume every plugin register
 Reason:
 Real debug logs showed only `just-demand-subagent-context` events for non-Task tools while `just-demand-state` gate events were absent. Duplicating the shared execution gate into the subagent-context hook prevents inline `apply_patch`, write-like `bash`, or gated workflow `Task` dispatch from bypassing formal task requirements when same-hook plugin behavior differs from isolated unit tests.
 
+### D004: Reinforce workflow through visible routing, not hidden authority
+
+Type: workflow-runtime
+Scope: workspace
+Status: accepted
+Date: 2026-06-22
+Source Task: 2026-06-22-analyze-stronger-workflow-rule-injection-and-reinforcement-task
+Supersedes: none
+
+Decision:
+Harden workflow discipline by layering visible runtime routing and narrow execution gates before introducing any session-owned authority model. Prefer unconditional `workflow-state` injection, explicit workflow-skip override phrases, mandatory subagent routing for long-context execution, action-type classification (`workflow-control`, `dispatch`, `execution-write`), and lightweight subagent output contracts. Do not use execution lease as the default authority model.
+
+Reason:
+Testing showed execution-lease style authority causes serious session conflict and friction. The higher-value fixes came from making workflow identity visible every turn, making inline bypass explicit, separating control-plane actions from real execution writes, and stabilizing subagent outputs.
+
+### D005: Do not persist weak workflow state unless it has clear continuity value and zero authority impact
+
+Type: workflow-runtime
+Scope: workspace
+Status: accepted
+Date: 2026-06-22
+Source Task: 2026-06-22-analyze-weak-workflow-state-persistence-task
+Supersedes: none
+
+Decision:
+Do not add weak workflow state persistence by default. Process-local reminder dedupe, topic counters, and subagent-unavailable prompts should remain ephemeral unless a future continuity problem justifies persistence. Any future persistence must stay continuity-only and must not become hidden execution authority, locking, or coordination state.
+
+Reason:
+After workflow-state injection, false-positive reduction, mandatory long-context subagent routing, and minimal subagent output contracts, the remaining ephemeral state has low recovery cost and low user impact. Persisting it now would add complexity and risk recreating authority-like conflicts for little benefit.
+
 ### D001: OpenCode-first local workflow
 
 Type: architecture
@@ -268,3 +298,21 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-18-close-post-approval-workflow-drift-gap-task (Close post-approval workflow drift gap) completed with status 'done'.
   Verification summary: Post-approval code-investigation drift guard implemented and verified: prompt fallback now treats codebase investigation as execution work before promotion; state plugin blocks English/Chinese code-investigation intent without a formal task; plugin tests 80/80 and package JSON validation passed.
+
+- Task 2026-06-22-analyze-stronger-workflow-rule-injection-and-reinforcement-task (Analyze stronger workflow rule injection and reinforcement) completed with status 'done'.
+  Verification summary: Repository-grounded comparison completed: identified workflow-state injection, explicit override routing, mandatory subagent dispatch, and output contracts as the strongest improvements for just-demand.
+
+- Task 2026-06-22-implement-workflow-reinforcement-core-skeleton-task (Implement workflow reinforcement core skeleton) completed with status 'done'.
+  Verification summary: Implemented first-batch workflow reinforcement: unconditional workflow-state injection, explicit workflow-skip override, and stronger no-task routing with plugin tests passing.
+
+- Task 2026-06-22-implement-workflow-gate-false-positive-reduction-batch-task (Implement workflow gate false-positive reduction batch) completed with status 'done'.
+  Verification summary: Reduced gate false positives by classifying workflow-control, dispatch, and execution-write behavior and narrowing conflict handling toward impact overlap; tests passed.
+
+- Task 2026-06-22-implement-mandatory-subagent-dispatch-for-long-context-execution-task (Implement mandatory subagent dispatch for long-context execution) completed with status 'done'.
+  Verification summary: Main-session long-context execution now routes toward just-demand subagents by default while preserving workflow-control, dispatch, and explicit override paths; tests passed.
+
+- Task 2026-06-22-implement-minimal-subagent-output-contracts-task (Implement minimal subagent output contracts) completed with status 'done'.
+  Verification summary: Added lightweight output contracts for just-demand research, implement, and check subagents; install, plugin, and core tests passed.
+
+- Task 2026-06-22-analyze-weak-workflow-state-persistence-task (Analyze weak workflow state persistence) completed with status 'done'.
+  Verification summary: Read-only evaluation concluded weak workflow state persistence is not worth adding now; continuity-only state remains lower value than its added complexity and authority risk.
