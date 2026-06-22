@@ -97,8 +97,8 @@ Use this reset when the user keeps providing new samples, when the conversation 
 - Subagents execute focused work from injected task context.
 - Scripts are the write path for `.just-demand/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
-- Long-context-consumption work belongs to subagents. The main agent should not perform broad code reading, large multi-file edits, or extended verification inline when a `just-demand-*` subagent can do it from a formal task package.
-- Prefer proactive subagent dispatch for long-context execution work. Do not stay inline in the main session just because one direct attempt seems possible.
+- Long-context-consumption work belongs to subagents. The main agent MUST NOT perform broad code reading, large multi-file edits, or extended verification inline when a `just-demand-*` subagent can do it from a formal task package. An explicit workflow skip override is required to proceed inline.
+- Prefer proactive subagent dispatch for long-context execution work. Do not stay inline in the main session just because one direct attempt seems possible. The plugin's execution block enforces this default.
 - Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
 
 ## Subagent Availability Rule
@@ -179,12 +179,25 @@ These skills describe routing; runtime plugins enforce workflow entry and task-g
 
 ## Runtime Boundaries
 
-- Main-session plugins should not inject workflow text when there is no active unfinished formal task.
-- Active unfinished tasks do not get a `<workflow-state>` breadcrumb in main-session messages. Tasks should be inspected explicitly via list-active scripts.
+- Main-session plugins inject an unconditional `[workflow-state]` banner every turn showing the current workflow identity (active task or no-task three-route guidance).
 - Task context is injected only for supported `just-demand-*` subagents.
 - Execution must not start until the current task context files exist and the intake is actually ready. Promotion is blocked when required clarification fields are still missing or blocking questions remain. Use `just-demand . list-active` to inspect unfinished tasks before dispatch.
 - `create-intake` is not the same as `promote`: `list-active` should remain empty until a formal task is promoted.
 - Restart OpenCode after changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`.
+
+### No-Active-Task Three-Route Model
+
+When no formal task exists, the agent chooses from three explicit routes:
+
+1. **Direct answer**: if the turn is a simple question or non-work inquiry, respond directly without workflow entry.
+2. **Enter workflow (default for real work)**: create an intake via `create-intake`, clarify via `socratic-clarification`, then `promote` to a formal task.
+3. **Skip workflow override**: include an explicit phrase like "skip workflow" or "workflow override" to consciously bypass the workflow path and proceed inline.
+
+Route 2 is the default when concrete work, bug reports, or implementation requests are detected. Route 3 is an explicit override that bypasses the `workflow_entry_required` or `execution_needed` block messages.
+
+### Long-Context Work Routing
+
+Long-context execution work (broad code reading, 3+ files, multi-step research/debugging, or extended verification) must route through a `just-demand-*` subagent by default. Inline handling in the main session is only permitted with an explicit workflow skip override. The plugin enforces this: execution intent on an active task without assigned subagents triggers a hard block with subagent routing guidance.
 
 ## Commands
 

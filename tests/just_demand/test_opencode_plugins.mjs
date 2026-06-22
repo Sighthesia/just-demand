@@ -12,7 +12,9 @@ import {
   getExecutionGateState,
   getMissingRequiredContextFiles,
   getWorkflowSubagentName,
+  impactsOverlap,
   isIntakeFilePath,
+  isWorkflowControlCommand,
   getApplyPatchTargetPath,
   listUnfinishedTasks,
   looksLikeIntakeOperation,
@@ -28,7 +30,9 @@ import stateFactory, {
   CONTROLLER_ACTION,
   CONTROLLER_PHASE,
   buildControllerDecision,
+  injectWorkflowStateBanner,
   textLooksLikeCodeInvestigationIntent,
+  textLooksLikeExplicitWorkflowSkip,
   textLooksLikeWorkflowEntryNarration,
 } from "../../.opencode/plugins/just-demand-state.js"
 import subagentContextFactory from "../../.opencode/plugins/just-demand-subagent-context.js"
@@ -349,6 +353,62 @@ test("write tool rule table identifies write-like tools and ignores read-only ba
 })
 
 // ---------------------------------------------------------------------------
+// lib: workflow-control command detection
+// ---------------------------------------------------------------------------
+test("isWorkflowControlCommand detects workflow-control CLI commands", () => {
+  assert.equal(isWorkflowControlCommand("just-demand . mark task-a done"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . select-task task-b"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . complete-verification task-a passed Done"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . update-clarification task-a --field scope=test"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . list-active"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . create-intake Title Request"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . promote intake-1 Title Goal --type design"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . checkpoint-commit task-a"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . --help"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . -h"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . archive task-a"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . cleanup task-a"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . status"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . resume task-a"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . create-session"), true)
+})
+
+test("isWorkflowControlCommand does not fire on non-control commands", () => {
+  assert.equal(isWorkflowControlCommand("git commit -m fix"), false)
+  assert.equal(isWorkflowControlCommand("mkdir -p out && touch out/file.txt"), false)
+  assert.equal(isWorkflowControlCommand("python3 -m unittest tests"), false)
+  assert.equal(isWorkflowControlCommand(""), false)
+  assert.equal(isWorkflowControlCommand(null), false)
+  assert.equal(isWorkflowControlCommand("just-demand . implement"), false)
+})
+
+test("isWorkflowControlCommand does not fire on composite commands with write patterns", () => {
+  assert.equal(isWorkflowControlCommand("just-demand . mark task-a done && touch out/file.txt"), false)
+  assert.equal(isWorkflowControlCommand("just-demand . mark task-a done > /tmp/out.txt"), false)
+})
+
+// ---------------------------------------------------------------------------
+// lib: impactsOverlap
+// ---------------------------------------------------------------------------
+test("impactsOverlap detects overlapping impact scopes", () => {
+  assert.equal(impactsOverlap(["src/api/"], ["src/api/users"]), true)
+  assert.equal(impactsOverlap(["src/api/users"], ["src/api/"]), true)
+  assert.equal(impactsOverlap(["docs/"], ["docs/readme.md"]), true)
+  assert.equal(impactsOverlap(["src/api/", "docs/"], ["src/api/users"]), true)
+  assert.equal(impactsOverlap(["src/api/"], ["src/web/"]), false)
+  assert.equal(impactsOverlap(["src/api/"], ["tests/"]), false)
+})
+
+test("impactsOverlap handles empty and invalid inputs", () => {
+  assert.equal(impactsOverlap([], ["src/api/"]), false)
+  assert.equal(impactsOverlap(["src/api/"], []), false)
+  assert.equal(impactsOverlap([], []), false)
+  assert.equal(impactsOverlap(null, ["src/api/"]), false)
+  assert.equal(impactsOverlap(["src/api/"], null), false)
+  assert.equal(impactsOverlap(["src/api/"], [123]), false)
+})
+
+// ---------------------------------------------------------------------------
 // lib: intake path detection
 // ---------------------------------------------------------------------------
 test("isIntakeFilePath detects intake file paths", () => {
@@ -416,12 +476,51 @@ test("getExecutionGateState distinguishes no formal task from no selected curren
   const activeDir = join(root, ".just-demand", "state", "active")
   mkdirSync(join(activeDir, "task-a"), { recursive: true })
   writeFileSync(join(activeDir, "task-a", "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "paused" }))
-  assert.deepEqual(getExecutionGateState(root), {
-    reason: "no_current_task_selected",
-    taskId: null,
-    activeTaskCount: 1,
-    activeTaskIds: ["task-a"],
-  })
+  const gateState = getExecutionGateState(root)
+  assert.equal(gateState.reason, "no_current_task_selected")
+  assert.equal(gateState.taskId, null)
+  assert.equal(gateState.activeTaskCount, 1)
+  assert.deepEqual(gateState.activeTaskIds, ["task-a"])
+  assert.deepEqual(gateState.overlappingTaskIds, [])
+  assert.equal(gateState.nonOverlappingActiveTaskCount, 0)
+})
+
+test("getExecutionGateState includes impact overlap info when task is selected with overlapping other tasks", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const activeDir = join(root, ".just-demand", "state", "active")
+  // Task A (selected) has impact: src/api/
+  mkdirSync(join(activeDir, "task-a"), { recursive: true })
+  writeFileSync(join(activeDir, "task-a", "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "executing", impact: ["src/api/"] }))
+  // Task B has overlapping impact: src/api/users
+  mkdirSync(join(activeDir, "task-b"), { recursive: true })
+  writeFileSync(join(activeDir, "task-b", "task.json"), JSON.stringify({ id: "task-b", title: "Task B", status: "planning", impact: ["src/api/users"] }))
+  // Task C has non-overlapping impact: docs/
+  mkdirSync(join(activeDir, "task-c"), { recursive: true })
+  writeFileSync(join(activeDir, "task-c", "task.json"), JSON.stringify({ id: "task-c", title: "Task C", status: "planning", impact: ["docs/"] }))
+
+  const gateState = getExecutionGateState(root)
+  assert.equal(gateState.reason, "ready")
+  assert.equal(gateState.taskId, "task-a")
+  assert.equal(gateState.activeTaskCount, 3)
+  assert.deepEqual(gateState.overlappingTaskIds, ["task-b"])
+  assert.equal(gateState.nonOverlappingActiveTaskCount, 1)
+})
+
+test("getExecutionGateState reports no overlap when other tasks lack impact scope", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const activeDir = join(root, ".just-demand", "state", "active")
+  mkdirSync(join(activeDir, "task-a"), { recursive: true })
+  writeFileSync(join(activeDir, "task-a", "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "executing", impact: ["src/api/"] }))
+  mkdirSync(join(activeDir, "task-b"), { recursive: true })
+  writeFileSync(join(activeDir, "task-b", "task.json"), JSON.stringify({ id: "task-b", title: "Task B", status: "planning" }))
+
+  const gateState = getExecutionGateState(root)
+  assert.equal(gateState.reason, "ready")
+  assert.equal(gateState.taskId, "task-a")
+  assert.deepEqual(gateState.overlappingTaskIds, [])
+  assert.equal(gateState.nonOverlappingActiveTaskCount, 1)
 })
 
 test("workflow subagent name supports current and compatibility argument keys", () => {
@@ -514,6 +613,116 @@ test("workflow-entry narration detector allows command narration but not inline 
   assert.equal(textLooksLikeWorkflowEntryNarration("I am creating the workflow entry now: create-intake first, then promote, then list-active."), true)
   assert.equal(textLooksLikeWorkflowEntryNarration("Run just-demand . --help so we can verify the help path."), true)
   assert.equal(textLooksLikeWorkflowEntryNarration("I will implement the fix inline in the main session, then maybe run create-intake."), false)
+})
+
+// ---------------------------------------------------------------------------
+// explicit workflow skip detector
+// ---------------------------------------------------------------------------
+test("textLooksLikeExplicitWorkflowSkip detects English skip-workflow override", () => {
+  const samples = [
+    "I will skip the workflow and implement this inline.",
+    "I'm bypassing the workflow for this change.",
+    "Let me do a workflow bypass and fix this directly.",
+    "This is an explicit workflow skip override.",
+    "I'm explicitly skipping workflow and proceeding inline.",
+    "I will proceed outside the workflow.",
+    "Doing this without the workflow.",
+    "workflow override for this simple fix.",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeExplicitWorkflowSkip(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeExplicitWorkflowSkip detects Chinese skip-workflow override", () => {
+  const samples = [
+    "我跳过工作流直接做这个修改。",
+    "绕过工作流，我直接改代码。",
+    "不经过工作流，我先修一下。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeExplicitWorkflowSkip(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeExplicitWorkflowSkip does not fire on ordinary work phrases", () => {
+  const samples = [
+    "I will implement the feature inline.",
+    "Let me fix this in the main session.",
+    "I'll just finish this here.",
+    "Please build a dashboard.",
+    "I need to read through the code first.",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeExplicitWorkflowSkip(sample), false, `Expected false for: "${sample}"`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// injectWorkflowStateBanner
+// ---------------------------------------------------------------------------
+test("injectWorkflowStateBanner appends active task banner", () => {
+  const text = "Hello."
+  const result = injectWorkflowStateBanner(text, "task-a", { id: "task-a", status: "executing", title: "My Task" }, { reason: "ready" })
+  assert.match(result, /Hello\./)
+  assert.match(result, /\[workflow-state\]/)
+  assert.match(result, /Active: task-a/)
+  assert.match(result, /My Task/)
+  assert.match(result, /executing/)
+})
+
+test("injectWorkflowStateBanner appends no-task three-route banner when no active task", () => {
+  const text = "Hello."
+  const result = injectWorkflowStateBanner(text, null, null, { reason: "no_formal_task", taskId: null, activeTaskCount: 0 })
+  assert.match(result, /Hello\./)
+  assert.match(result, /\[workflow-state\]/)
+  assert.match(result, /No active task/)
+  assert.match(result, /enter workflow/)
+  assert.match(result, /direct answer/)
+  assert.match(result, /skip workflow/)
+})
+
+test("injectWorkflowStateBanner appends select-task banner when unfinished tasks exist", () => {
+  const text = "Hello."
+  const result = injectWorkflowStateBanner(text, null, null, { reason: "no_current_task_selected", taskId: null, activeTaskCount: 2 })
+  assert.match(result, /Hello\./)
+  assert.match(result, /\[workflow-state\]/)
+  assert.match(result, /Unfinished tasks exist/)
+  assert.match(result, /select-task/)
+})
+
+test("injectWorkflowStateBanner deduplicates when marker already present", () => {
+  const text = "Hello.\n\n[workflow-state] No active task"
+  const result = injectWorkflowStateBanner(text, null, null, { reason: "no_formal_task" })
+  assert.equal(result, text)
+})
+
+// ---------------------------------------------------------------------------
+// controller decision: explicit workflow skip override
+// ---------------------------------------------------------------------------
+test("controller decision allows explicit workflow skip override when no active task", () => {
+  const decision = buildControllerDecision(
+    "I will skip the workflow and implement this inline.",
+    { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false },
+  )
+  assert.equal(decision.phase, CONTROLLER_PHASE.route)
+  assert.equal(decision.action, CONTROLLER_ACTION.allow)
+  assert.equal(decision.reason_code, "workflow_skip_override")
+  assert.deepEqual(decision.rewrite, null)
+})
+
+test("controller decision allows explicit workflow skip override with active task (bypasses execution_needed)", () => {
+  const decision = buildControllerDecision(
+    "I will skip the workflow and implement this inline.",
+    {
+      activeTask: { id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] },
+      same_topic_turns: 0,
+      subagent_unavailable_pending: false,
+    },
+  )
+  assert.equal(decision.phase, CONTROLLER_PHASE.route)
+  assert.equal(decision.action, CONTROLLER_ACTION.allow)
+  assert.equal(decision.reason_code, "workflow_skip_override")
 })
 
 // ---------------------------------------------------------------------------
@@ -664,7 +873,8 @@ test("state allows neutral analysis that mentions code", async () => {
     const output = { parts: [{ type: "text", text: sample }] }
     await plugin["chat.message"]({ sessionID: `neutral-code-${index}` }, output)
 
-    assert.equal(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample), `Expected text to contain sample: "${sample}"`)
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand workflow entry required\]/i)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
   }
@@ -685,8 +895,9 @@ test("state allows workflow-entry narration when active tasks exist but no curre
 
   await plugin["chat.message"]({ sessionID: "workflow-entry-with-unselected-task" }, output)
 
-  assert.equal(output.parts[0].text, sample)
-  assert.doesNotMatch(output.parts[0].text, /select-task/i)
+  assert.ok(output.parts[0].text.includes(sample))
+  assert.match(output.parts[0].text, /\[workflow-state\]/)
+  assert.match(output.parts[0].text, /select-task/i)
   assert.doesNotMatch(output.parts[0].text, /workflow entry required/i)
   assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
 })
@@ -768,7 +979,7 @@ test("state appends clarification reminder for concrete request turns", async ()
   assert.match(output.parts[0].text, /socratic-clarification second/i)
   assert.match(output.parts[0].text, /Use just-demand subagents proactively/i)
   assert.match(output.parts[0].text, /\[just-demand reminder\]/)
-  assert.doesNotMatch(output.parts[0].text, /task-a/)
+  assert.match(output.parts[0].text, /\[workflow-state\].*task-a/)
 })
 
 test("state hard redirects concrete workflow work when no formal task exists", async () => {
@@ -783,10 +994,13 @@ test("state hard redirects concrete workflow work when no formal task exists", a
 
   assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
   assert.match(output.parts[0].text, /no formal task yet/i)
-  assert.match(output.parts[0].text, /Return to the workflow entry path first/i)
+  assert.match(output.parts[0].text, /Enter workflow/i)
+  assert.match(output.parts[0].text, /Three routes/i)
   assert.match(output.parts[0].text, /using-just-demand/i)
   assert.match(output.parts[0].text, /socratic-clarification/i)
   assert.match(output.parts[0].text, /just-demand-intake/i)
+  assert.match(output.parts[0].text, /direct answer/i)
+  assert.match(output.parts[0].text, /skip workflow/i)
   assert.match(output.parts[0].text, /Original response:/i)
   assert.match(output.parts[0].text, /> Please build a dashboard for alerts\./)
   assert.notEqual(output.parts[0].text, "Please build a dashboard for alerts.")
@@ -843,7 +1057,8 @@ test("state allows workflow-entry narration when no active task exists", async (
   for (const [index, sample] of samples.entries()) {
     const output = { parts: [{ type: "text", text: sample }] }
     await plugin["chat.message"]({ sessionID: `workflow-entry-narration-${index}` }, output)
-    assert.equal(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
     assert.doesNotMatch(output.parts[0].text, /workflow entry required/i)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
   }
@@ -978,6 +1193,127 @@ test("state blocks workflow task dispatch with real agent argument key when acti
   )
 })
 
+test("state allows dispatch when task is ready even in non-standard status (dispatch exemption)", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  // Task is in "paused" status (not in WRITE_ALLOWED_STATUSES) but IS ready (clarification complete)
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "paused",
+    clarification: {
+      scope: "Feature scope",
+      final_expected_effect: "Feature works",
+      chosen_approach: "Approach A",
+      final_implementation_plan: "1. Build\n2. Test",
+      approval: "Approved",
+    },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // Dispatch should succeed even though status is "paused"
+  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "Task" }, output),
+  )
+})
+
+test("state still blocks apply_patch when task status is paused even if task is ready (no dispatch exemption for writes)", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "paused",
+    clarification: {
+      scope: "Feature scope",
+      final_expected_effect: "Feature works",
+      chosen_approach: "Approach A",
+      final_implementation_plan: "1. Build\n2. Test",
+      approval: "Approved",
+    },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // apply_patch should still be blocked because it is not a dispatch
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch: active task task-a is in status 'paused', which does not allow writes\./,
+  )
+})
+
+test("workflow-control bash command passes through gate when task is not ready", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "executing",
+    clarification: { scope: "" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // Workflow-control command passes despite task not being ready
+  const output = { args: { command: "just-demand . mark task-a done" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, output),
+  )
+})
+
+test("workflow-control bash command passes through gate when no formal task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // create-intake should work without a formal task
+  const output = { args: { command: "just-demand . create-intake Test Title Request" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, output),
+  )
+})
+
+test("write-like bash with workflow-control prefix in composite command still blocked when no formal task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // Composite command with write pattern still blocked
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "just-demand . mark task-a done && touch out/file.txt" } }),
+    /Blocked bash: there is no formal task yet\./,
+  )
+})
+
+test("list-active without shell redirection passes through gate when no formal task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // list-active should work without a formal task
+  const output = { args: { command: "just-demand . list-active" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, output),
+  )
+})
+
 test("state blocks write-like bash commands when active task is not ready for execution (past planning)", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -1062,7 +1398,8 @@ test("state stays quiet for ordinary analysis and status-summary language", asyn
 
     await plugin["chat.message"]({ sessionID: `neutral-analysis-${index}` }, output)
 
-    assert.equal(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
     assert.doesNotMatch(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
     assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
@@ -1085,7 +1422,8 @@ test("state appends premise-check reminder for narrow frame-check turns and dedu
   assert.match(first.parts[0].text, /\[just-demand reminder\]/)
   assert.match(first.parts[0].text, /Check whether the current frame is the right problem model/i)
   assert.match(first.parts[0].text, /Do not keep tuning a weak premise/i)
-  assert.equal(second.parts[0].text, "What if the premise is off?")
+  assert.ok(second.parts[0].text.includes("What if the premise is off?"))
+  assert.match(second.parts[0].text, /\[workflow-state\]/)
 })
 
 test("state blocks obvious execution-needed replies on unrouted active tasks", async () => {
@@ -1110,11 +1448,148 @@ test("state blocks obvious execution-needed replies on unrouted active tasks", a
     await plugin["chat.message"]({ sessionID: `execution-${index}` }, output)
 
     assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-    assert.match(output.parts[0].text, /This reads like execution work that should run through a just-demand-\* workflow subagent/i)
-    assert.match(output.parts[0].text, /Dispatch the supported just-demand-\* subagent path/i)
+    assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+    assert.match(output.parts[0].text, /Dispatch the supported just-demand-\* subagent/i)
+    assert.match(output.parts[0].text, /skip workflow/i)
     assert.match(output.parts[0].text, /Original response:/i)
     assert.match(output.parts[0].text, /> /)
     assert.notEqual(output.parts[0].text, sample)
+  }
+})
+
+test("state blocks additional common execution phrasings on unrouted active tasks", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    // "let me/us" patterns
+    "Let me implement the fix now.",
+    "Let me build the feature inline.",
+    "Let me add the new endpoint here.",
+    "Let me fix the regression directly.",
+    "Let me debug the issue in the main session.",
+    "Let me update the configuration.",
+    // "I'll" patterns
+    "I'll implement the feature.",
+    "I'll fix the bug directly.",
+    "I'll build the new component.",
+    "I'll debug the issue inline.",
+    // "I'm going to" patterns
+    "I'm going to implement the fix now.",
+    "I'm going to build this feature inline.",
+    "I'm going to fix the broken test.",
+    // Chinese "让我/我来" patterns
+    "让我来实现这个修复。",
+    "我来调试这个问题。",
+    "我们来添加这个功能。",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+
+    await plugin["chat.message"]({ sessionID: `broad-execution-${index}` }, output)
+
+    assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected block for: "${sample}"`)
+    assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+    assert.match(output.parts[0].text, /skip workflow/i)
+    assert.match(output.parts[0].text, /Original response:/i)
+    assert.notEqual(output.parts[0].text, sample)
+  }
+})
+
+test("state blocks code investigation intent inside active execution task without subagents", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "Let me inspect the codebase to understand the structure.",
+    "I need to read through the source files before proceeding.",
+    "Let me trace the implementation to find the bug.",
+    "Let me search the codebase for similar patterns.",
+    "Let me look at the existing implementation.",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+    await plugin["chat.message"]({ sessionID: `code-investigation-exec-${index}` }, output)
+
+    assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected block for: "${sample}"`)
+    assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+  }
+})
+
+test("state allows code investigation during planning (non-execution) status inside active task", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", current_step: "clarify", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "Let me inspect the codebase to understand the current structure." }] }
+
+  await plugin["chat.message"]({}, output)
+
+  assert.ok(output.parts[0].text.includes("Let me inspect the codebase to understand the current structure."))
+  assert.match(output.parts[0].text, /\[workflow-state\]/)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
+})
+
+test("state allows neutral analysis with code investigation language inside active execution task", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "I am inspecting the code, but just reviewing and not proposing to implement anything.",
+    "Quick review: I traced the implementation and the structure seems reasonable with no action needed.",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+    await plugin["chat.message"]({ sessionID: `neutral-investigation-${index}` }, output)
+
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
+  }
+})
+
+test("explicit workflow skip overrides execution block for new patterns and code investigation", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "I will skip the workflow and implement the fix directly.",
+    "I'm bypassing the workflow and inspecting the codebase now.",
+    "workflow override — let me implement the change inline.",
+  ]
+
+  for (const [index, sample] of samples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+
+    await plugin["chat.message"]({ sessionID: `skip-override-broad-${index}` }, output)
+
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected no block for: "${sample}"`)
+    assert.doesNotMatch(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
   }
 })
 
@@ -1184,7 +1659,8 @@ test("state leaves analysis and near-miss closeout replies unchanged", async () 
 
     await plugin["chat.message"]({ sessionID: `closeout-safe-${index}` }, output)
 
-    assert.equal(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand closeout blocked\]/i)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
     assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
@@ -1214,7 +1690,8 @@ test("state stays quiet for Chinese near-miss execution and closeout wording", a
 
     await plugin["chat.message"]({ sessionID: `near-miss-${index}` }, output)
 
-    assert.equal(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
     assert.doesNotMatch(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
     assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
@@ -1241,7 +1718,8 @@ test("state stays quiet for cross-sentence execution and closeout near-miss word
 
     await plugin["chat.message"]({ sessionID: `cross-sentence-${index}` }, output)
 
-    assert.equal(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
     assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
     assert.doesNotMatch(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
     assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
@@ -1297,7 +1775,8 @@ test("state does not inject the same reminder type on consecutive turns", async 
   await plugin["chat.message"]({ sessionID: "dedupe-test" }, second)
 
   assert.match(first.parts[0].text, /\[just-demand reminder\]/i)
-  assert.equal(second.parts[0].text, "Please fix the bug in the API.")
+  assert.ok(second.parts[0].text.includes("Please fix the bug in the API."))
+  assert.match(second.parts[0].text, /\[workflow-state\]/)
 })
 
 test("state resets after three same-topic turns", async () => {
@@ -1320,7 +1799,8 @@ test("state resets after three same-topic turns", async () => {
   assert.doesNotMatch(second.parts[0].text, /\[just-demand reminder\]/)
   assert.match(third.parts[0].text, /\[just-demand reminder\]/)
   assert.match(third.parts[0].text, /Reset the problem model/i)
-  assert.equal(fourth.parts[0].text, "Same topic alpha beta gamma")
+  assert.ok(fourth.parts[0].text.includes("Same topic alpha beta gamma"))
+  assert.match(fourth.parts[0].text, /\[workflow-state\]/)
 })
 
 test("state asks retry or skip after subagent becomes unavailable", async () => {
@@ -1348,7 +1828,8 @@ test("state asks retry or skip after subagent becomes unavailable", async () => 
 
   const second = { parts: [{ type: "text", text: "Continue with the main session." }] }
   await statePlugin["chat.message"]({}, second)
-  assert.equal(second.parts[0].text, "Continue with the main session.")
+  assert.ok(second.parts[0].text.includes("Continue with the main session."))
+  assert.match(second.parts[0].text, /\[workflow-state\]/)
 })
 
 // ---------------------------------------------------------------------------

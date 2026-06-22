@@ -330,6 +330,16 @@ class InstallIntegrationTests(unittest.TestCase):
             self.assertIn('edit: deny', research_agent)
             self.assertIn('bash: deny', research_agent)
             self.assertIn('Prefer dedicated read-only tools first', research_agent)
+
+            # Output contract coverage
+            self.assertIn('## Output Contract', research_agent)
+            self.assertIn('**Key findings**', research_agent)
+            self.assertIn('## Output Contract', implement_agent)
+            self.assertIn('**Files changed**', implement_agent)
+            self.assertIn('**Concerns**', implement_agent)
+            self.assertIn('## Output Contract', check_agent)
+            self.assertIn('**Findings**', check_agent)
+            self.assertIn('**Residual risk**', check_agent)
     
     def test_install_opencode_global_creates_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:

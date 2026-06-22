@@ -32,7 +32,13 @@ const WRITE_TOOL_RULES = Object.freeze([
   {
     name: "bash:write-like",
     label: "bash",
-    match: (toolName, args) => toolName === "bash" && looksLikeBashWriteCommand(String(args?.command || "")),
+    match: (toolName, args) => {
+      if (toolName !== "bash") return false
+      const cmd = String(args?.command || "")
+      // Workflow-control CLI commands are not execution writes
+      if (isWorkflowControlCommand(cmd)) return false
+      return looksLikeBashWriteCommand(cmd)
+    },
     needsExecutionGate: () => true,
   },
 ])
@@ -46,6 +52,24 @@ const WRITE_ALLOWED_STATUSES = new Set([
   "changes_requested",
   "tweaking",
   "debugging",
+])
+
+const WORKFLOW_CONTROL_CLI_COMMANDS = new Set([
+  "mark",
+  "select-task",
+  "resume",
+  "complete-verification",
+  "update-clarification",
+  "checkpoint-commit",
+  "create-intake",
+  "promote",
+  "list-active",
+  "--help",
+  "-h",
+  "archive",
+  "cleanup",
+  "status",
+  "create-session",
 ])
 
 const BASH_WRITE_PATTERNS = [
@@ -75,11 +99,24 @@ const NEGATED_EXECUTION_PATTERNS = [
   /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
 ]
 
+const EXPLICIT_WORKFLOW_SKIP_PATTERNS = [
+  /\b(skip(?:ping)?\s+the?\s+workflow|bypass(?:ing)?\s+the?\s+workflow|workflow\s+(?:skip|bypass|override)|explicit(?:ly)?\s+(?:skip(?:ping)?|bypass(?:ing)?)\s+workflow|doing\s+this\s+(?:outside|without)\s+the?\s+workflow|proceed(?:ing)?\s+(?:outside|without)\s+the?\s+workflow)\b/i,
+  /(?:跳过工作流|绕过工作流|不经过工作流)/,
+]
+
 const EXECUTION_CANDIDATE_PATTERNS = [
   /\b(i|we)\s+(am|'m|are|will|can|should|need to|need)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
   /\b(i|we)\s+(should|will|can|need to)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
   /\b(i|we)\s+(implemented|built|added|removed|refactored|updated|fixed|debugged|investigated|traced|analy[sz]ed|designed|reworked|extended|patched|changed)\b/i,
   /\b(i(?:'ll)?|we)\s+just\s+finish(?:\s+this)?\s+in\s+the\s+main\s+session\b/i,
+  // "let me/us" patterns — common agent phrasing for inline execution intent
+  /\b(let\s+me|let's|lets)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  // "I'll" patterns
+  /\bi'[gl]l\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  // "I'm going to" patterns
+  /\bi'm\s+going\s+to\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  // Chinese: "让我/我来" patterns
+  /(?:让我|我来|我们来)\s*(?:实现|修复|调试|排查|添加|修改|重构|更新|构建|创建|配置)/i,
   /直接在主会话里(?:实现|修复|调试|处理|修改)/,
 ]
 
@@ -192,6 +229,12 @@ export const textLooksLikeCompletionClaim = (text) => {
   return COMPLETION_CLAIM_PATTERNS.some((pattern) => pattern.test(value))
 }
 
+export const textLooksLikeExplicitWorkflowSkip = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  return EXPLICIT_WORKFLOW_SKIP_PATTERNS.some((pattern) => pattern.test(body))
+}
+
 export const taskLooksLikeLongContextExecutionCandidate = (task, text) => {
   if (!task || task.status === "done") return false
   if (hasAssignedWorkflowSubagents(task)) return false
@@ -215,6 +258,30 @@ export const taskNeedsCheckpointFollowUp = (task) => {
   if (!task) return false
   if (String(task.verification_status || "").toLowerCase() !== "passed") return false
   return !(task.checkpoint_commit && task.checkpoint_commit.created)
+}
+
+export const isWorkflowControlCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+  // Must match a just-demand CLI workflow-control command
+  const match = trimmed.match(/^just-demand\s+\.\s+(\S+)/)
+  if (!match || !WORKFLOW_CONTROL_CLI_COMMANDS.has(match[1])) return false
+  // Must not also be a write-like command (composite commands like "mark && touch x" still gate)
+  return !BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed)) && !hasUnquotedShellRedirection(trimmed)
+}
+
+export const impactsOverlap = (impactsA, impactsB) => {
+  if (!Array.isArray(impactsA) || !Array.isArray(impactsB)) return false
+  if (impactsA.length === 0 || impactsB.length === 0) return false
+  for (const a of impactsA) {
+    if (typeof a !== "string") continue
+    for (const b of impactsB) {
+      if (typeof b !== "string") continue
+      // Path-prefix overlap: one impact scope starts with the other
+      if (a.startsWith(b) || b.startsWith(a) || a === b) return true
+    }
+  }
+  return false
 }
 
 export const looksLikeBashWriteCommand = (command) => {
@@ -333,9 +400,11 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
   const taskStatus = String(task?.status || "").toLowerCase()
 
   // Gate 2: Is the task in a write-allowed status?
-  // Only applies to tools that need the execution gate (e.g., non-writable
-  // subagents like research pass through).
-  if (rule.needsExecutionGate(args) && !WRITE_ALLOWED_STATUSES.has(taskStatus)) {
+  // Dispatch exemption: subagent dispatch is not subject to status gating.
+  // Status gating applies to execution-write tools (apply_patch, bash).
+  // Readiness is enforced separately in Gate 3 for dispatch.
+  const isDispatch = rule.name === "task:workflow-subagent"
+  if (rule.needsExecutionGate(args) && !isDispatch && !WRITE_ALLOWED_STATUSES.has(taskStatus)) {
     debugLog(`${logPrefix}.block`, { reason: "status_not_allowed", rule: rule.name, task_id: taskId, status: taskStatus }, directory)
     throw new Error(buildExecutionGateError(rule.label, { reason: "status_not_allowed", taskId, status: taskStatus }))
   }
@@ -343,6 +412,7 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
   // Gate 3: Execution readiness check.
   // Non-ready tasks are blocked from write tools. Use the dedicated
   // `update-clarification` CLI command to fill required clarification fields.
+  // Applies to both dispatch and execution-write: dispatch requires a ready task.
   if (rule.needsExecutionGate(args) && !taskIsReadyForExecution(task)) {
     const missing = getMissingExecutionGateFields(task)
     debugLog(`${logPrefix}.block`, { reason: "task_not_ready", rule: rule.name, task_id: taskId, missing }, directory)
@@ -357,7 +427,27 @@ export const getExecutionGateState = (directory) => {
   const activeTasks = listUnfinishedTasks(directory)
   const taskId = getActiveTask(directory)
   if (taskId) {
-    return { reason: "ready", taskId, activeTaskCount: activeTasks.length }
+    // Check impact overlap between current task and other active tasks
+    const currentTask = readTaskJson(directory, taskId)
+    const currentImpacts = currentTask?.impact || []
+    const overlappingTaskIds = []
+    let nonOverlappingCount = 0
+    for (const t of activeTasks) {
+      if (t.id === taskId) continue
+      const otherTask = readTaskJson(directory, t.id)
+      if (impactsOverlap(currentImpacts, otherTask?.impact || [])) {
+        overlappingTaskIds.push(t.id)
+      } else {
+        nonOverlappingCount += 1
+      }
+    }
+    return {
+      reason: "ready",
+      taskId,
+      activeTaskCount: activeTasks.length,
+      overlappingTaskIds,
+      nonOverlappingActiveTaskCount: nonOverlappingCount,
+    }
   }
   if (activeTasks.length > 0) {
     return {
@@ -365,9 +455,11 @@ export const getExecutionGateState = (directory) => {
       taskId: null,
       activeTaskCount: activeTasks.length,
       activeTaskIds: activeTasks.map((task) => task.id),
+      overlappingTaskIds: [],
+      nonOverlappingActiveTaskCount: 0,
     }
   }
-  return { reason: "no_formal_task", taskId: null, activeTaskCount: 0, activeTaskIds: [] }
+  return { reason: "no_formal_task", taskId: null, activeTaskCount: 0, activeTaskIds: [], overlappingTaskIds: [], nonOverlappingActiveTaskCount: 0 }
 }
 
 export const buildExecutionGateError = (toolLabel, gate, missing = []) => {

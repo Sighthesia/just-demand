@@ -6,11 +6,13 @@ import {
   enforceExecutionGate,
   getExecutionGateState,
   getReminderState,
+  hasAssignedWorkflowSubagents,
   readTaskJson,
   taskLooksLikeLongContextExecutionCandidate,
   taskNeedsCheckpointFollowUp,
   taskNeedsVerificationCloseout,
   textLooksLikeCompletionClaim,
+  textLooksLikeExplicitWorkflowSkip,
   updateReminderState,
   workflowRoot,
 } from "./just-demand-lib.js"
@@ -221,7 +223,32 @@ const buildControllerDecision = (text, reminderState) => {
     }
   }
 
+  // Explicit workflow skip override: agent consciously overrides the workflow
+  // route to proceed inline. Overrides execution_needed, workflow_entry_required,
+  // and select_task_hint. Does not override subagent_unavailable_pending above.
+  if (textLooksLikeExplicitWorkflowSkip(text)) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.allow,
+      reason_code: "workflow_skip_override",
+      rewrite: null,
+    }
+  }
+
   if (CROSS_SENTENCE_NEAR_MISS_PATTERNS.some((pattern) => pattern.test(text))) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.allow,
+      reason_code: "no_op",
+      rewrite: null,
+    }
+  }
+
+  // Neutral analysis/status-summary text must be checked before any active task
+  // execution detection. Text that explicitly declares itself as neutral (e.g.
+  // "just reviewing, no action needed") should not be blocked by execution
+  // candidate patterns that incidentally match past-tense verbs like "traced".
+  if (textLooksLikeNeutralAnalysis(text)) {
     return {
       phase: CONTROLLER_PHASE.route,
       action: CONTROLLER_ACTION.allow,
@@ -250,6 +277,25 @@ const buildControllerDecision = (text, reminderState) => {
       }
     }
 
+    // Block code investigation intent inside active execution tasks without
+    // assigned subagents — reading/tracing/inspecting code to execute a task
+    // is also long-context work that should route through a subagent.
+    if (textLooksLikeCodeInvestigationIntent(text) && !textLooksLikeNeutralAnalysis(text)) {
+      const currentStep = String(activeTask.current_step || "").toLowerCase()
+      const status = String(activeTask.status || "").toLowerCase()
+      const taskSignalsExecution = ["execut", "implement", "verify", "changes_requested"].some(
+        (fragment) => currentStep.includes(fragment) || status.includes(fragment),
+      )
+      if (taskSignalsExecution && !hasAssignedWorkflowSubagents(activeTask)) {
+        return {
+          phase: CONTROLLER_PHASE.execute,
+          action: CONTROLLER_ACTION.block,
+          reason_code: "execution_needed",
+          rewrite: { mode: "replace", preserve_original: true },
+        }
+      }
+    }
+
     if (taskNeedsCheckpointFollowUp(activeTask)) {
       return {
         phase: CONTROLLER_PHASE.close,
@@ -257,17 +303,6 @@ const buildControllerDecision = (text, reminderState) => {
         reason_code: "checkpoint_followup",
         rewrite: { mode: "append" },
       }
-    }
-  }
-
-  // Neutral analysis/status-summary text should not be blocked even if it
-  // contains concrete work words incidentally (e.g. "not proposing to implement").
-  if (textLooksLikeNeutralAnalysis(text)) {
-    return {
-      phase: CONTROLLER_PHASE.route,
-      action: CONTROLLER_ACTION.allow,
-      reason_code: "no_op",
-      rewrite: null,
     }
   }
 
@@ -460,8 +495,9 @@ const blockExecutionNeeded = (text, reminderState) => {
 
   return [
     EXECUTION_BLOCKED_HEADER,
-    "- This reads like execution work that should run through a just-demand-* workflow subagent.",
-    "- Dispatch the supported just-demand-* subagent path before continuing the long-context work inline.",
+    "- This reads like execution work that must run through a just-demand-* workflow subagent, not inline in the main session.",
+    "- Dispatch the supported just-demand-* subagent for the current task.",
+    "- To explicitly override the workflow path and continue inline, include \"skip workflow\" or \"workflow override\" in your response.",
     "",
     "Original response:",
     quotedText,
@@ -484,11 +520,34 @@ const blockWorkflowEntryRequired = (text, reminderState) => {
   return [
     WORKFLOW_ENTRY_BLOCKED_HEADER,
     "- This is concrete workflow work, but there is no formal task yet.",
-    "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then `just-demand-intake` before continuing.",
+    "- Three routes:",
+    "  · Enter workflow (recommended): `using-just-demand` → `socratic-clarification` → `just-demand-intake`",
+    "  · Direct answer: if this is a simple question or non-work inquiry, restate it without work intent.",
+    "  · Skip workflow: include \"skip workflow\" or \"workflow override\" to proceed inline.",
     "",
     "Original response:",
     quotedText,
   ].join("\n")
+}
+
+const WORKFLOW_STATE_MARKER = "[workflow-state]"
+
+const injectWorkflowStateBanner = (text, activeTaskId, activeTask, gateState) => {
+  if (typeof text !== "string") return text
+  if (text.includes(WORKFLOW_STATE_MARKER)) return text
+
+  let banner
+  if (activeTaskId && activeTask) {
+    const status = activeTask.status || "unknown"
+    const title = activeTask.title ? ` "${activeTask.title}"` : ""
+    banner = `\n\n${WORKFLOW_STATE_MARKER} Active: ${activeTaskId}${title} (${status})`
+  } else if (gateState?.reason === "no_current_task_selected") {
+    banner = `\n\n${WORKFLOW_STATE_MARKER} Unfinished tasks exist — select a task: \`just-demand . select-task <id>\``
+  } else {
+    banner = `\n\n${WORKFLOW_STATE_MARKER} No active task — routes: enter workflow | direct answer | skip workflow`
+  }
+
+  return text + banner
 }
 
 export default async ({ directory } = {}) => {
@@ -553,8 +612,11 @@ export default async ({ directory } = {}) => {
       if (controllerDecision.reason_code !== "subagent_retry_or_skip") {
         clearSubagentUnavailablePending(workflowDirectory, sessionID)
       }
+
+      // Unconditional workflow-state injection: visible every turn.
+      textPart.text = injectWorkflowStateBanner(textPart.text, activeTaskId, activeTask, gateState)
     },
   }
 }
 
-export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE, textLooksLikeCodeInvestigationIntent, textLooksLikeNeutralAnalysis, textLooksLikeWorkflowEntryNarration }
+export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE, injectWorkflowStateBanner, textLooksLikeCodeInvestigationIntent, textLooksLikeExplicitWorkflowSkip, textLooksLikeNeutralAnalysis, textLooksLikeWorkflowEntryNarration }

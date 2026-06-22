@@ -17,4 +17,11 @@ Before editing UI, animation, layout, reveal, overflow, clipping, masking, or qu
 
 Containment is acceptable when the task explicitly chose it. If containment is only a safety guardrail, keep the primary behavior aligned with the chosen approach, such as foreground following the container's anchor, timing, direction, or available layout space.
 
-Report files changed, verification run, and any concerns. Include a concern if the code passes technical checks but the visible effect may still feel clipped, unsynchronized, or like a hard cut.
+## Output Contract
+
+Conclude every implementation with:
+- **Files changed**: list each file and the nature of changes
+- **Verification**: what was run and whether it passed
+- **Concerns**: residual risks, edge cases, or visible effects that may feel unexpected
+
+Include a concern if the code passes technical checks but the visible effect may still feel clipped, unsynchronized, or like a hard cut.
