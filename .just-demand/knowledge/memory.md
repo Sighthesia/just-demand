@@ -316,3 +316,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-22-analyze-weak-workflow-state-persistence-task (Analyze weak workflow state persistence) completed with status 'done'.
   Verification summary: Read-only evaluation concluded weak workflow state persistence is not worth adding now; continuity-only state remains lower value than its added complexity and authority risk.
+
+- Task 2026-06-22-redesign-agent-team-roles-task (Redesign agent team roles) completed with status 'done'.
+  Verification summary: Team-style agent role redesign verified: active roles are researcher/coder/tester/advisor, docs role removed from active surface, advisor added as fresh-context advisory helper, plugin/install/workflow tests passed.

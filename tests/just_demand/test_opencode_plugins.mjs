@@ -171,7 +171,7 @@ test("listUnfinishedTasks returns empty array when active dir missing", () => {
 
 
 // ---------------------------------------------------------------------------
-// lib: readTaskContext - implement
+// lib: readTaskContext - coder
 // ---------------------------------------------------------------------------
 test("readTaskContext combines context and implement brief", () => {
   const root = makeRoot()
@@ -182,7 +182,7 @@ test("readTaskContext combines context and implement brief", () => {
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Should we keep the legacy label?\n")
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { expected_behavior: "Saving shows a toast.", actual_behavior: "Saving does nothing.", reproduction: "1. Click save", scope: "Save flow only.", non_blocking_questions: ["Should we keep the legacy label?"] } }))
   writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
-  const context = readTaskContext(root, "task-a", "just-demand-implement")
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
   assert.match(context, /# Context/)
   assert.match(context, /# Execution Context/)
   assert.match(context, /## Goal/)
@@ -195,7 +195,7 @@ test("readTaskContext combines context and implement brief", () => {
   assert.doesNotMatch(context, /# Verify/)
 })
 
-test("readTaskContext includes open questions for just-demand-check", () => {
+test("readTaskContext includes open questions for just-demand-tester", () => {
   const root = makeRoot()
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
@@ -203,7 +203,7 @@ test("readTaskContext includes open questions for just-demand-check", () => {
   writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Is analytics coverage required?\n")
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { expected_behavior: "Event fires once.", actual_behavior: "Event fires twice.", reproduction: "Submit the form once.", scope: "Analytics submit path.", non_blocking_questions: ["Is analytics coverage required?"] } }))
-  const context = readTaskContext(root, "task-a", "just-demand-check")
+  const context = readTaskContext(root, "task-a", "just-demand-tester")
   assert.match(context, /# Execution Context/)
   assert.match(context, /Event fires once/)
   assert.match(context, /Event fires twice/)
@@ -211,7 +211,7 @@ test("readTaskContext includes open questions for just-demand-check", () => {
   assert.match(context, /analytics coverage/)
 })
 
-test("readTaskContext injects compact execution artifact for implement and check", () => {
+test("readTaskContext injects compact execution artifact for coder and tester", () => {
   const root = makeRoot()
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
@@ -232,10 +232,10 @@ test("readTaskContext injects compact execution artifact for implement and check
     },
   }))
 
-  const implementContext = readTaskContext(root, "task-a", "just-demand-implement")
-  const checkContext = readTaskContext(root, "task-a", "just-demand-check")
+  const coderContext = readTaskContext(root, "task-a", "just-demand-coder")
+  const testerContext = readTaskContext(root, "task-a", "just-demand-tester")
 
-  for (const context of [implementContext, checkContext]) {
+  for (const context of [coderContext, testerContext]) {
     assert.match(context, /# Execution Context/)
     assert.match(context, /## Goal/)
     assert.match(context, /User can save settings confidently/)
@@ -258,7 +258,7 @@ test("readTaskContext falls back to task clarification questions when open_quest
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n")
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { non_blocking_questions: ["Should the fallback question be shown?"] } }))
-  const context = readTaskContext(root, "task-a", "just-demand-implement")
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
   assert.match(context, /Remaining Open Questions/)
   assert.match(context, /fallback question be shown/)
 })
@@ -266,73 +266,73 @@ test("readTaskContext falls back to task clarification questions when open_quest
 // ---------------------------------------------------------------------------
 // lib: readTaskContext - research
 // ---------------------------------------------------------------------------
-test("readTaskContext for just-demand-research includes workspace facts", () => {
+test("readTaskContext for just-demand-researcher includes workspace facts", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const context = readTaskContext(root, "task-a", "just-demand-research")
+  const context = readTaskContext(root, "task-a", "just-demand-researcher")
   assert.match(context, /# Context/)
   assert.match(context, /workspace facts/i)
   assert.match(context, /JSONL/)
 })
 
-test("readTaskContext for just-demand-research avoids absolute research path leakage", () => {
+test("readTaskContext for just-demand-researcher avoids absolute research path leakage", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   mkdirSync(join(taskDir, "research"), { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const context = readTaskContext(root, "task-a", "just-demand-research")
+  const context = readTaskContext(root, "task-a", "just-demand-researcher")
   assert.match(context, /research outputs/i)
   assert.match(context, /local research\//i)
   assert.equal(context.includes(root), false)
 })
 
 // ---------------------------------------------------------------------------
-// lib: readTaskContext - docs
+// lib: readTaskContext - advisor
 // ---------------------------------------------------------------------------
-test("readTaskContext for just-demand-docs includes workspace decisions", () => {
+test("readTaskContext for just-demand-advisor includes workspace memory", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const context = readTaskContext(root, "task-a", "just-demand-docs")
+  const context = readTaskContext(root, "task-a", "just-demand-advisor")
   assert.match(context, /# Context/)
-  assert.match(context, /workspace decisions/i)
+  assert.match(context, /workspace facts/i)
   assert.match(context, /approach A/)
 })
 
-test("readTaskContext for just-demand-docs includes deferred options", () => {
+test("readTaskContext for just-demand-advisor includes deferred options", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const context = readTaskContext(root, "task-a", "just-demand-docs")
+  const context = readTaskContext(root, "task-a", "just-demand-advisor")
   assert.match(context, /deferred options/i)
   assert.match(context, /Option X/)
 })
 
-test("getMissingRequiredContextFiles reports missing implement context files", () => {
+test("getMissingRequiredContextFiles reports missing coder context files", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
-  const missing = getMissingRequiredContextFiles(root, "task-a", "just-demand-implement")
+  const missing = getMissingRequiredContextFiles(root, "task-a", "just-demand-coder")
   assert.deepEqual(missing, ["implement.md"])
 })
 
 test("write tool rule table identifies write-like tools and ignores read-only bash", () => {
   assert.equal(getWriteToolRule("apply_patch", {})?.label, "apply_patch")
-  assert.equal(getWriteToolRule("task", { subagent_type: "just-demand-implement" })?.label, "Task")
-  assert.equal(getWriteToolRule("task", { agent: "just-demand-implement" })?.label, "Task")
-  assert.equal(getWriteToolRule("task", { agent_name: "just-demand-check" })?.label, "Task")
-  assert.equal(getWriteToolRule("task", { subagent_type: "just-demand-research" })?.needsExecutionGate({ subagent_type: "just-demand-research" }), false)
+  assert.equal(getWriteToolRule("task", { subagent_type: "just-demand-coder" })?.label, "Task")
+  assert.equal(getWriteToolRule("task", { agent: "just-demand-coder" })?.label, "Task")
+  assert.equal(getWriteToolRule("task", { agent_name: "just-demand-tester" })?.label, "Task")
+  assert.equal(getWriteToolRule("task", { subagent_type: "just-demand-researcher" })?.needsExecutionGate({ subagent_type: "just-demand-researcher" }), false)
   assert.equal(getWriteToolRule("bash", { command: "mkdir -p out && touch out/file.txt" })?.label, "bash")
   assert.equal(getWriteToolRule("bash", { command: "python3 -m unittest tests.just_demand.test_workflow_core -v" }), null)
   assert.equal(looksLikeBashWriteCommand("mkdir -p out && touch out/file.txt"), true)
@@ -464,7 +464,7 @@ test("looksLikeIntakeOperation does not fire for bash commands with non-intake r
 })
 
 test("looksLikeIntakeOperation returns false for non-matching tools", () => {
-  assert.equal(looksLikeIntakeOperation("Task", { subagent_type: "just-demand-implement" }), false)
+  assert.equal(looksLikeIntakeOperation("Task", { subagent_type: "just-demand-coder" }), false)
   assert.equal(looksLikeIntakeOperation("apply_patch", {}), false)
   assert.equal(looksLikeIntakeOperation("bash", {}), false)
 })
@@ -524,10 +524,10 @@ test("getExecutionGateState reports no overlap when other tasks lack impact scop
 })
 
 test("workflow subagent name supports current and compatibility argument keys", () => {
-  assert.equal(getWorkflowSubagentName({ subagent_type: "just-demand-implement" }), "just-demand-implement")
-  assert.equal(getWorkflowSubagentName({ agent: "just-demand-check" }), "just-demand-check")
-  assert.equal(getWorkflowSubagentName({ agentName: "just-demand-docs" }), "just-demand-docs")
-  assert.equal(getWorkflowSubagentName({ agent_name: "just-demand-research" }), "just-demand-research")
+  assert.equal(getWorkflowSubagentName({ subagent_type: "just-demand-coder" }), "just-demand-coder")
+  assert.equal(getWorkflowSubagentName({ agent: "just-demand-tester" }), "just-demand-tester")
+  assert.equal(getWorkflowSubagentName({ agentName: "just-demand-advisor" }), "just-demand-advisor")
+  assert.equal(getWorkflowSubagentName({ agent_name: "just-demand-researcher" }), "just-demand-researcher")
   assert.equal(getWorkflowSubagentName({ agent: "general" }), "")
 })
 
@@ -1165,7 +1165,7 @@ test("state blocks apply_patch when active task is not ready for execution (past
   )
 })
 
-test("state blocks implement task dispatch when active task is not ready for execution (past planning)", async () => {
+test("state blocks coder task dispatch when active task is not ready for execution (past planning)", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -1174,7 +1174,7 @@ test("state blocks implement task dispatch when active task is not ready for exe
 
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
-    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }),
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }),
     /Blocked Task: active task task-a is not ready for execution yet\./,
   )
 })
@@ -1188,7 +1188,7 @@ test("state blocks workflow task dispatch with real agent argument key when acti
 
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
-    plugin["tool.execute.before"]({ tool: "Task" }, { args: { agent: "just-demand-implement", prompt: "Do the work" } }),
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { agent: "just-demand-coder", prompt: "Do the work" } }),
     /Blocked Task: active task task-a is not ready for execution yet\./,
   )
 })
@@ -1216,7 +1216,7 @@ test("state allows dispatch when task is ready even in non-standard status (disp
   const plugin = await stateFactory({ directory: root })
 
   // Dispatch should succeed even though status is "paused"
-  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
   await assert.doesNotReject(
     plugin["tool.execute.before"]({ tool: "Task" }, output),
   )
@@ -1598,7 +1598,7 @@ test("state leaves execution-needed wording unchanged when workflow subagents ar
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: ["just-demand-implement"] }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: ["just-demand-coder"] }))
 
   const plugin = await stateFactory({ directory: root })
   const output = { parts: [{ type: "text", text: "I will implement the feature and debug the bug inline." }] }
@@ -1815,7 +1815,7 @@ test("state asks retry or skip after subagent becomes unavailable", async () => 
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Implement the approved feature." } }))
 
   const toolInput = { tool: "Task" }
-  const toolOutput = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
+  const toolOutput = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
   await assert.rejects(
     subagentPlugin["tool.execute.before"](toolInput, toolOutput),
     /missing required task context files.*implement\.md/i,
@@ -1846,7 +1846,7 @@ test("subagent-context injects context for supported subagent type", async () =>
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { expected_behavior: "Shortcut triggers the action.", actual_behavior: "Shortcut is ignored.", reproduction: "Press the shortcut once.", scope: "Keyboard shortcut handling.", non_blocking_questions: ["Should the old shortcut still work?"] } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /Active task: task-a/)
   assert.match(output.args.prompt, /# Just Demand Workflow/)
@@ -1872,14 +1872,14 @@ test("subagent-context injects context when runtime uses agent argument key", as
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { agent: "just-demand-implement", prompt: "Do the work" } }
+  const output = { args: { agent: "just-demand-coder", prompt: "Do the work" } }
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /Active task: task-a/)
   assert.match(output.args.prompt, /# Just Demand Workflow/)
   assert.match(output.args.prompt, /# Implement/)
 })
 
-test("subagent-context avoids absolute path leakage for just-demand-research", async () => {
+test("subagent-context avoids absolute path leakage for just-demand-researcher", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -1888,7 +1888,7 @@ test("subagent-context avoids absolute path leakage for just-demand-research", a
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: research topic")
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "just-demand-research", prompt: "Investigate this" } }
+  const output = { args: { subagent_type: "just-demand-researcher", prompt: "Investigate this" } }
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /research outputs/i)
   assert.match(output.args.prompt, /local research\//i)
@@ -1904,10 +1904,10 @@ test("subagent-context throws when writable subagent required context files are 
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do the work" } }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
   await assert.rejects(
     plugin["tool.execute.before"](input, output),
-    /Blocked just-demand-implement: missing required task context files.*implement\.md/,
+    /Blocked just-demand-coder: missing required task context files.*implement\.md/,
   )
   assert.equal(output.args.prompt, "Do the work")
 })
@@ -1919,7 +1919,7 @@ test("subagent-context still annotates read-only research subagent when required
   mkdirSync(taskDir, { recursive: true })
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "just-demand-research", prompt: "Investigate this" } }
+  const output = { args: { subagent_type: "just-demand-researcher", prompt: "Investigate this" } }
   await plugin["tool.execute.before"](input, output)
   assert.match(output.args.prompt, /# BLOCKED/)
   assert.match(output.args.prompt, /context\.md/)
@@ -1938,13 +1938,13 @@ test("subagent-context skips non-supported subagent type", async () => {
   assert.equal(output.args.prompt, "Do something")
 })
 
-test("subagent-context blocks workflow implement task when no formal task", async () => {
+test("subagent-context blocks workflow coder task when no formal task", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do work" } }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Do work" } }
   await assert.rejects(
     plugin["tool.execute.before"](input, output),
     /Blocked Task: there is no formal task yet\./,
@@ -1992,7 +1992,7 @@ test("subagent-context skips when workflow root is missing", async () => {
   const root = makeRoot()
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
-  const output = { args: { subagent_type: "just-demand-implement", prompt: "Do work" } }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Do work" } }
   await plugin["tool.execute.before"](input, output)
   assert.equal(output.args.prompt, "Do work")
   assert.equal(existsSync(join(root, ".just-demand")), false)
@@ -2003,7 +2003,7 @@ test("subagent-context skips when tool is not Task", async () => {
   scaffoldWorkflow(root)
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Bash" }
-  const output = { args: { subagent_type: "just-demand-implement", prompt: "Run this" } }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Run this" } }
   await plugin["tool.execute.before"](input, output)
   assert.equal(output.args.prompt, "Run this")
 })
@@ -2023,7 +2023,7 @@ test("subagent-context avoids duplicate injection when prompt already contains w
   const input = { tool: "Task" }
   // Prompt already contains injection marker
   const existingContext = "# Injected Workflow Context\n\nExisting context"
-  const output = { args: { subagent_type: "just-demand-implement", prompt: `${existingContext}\n\nDo the work` } }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: `${existingContext}\n\nDo the work` } }
   await plugin["tool.execute.before"](input, output)
   // Should not add duplicate injection
   assert.equal(output.args.prompt, `${existingContext}\n\nDo the work`)

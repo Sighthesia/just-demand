@@ -28,10 +28,10 @@ DEPLOYED_FILES = {
         "just-demand-subagent-context.js",
     ],
     "agents": [
-        "just-demand-check.md",
-        "just-demand-docs.md",
-        "just-demand-implement.md",
-        "just-demand-research.md",
+        "just-demand-advisor.md",
+        "just-demand-coder.md",
+        "just-demand-researcher.md",
+        "just-demand-tester.md",
     ],
     "skills": [
         "using-just-demand",
@@ -45,6 +45,13 @@ DEPLOYED_FILES = {
         "package.json",
     ],
 }
+
+STALE_DEPLOYED_FILES = [
+    "agents/just-demand-check.md",
+    "agents/just-demand-docs.md",
+    "agents/just-demand-implement.md",
+    "agents/just-demand-research.md",
+]
 
 # Manifest file to track managed files
 MANIFEST_FILE = ".just-demand-manifest.json"
@@ -304,6 +311,33 @@ def deploy_config_file(source: Path, target: Path, manifest: dict[str, Any], con
     return copied, None, entry
 
 
+def remove_stale_deployed_files(config_root: Path, manifest: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    """Remove managed files that no longer belong to the active role surface."""
+    installed_files = manifest.setdefault("installed_files", {})
+    removed: list[str] = []
+    numstat: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    for relative_path in STALE_DEPLOYED_FILES:
+        info = installed_files.get(relative_path)
+        if not isinstance(info, dict):
+            continue
+        if info.get("preserve_on_uninstall"):
+            continue
+        target = config_root / relative_path
+        try:
+            removed_lines = len(target.read_text(encoding="utf-8").splitlines()) if target.exists() else 0
+            if target.exists():
+                target.unlink()
+                removed.append(relative_path)
+                numstat.append(make_numstat(relative_path, 0, removed_lines))
+            installed_files.pop(relative_path, None)
+        except OSError as exc:
+            warnings.append(f"Failed to remove stale managed file {relative_path}: {exc}")
+
+    return removed, numstat, warnings
+
+
 def deploy_directory(source_dir: Path, target_dir: Path, manifest: dict[str, Any], config_root: Path, exclude: list[str] | None = None) -> tuple[int, list[dict[str, Any]]]:
     """Deploy all files from source directory to target directory.
     
@@ -357,8 +391,14 @@ def install_opencode_global(config_root: Optional[Path] = None) -> dict[str, Any
         "total_deployed": 0,
         "numstat": [],
         "warnings": [],
+        "stale_removed": [],
     }
-    
+
+    stale_removed, stale_stats, stale_warnings = remove_stale_deployed_files(config_root, manifest)
+    results["stale_removed"].extend(stale_removed)
+    results["numstat"].extend(stale_stats)
+    results["warnings"].extend(stale_warnings)
+
     # Deploy plugins
     plugins_dir = repo_opencode / "plugins"
     target_plugins = config_root / "plugins"

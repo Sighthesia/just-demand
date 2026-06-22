@@ -8,7 +8,7 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Working flow: clarify -> intake -> promote to formal task -> inspect unfinished tasks -> ensure required task context files exist -> dispatch `just-demand-*` subagent -> verify -> `complete-verification` -> checkpoint commit -> archive -> extract durable memory.
 - Do not skip the clarification gate. In this repo, `using-just-demand` routes first and `socratic-clarification` is the hard gate before promotion, subagent dispatch, or code edits.
 - Long-context implementation, research, and verification belong in `just-demand-*` subagents, not inline in the main session.
-- The user owns goals and approval; the agent owns execution, verification, and workflow closure.
+- The user is the boss/product lead/architecture approver; the main agent owns workflow dispatch, verification, and closure.
 
 ## Skill-Only Fallback
 
@@ -55,10 +55,10 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 ## Task Context Rules
 
 - Required files are enforced by plugin injection:
-- `just-demand-implement`: `context.md`, `implement.md`
-- `just-demand-check`: `context.md`, `verify.md`
-- `just-demand-docs`: `context.md`, `decisions.md`
-- `just-demand-research`: `context.md`
+- `just-demand-coder`: `context.md`, `implement.md`
+- `just-demand-tester`: `context.md`, `verify.md`
+- `just-demand-researcher`: `context.md`
+- `just-demand-advisor`: `context.md`
 - If required files are missing, stop and create/refresh the task context package; do not silently continue inline.
 
 ## Repository Map
@@ -73,10 +73,11 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 
 ## Subagent Boundaries
 
-- `just-demand-research`: research only; no code changes.
-- `just-demand-implement`: scoped implementation only; no commits; do not mutate `.just-demand/state/` except through scripts.
-- `just-demand-check`: verify against the task brief; may fix only low-risk local issues.
-- `just-demand-docs`: docs and durable notes only; no business-code changes.
+- `just-demand-researcher`: research only; no code changes.
+- `just-demand-coder`: scoped implementation only; no commits; do not mutate `.just-demand/state/` except through scripts.
+- `just-demand-tester`: verify against the task brief; may fix only low-risk local issues.
+- `just-demand-advisor`: independent analysis and advisory for difficult or cross-boundary problems; no direct large-scale implementation.
+- Documentation, decisions, durable notes, and summaries are owned by the main agent or produced as part of a `coder`/`advisor` task. There is no standalone docs subagent.
 - If a suitable `just-demand-*` subagent should be used but is unavailable, ask whether to retry now or skip one turn; do not quietly abandon the subagent path.
 
 ## Commit And Archive Expectations

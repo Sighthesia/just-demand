@@ -1,6 +1,6 @@
 ---
 name: just-demand-verification
-description: Use after implementation, after just-demand-check output, when verification fails, when the user gives correction feedback, or before claiming a workflow task is done.
+description: Use after implementation, after just-demand-tester output, when verification fails, when the user gives correction feedback, or before claiming a workflow task is done.
 ---
 
 # Workflow Verification
@@ -142,7 +142,7 @@ After verification passes and the user accepts (or the task is confirmed done), 
 
 ## Checkpoint Commit Expectation
 
-After `just-demand-check` passes with no unresolved findings, the main agent should create a local checkpoint commit using the safety gate in `just-demand-execution`. This records that the verified slice passed engineering checks; it does not mean auto-push or irreversible product finality.
+After `just-demand-tester` passes with no unresolved findings, the main agent should create a local checkpoint commit using the safety gate in `just-demand-execution`. This records that the verified slice passed engineering checks; it does not mean auto-push or irreversible product finality.
 
 Use the script-owned closure path instead of inventing an inline sequence:
 

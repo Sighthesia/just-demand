@@ -114,8 +114,10 @@ Treat one failed subagent attempt as a transient exception, not as permission to
 
 ### Role Model
 
-- **User**: product manager and chief architect. Defines business goals, architecture constraints, module boundaries, and tradeoff preferences.
-- **Agent**: chief execution engineer. Implements, debugs, verifies, and fills engineering details. Goal is to deliver maintainable, verifiable, production-ready results, not to over-explain.
+- **User**: boss, product manager, and architecture approver. Defines goals, constraints, module boundaries, and tradeoff preferences.
+- **Main agent**: workflow owner and dispatcher. Owns clarification, intake, promotion, subagent routing, verification closeout, and summaries.
+- **Subagent team**: `just-demand-researcher` investigates, `just-demand-coder` implements, `just-demand-tester` verifies, and `just-demand-advisor` gives fresh-context diagnosis or solution framing for hard cross-boundary problems.
+- **Documentation ownership**: decisions, durable notes, and summaries stay with the main workflow or are produced inside a scoped coder/advisor task; there is no active standalone docs role.
 
 ### Priorities
 

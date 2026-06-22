@@ -8,7 +8,16 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Working flow: clarify -> intake -> promote to formal task -> inspect unfinished tasks -> ensure required task context files exist -> dispatch `just-demand-*` subagent -> verify -> `complete-verification` -> checkpoint commit -> archive -> extract durable memory.
 - Do not skip the clarification gate. In this repo, `using-just-demand` routes first and `socratic-clarification` is the hard gate before promotion, subagent dispatch, or code edits.
 - Long-context implementation, research, and verification belong in `just-demand-*` subagents, not inline in the main session.
-- The user owns goals and approval; the agent owns execution, verification, and workflow closure.
+- The user is the boss/product lead/architecture approver; the main agent owns workflow dispatch, verification, and closure.
+
+## Skill-Only Fallback
+
+- If OpenCode plugins are unavailable, disabled, or unstable, skill guidance is only best-effort; it cannot hard-block tools. Plugin gates remain the reliable enforcement layer.
+- Even without plugin support, every repo-work turn must start by loading `using-just-demand` when workflow rules might apply.
+- Any request, bug, correction, design/refactor, implementation approval, or Q&A-to-work pivot must then load `socratic-clarification` before intake, execution, or code edits.
+- Treat user approval of an approach as approval to enter intake/formal task flow, not permission to edit inline unless formal execution readiness is satisfied.
+- Post-approval/pre-promotion codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) is also execution work and must wait for a formal task. In no-plugin fallback, this behavior is mandatory: do not read or inspect codebase files outside a formal task context.
+- Before any write tool or execution subagent in no-plugin fallback mode, run `just-demand . list-active` and verify the required task context files exist.
 
 ## Source Of Truth
 
@@ -22,27 +31,34 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Install tests: `python3 -m unittest tests.just_demand.test_install -v`
 - Plugin tests: `node --test tests/just_demand/test_opencode_plugins.mjs`
 - Validate Node package file: `python3 -m json.tool .opencode/package.json`
-- List unfinished formal tasks before execution: `just-demand --root . list-active`
-- Create intake: `just-demand --root . create-intake "<title>" "<raw request>" --session <session-id>`
-- Promote intake: `just-demand --root . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
-- Mark task status/progress/impact: `just-demand --root . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
-- Close verified work: `just-demand --root . complete-verification <task-id> passed "<summary>"`
-- Mid-task checkpoint: `just-demand --root . checkpoint-commit <task-id>`
+- List unfinished formal tasks before execution: `just-demand . list-active`
+- Select or resume a task: `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`
+- Create intake: `just-demand . create-intake "<title>" "<raw request>" --session <session-id>`
+- Promote intake: `just-demand . promote <intake-id> "<title>" "<goal>" --type design --acceptance "<criterion>"`
+- Root help: `just-demand --help` or `just-demand . --help`
+- Mark task status/progress/impact: `just-demand . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]`
+- Close verified work: `just-demand . complete-verification <task-id> passed "<summary>"`
+- Mid-task checkpoint: `just-demand . checkpoint-commit <task-id>`
 
 ## Command Order That Matters
 
 - After changing `.just-demand/scripts/`, run both Python test modules.
 - After changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`, run plugin tests and `python3 -m json.tool .opencode/package.json`, then restart OpenCode.
 - Before any implementation or verification dispatch, run `list-active` to inspect unfinished tasks for conflict risk.
+- `create-intake` only creates an intake. `list-active` stays empty until `promote` creates a formal task.
+- Prompt-layer recovery details belong in `just-demand-intake` and `just-demand-execution`; keep AGENTS at the rule/command level.
+- After `create-intake`, fill the created intake markdown at `.just-demand/state/intake/<intake-id>.md`; promotion is not the next legal step until the required sections are written there.
+- If `promote` fails with missing-field or blocking-question errors, update the same intake file to fill the named sections, clear blocking questions, then rerun `just-demand . promote ...`; do not create a second intake just to recover.
+- If `list-active` shows unfinished formal tasks but no current task is selected, recover by choosing the right task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>` before dispatch or inline edits.
 - Do not report a task as complete until `complete-verification` has run. In this repo, verification closeout is a real workflow step, not wording.
 
 ## Task Context Rules
 
 - Required files are enforced by plugin injection:
-- `just-demand-implement`: `context.md`, `implement.md`
-- `just-demand-check`: `context.md`, `verify.md`
-- `just-demand-docs`: `context.md`, `decisions.md`
-- `just-demand-research`: `context.md`
+- `just-demand-coder`: `context.md`, `implement.md`
+- `just-demand-tester`: `context.md`, `verify.md`
+- `just-demand-researcher`: `context.md`
+- `just-demand-advisor`: `context.md`
 - If required files are missing, stop and create/refresh the task context package; do not silently continue inline.
 
 ## Repository Map
@@ -57,10 +73,11 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 
 ## Subagent Boundaries
 
-- `just-demand-research`: research only; no code changes.
-- `just-demand-implement`: scoped implementation only; no commits; do not mutate `.just-demand/state/` except through scripts.
-- `just-demand-check`: verify against the task brief; may fix only low-risk local issues.
-- `just-demand-docs`: docs and durable notes only; no business-code changes.
+- `just-demand-researcher`: research only; no code changes.
+- `just-demand-coder`: scoped implementation only; no commits; do not mutate `.just-demand/state/` except through scripts.
+- `just-demand-tester`: verify against the task brief; may fix only low-risk local issues.
+- `just-demand-advisor`: independent analysis and advisory for difficult or cross-boundary problems; no direct large-scale implementation.
+- Documentation, decisions, durable notes, and summaries are owned by the main agent or produced as part of a `coder`/`advisor` task. There is no standalone docs subagent.
 - If a suitable `just-demand-*` subagent should be used but is unavailable, ask whether to retry now or skip one turn; do not quietly abandon the subagent path.
 
 ## Commit And Archive Expectations

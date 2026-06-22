@@ -233,10 +233,11 @@ class InstallCoreTests(unittest.TestCase):
         self.assertIn("just-demand-state.js", DEPLOYED_FILES["plugins"])
         self.assertIn("just-demand-subagent-context.js", DEPLOYED_FILES["plugins"])
         
-        self.assertIn("just-demand-check.md", DEPLOYED_FILES["agents"])
-        self.assertIn("just-demand-docs.md", DEPLOYED_FILES["agents"])
-        self.assertIn("just-demand-implement.md", DEPLOYED_FILES["agents"])
-        self.assertIn("just-demand-research.md", DEPLOYED_FILES["agents"])
+        self.assertIn("just-demand-advisor.md", DEPLOYED_FILES["agents"])
+        self.assertIn("just-demand-coder.md", DEPLOYED_FILES["agents"])
+        self.assertIn("just-demand-researcher.md", DEPLOYED_FILES["agents"])
+        self.assertIn("just-demand-tester.md", DEPLOYED_FILES["agents"])
+        self.assertNotIn("just-demand-docs.md", DEPLOYED_FILES["agents"])
         
         self.assertIn("using-just-demand", DEPLOYED_FILES["skills"])
         self.assertIn("socratic-clarification", DEPLOYED_FILES["skills"])
@@ -258,7 +259,7 @@ class InstallIntegrationTests(unittest.TestCase):
             
             # Check that files were deployed
             self.assertTrue((config_root / "plugins" / "just-demand-lib.js").exists())
-            self.assertTrue((config_root / "agents" / "just-demand-implement.md").exists())
+            self.assertTrue((config_root / "agents" / "just-demand-coder.md").exists())
             self.assertTrue((config_root / "skills" / "using-just-demand").exists())
             self.assertTrue((config_root / "package.json").exists())
 
@@ -276,6 +277,30 @@ class InstallIntegrationTests(unittest.TestCase):
             for skill in DEPLOYED_FILES["skills"]:
                 with self.subTest(skill=skill):
                     self.assertTrue((config_root / "skills" / skill / "SKILL.md").exists())
+
+    def test_install_opencode_global_removes_stale_managed_agent_roles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_root = Path(tmp)
+            stale_agent = config_root / "agents" / "just-demand-docs.md"
+            stale_agent.parent.mkdir(parents=True)
+            stale_agent.write_text("legacy docs agent\n", encoding="utf-8")
+            save_manifest(
+                config_root,
+                {
+                    "version": "1.0",
+                    "installed_files": {
+                        "agents/just-demand-docs.md": {"source": "legacy"},
+                    },
+                },
+            )
+
+            result = install_opencode_global(config_root)
+
+            self.assertFalse(stale_agent.exists())
+            self.assertIn("agents/just-demand-docs.md", result["results"]["stale_removed"])
+            manifest = load_manifest(config_root)
+            self.assertNotIn("agents/just-demand-docs.md", manifest["installed_files"])
+            self.assertTrue((config_root / "agents" / "just-demand-advisor.md").exists())
 
     def test_install_opencode_global_deploys_socratic_clarification_before_intake(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -311,35 +336,38 @@ class InstallIntegrationTests(unittest.TestCase):
             config_root = Path(tmp)
             install_opencode_global(config_root)
 
-            implement_agent = (config_root / "agents" / "just-demand-implement.md").read_text(encoding="utf-8")
-            check_agent = (config_root / "agents" / "just-demand-check.md").read_text(encoding="utf-8")
-            docs_agent = (config_root / "agents" / "just-demand-docs.md").read_text(encoding="utf-8")
-            research_agent = (config_root / "agents" / "just-demand-research.md").read_text(encoding="utf-8")
+            coder_agent = (config_root / "agents" / "just-demand-coder.md").read_text(encoding="utf-8")
+            tester_agent = (config_root / "agents" / "just-demand-tester.md").read_text(encoding="utf-8")
+            advisor_agent = (config_root / "agents" / "just-demand-advisor.md").read_text(encoding="utf-8")
+            researcher_agent = (config_root / "agents" / "just-demand-researcher.md").read_text(encoding="utf-8")
 
-            for content in (implement_agent, check_agent):
+            for content in (coder_agent, tester_agent):
                 self.assertIn('bash: allow', content)
                 self.assertIn('Prefer dedicated tools first', content)
                 self.assertIn('task: deny', content)
 
-            self.assertIn('read: allow', docs_agent)
-            self.assertIn('glob: allow', docs_agent)
-            self.assertIn('grep: allow', docs_agent)
-            self.assertIn('bash: deny', docs_agent)
-            self.assertIn('Do not use shell.', docs_agent)
-            self.assertIn('write: deny', research_agent)
-            self.assertIn('edit: deny', research_agent)
-            self.assertIn('bash: deny', research_agent)
-            self.assertIn('Prefer dedicated read-only tools first', research_agent)
+            for content in (researcher_agent, advisor_agent):
+                self.assertIn('read: allow', content)
+                self.assertIn('glob: allow', content)
+                self.assertIn('grep: allow', content)
+                self.assertIn('bash: deny', content)
+                self.assertIn('write: deny', content)
+                self.assertIn('edit: deny', content)
+            self.assertIn('Prefer dedicated read-only tools first', researcher_agent)
+            self.assertIn('fresh context', advisor_agent)
+            self.assertIn('does **not** replace the main workflow owner', advisor_agent)
 
             # Output contract coverage
-            self.assertIn('## Output Contract', research_agent)
-            self.assertIn('**Key findings**', research_agent)
-            self.assertIn('## Output Contract', implement_agent)
-            self.assertIn('**Files changed**', implement_agent)
-            self.assertIn('**Concerns**', implement_agent)
-            self.assertIn('## Output Contract', check_agent)
-            self.assertIn('**Findings**', check_agent)
-            self.assertIn('**Residual risk**', check_agent)
+            self.assertIn('## Output Contract', researcher_agent)
+            self.assertIn('**Key findings**', researcher_agent)
+            self.assertIn('## Output Contract', advisor_agent)
+            self.assertIn('**Recommendation**', advisor_agent)
+            self.assertIn('## Output Contract', coder_agent)
+            self.assertIn('**Files changed**', coder_agent)
+            self.assertIn('**Concerns**', coder_agent)
+            self.assertIn('## Output Contract', tester_agent)
+            self.assertIn('**Findings**', tester_agent)
+            self.assertIn('**Residual risk**', tester_agent)
     
     def test_install_opencode_global_creates_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,6 +1,6 @@
 ---
 name: just-demand-execution
-description: Use when a formal work item is ready to execute, when dispatching just-demand-research, just-demand-implement, just-demand-check, or just-demand-docs subagents, or when building context for focused execution.
+description: Use when a formal work item is ready to execute, when dispatching just-demand-researcher, just-demand-coder, just-demand-tester, or just-demand-advisor subagents, or when building context for focused execution.
 ---
 
 # Workflow Execution
@@ -71,10 +71,11 @@ Do not make the user choose implementation details. Escalate only when the wrong
 
 ## Subagent Routing
 
-- `just-demand-research`: research only; no code changes.
-- `just-demand-implement`: scoped implementation; no commits.
-- `just-demand-check`: verify requirements and fix only low-risk local issues within scope.
-- `just-demand-docs`: update workflow docs and durable notes; no business-code changes.
+- `just-demand-researcher`: research only; no code changes.
+- `just-demand-coder`: scoped implementation; no commits.
+- `just-demand-tester`: verify requirements and fix only low-risk local issues within scope.
+- `just-demand-advisor`: independent analysis and advisory for difficult or cross-boundary problems; no direct large-scale implementation.
+- Documentation, decisions, durable notes, and summaries are owned by the main agent or produced as part of a `coder`/`advisor` task. There is no standalone docs subagent.
 
 ## Subagent Unavailable Handling
 
@@ -188,7 +189,7 @@ That command records verification, runs the checkpoint-commit safety gate, and a
 
 ### Standalone commit path: mid-task checkpoints
 
-After any clean `just-demand-check` result, create a mid-task checkpoint without closing the task:
+After any clean `just-demand-tester` result, create a mid-task checkpoint without closing the task:
 
 ```text
 just-demand . checkpoint-commit <task-id>
@@ -196,14 +197,14 @@ just-demand . checkpoint-commit <task-id>
 
 This is useful for:
 - Long tasks with multiple independently verified slices.
-- After fixing issues found by `just-demand-check` before moving to the next phase.
+- After fixing issues found by `just-demand-tester` before moving to the next phase.
 - Any time a safe, scoped commit would reduce risk.
 
 ### When to commit — proactively
 
 Commit after **every** meaningful clean verification:
 
-- After `just-demand-check` passes with no unresolved findings.
+- After `just-demand-tester` passes with no unresolved findings.
 - After fixing low-risk local issues and re-verifying.
 - After the user expresses positive acceptance (e.g., `effective`, `good`, `OK`, `LGTM`, `works`, `looks good`, `valid`, `不错`, `有效`, `可以`, `没问题`, `达成`, `就这样`).
 - Before ending a multi-step implementation turn, even if the full task is not done yet.
@@ -268,9 +269,9 @@ Completed and verified tasks should be archived to `tasks/archive/` rather than 
 
 ## Required Context Files
 
-- `just-demand-implement`: `context.md`, `implement.md`
-- `just-demand-check`: `context.md`, `verify.md`
-- `just-demand-docs`: `context.md`, `decisions.md`
-- `just-demand-research`: `context.md`
+- `just-demand-coder`: `context.md`, `implement.md`
+- `just-demand-tester`: `context.md`, `verify.md`
+- `just-demand-researcher`: `context.md`
+- `just-demand-advisor`: `context.md`
 
 If required files are missing, stop and create or refresh the task context package first.

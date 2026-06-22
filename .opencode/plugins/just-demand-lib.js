@@ -4,8 +4,8 @@ import { join } from "node:path"
 const REMINDER_STATE = new Map()
 
 const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
-const WORKFLOW_SUBAGENTS = new Set(["just-demand-research", "just-demand-implement", "just-demand-check", "just-demand-docs"])
-const EXECUTION_GATED_SUBAGENTS = new Set(["just-demand-implement", "just-demand-check", "just-demand-docs"])
+const WORKFLOW_SUBAGENTS = new Set(["just-demand-researcher", "just-demand-coder", "just-demand-tester", "just-demand-advisor"])
+const EXECUTION_GATED_SUBAGENTS = new Set(["just-demand-coder", "just-demand-tester"])
 const DEBUG_ENV_VALUES = new Set(["1", "true", "yes", "on"])
 const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
   "design",
@@ -582,7 +582,7 @@ export const readTaskContext = (directory, taskId, agentName) => {
   const context = readTextIfExists(join(taskDir, "context.md"))
   if (context) parts.push(context)
 
-  if (["just-demand-implement", "just-demand-check"].includes(agentName)) {
+  if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
     const clarificationContext = renderClarificationContext(task)
     if (clarificationContext) parts.push(clarificationContext)
   }
@@ -596,22 +596,22 @@ export const readTaskContext = (directory, taskId, agentName) => {
   const renderedOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, ""))
     ? openQuestions
     : `# Open Questions\n\n## Remaining Open Questions\n\n${clarificationQuestions.map((question) => `- ${question}`).join("\n")}\n`
-  if (hasRemainingOpenQuestions && ["just-demand-implement", "just-demand-check"].includes(agentName)) {
+  if (hasRemainingOpenQuestions && ["just-demand-coder", "just-demand-tester"].includes(agentName)) {
     parts.push(renderedOpenQuestions)
   }
 
   switch (agentName) {
-    case "just-demand-implement": {
+    case "just-demand-coder": {
       const implement = readTextIfExists(join(taskDir, "implement.md"))
       if (implement) parts.push(implement)
       break
     }
-    case "just-demand-check": {
+    case "just-demand-tester": {
       const verify = readTextIfExists(join(taskDir, "verify.md"))
       if (verify) parts.push(verify)
       break
     }
-    case "just-demand-research": {
+    case "just-demand-researcher": {
       const facts = readTextIfExists(join(knowledgeDir, "memory.md"))
       if (facts) parts.push(`# Workspace Facts\n\n${facts}`)
       const researchDir = join(taskDir, "research")
@@ -620,9 +620,14 @@ export const readTaskContext = (directory, taskId, agentName) => {
       }
       break
     }
-    case "just-demand-docs": {
+    case "just-demand-advisor": {
       const wsDecisions = readTextIfExists(join(knowledgeDir, "memory.md"))
-      if (wsDecisions) parts.push(`# Workspace Decisions\n\n${wsDecisions}`)
+      if (wsDecisions) parts.push(`# Workspace Facts\n\n${wsDecisions}`)
+      // Advisor gets workspace memory context plus task context
+      const advisorDir = join(taskDir, "advisor")
+      if (existsSync(advisorDir)) {
+        parts.push("Advisory outputs: write any analysis artifacts under this task's local advisor/ directory.")
+      }
       break
     }
   }
@@ -632,13 +637,13 @@ export const readTaskContext = (directory, taskId, agentName) => {
 
 export const getRequiredContextFiles = (agentName) => {
   switch (agentName) {
-    case "just-demand-implement":
+    case "just-demand-coder":
       return ["context.md", "implement.md"]
-    case "just-demand-check":
+    case "just-demand-tester":
       return ["context.md", "verify.md"]
-    case "just-demand-docs":
-      return ["context.md", "decisions.md"]
-    case "just-demand-research":
+    case "just-demand-researcher":
+      return ["context.md"]
+    case "just-demand-advisor":
       return ["context.md"]
     default:
       return []

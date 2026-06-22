@@ -1,17 +1,20 @@
 import {
-  buildExecutionGateError,
+  consumeIntakeFallbackPending,
   getActiveTask,
   clearSubagentUnavailablePending,
-  getMissingExecutionGateFields,
+  debugLog,
+  enforceExecutionGate,
+  getExecutionGateState,
   getReminderState,
-  getWriteToolRule,
+  hasAssignedWorkflowSubagents,
   readTaskJson,
-  taskIsReadyForExecution,
   taskLooksLikeLongContextExecutionCandidate,
   taskNeedsCheckpointFollowUp,
   taskNeedsVerificationCloseout,
   textLooksLikeCompletionClaim,
+  textLooksLikeExplicitWorkflowSkip,
   updateReminderState,
+  workflowRoot,
 } from "./just-demand-lib.js"
 
 const REMINDER_HEADER = "[just-demand reminder]"
@@ -43,8 +46,9 @@ const STOPWORDS = new Set([
 const SHORT_SIGNAL_WORDS = new Set(["api", "bug", "css", "db", "llm", "ui", "ux", "json", "task"])
 
 const CONCRETE_WORK_PATTERNS = [
-  /\b(request|feature|bug|regression|mismatch|correction|implement|update|add|remove|fix|refactor|change|improve)\b/i,
+  /\b(request|feature|bug|regression|mismatch|correction|implement|update|add|remove|fix|refactor|change|improve|build|create|make|support|setup|set up)\b/i,
   /\b(expected|actual|broken|fail|failing)\b/i,
+  /(请求|需求|功能|缺陷|问题|回归|不一致|修复|修正|调试|排查|实现|新增|添加|删除|移除|重构|改造|修改|更改|更新|优化|改进|支持|创建|构建|接入|设置|配置|将.+改为|把.+改成)/,
 ]
 
 const PREMISE_PATTERNS = [
@@ -61,6 +65,74 @@ const CROSS_SENTENCE_NEAR_MISS_PATTERNS = [
   /\b(still\s+want\s+to\s+confirm|want\s+to\s+confirm\s+.*\s+first|need\s+to\s+confirm\s+.*\s+first|one\s+more\s+check|hold\s+off\s+on|not\s+yet|before\s+i\s+(?:say|do)|before\s+we\s+(?:say|do))\b/i,
   /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
 ]
+
+const CODE_INVESTIGATION_INTENT_PATTERNS = [
+  // "inspect the code/codebase/source" — allow optional adjective before target
+  /\b(inspect)\s+(?:the\s+)?(?:\w+\s+)?(?:code|codebase|source)\b/i,
+  // "trace through the code/implementation" / "trace the code"
+  /\b(trace)\s+(?:through\s+)?(?:the\s+)?(?:\w+\s+)?(?:code|codebase|source|implementation)\b/i,
+  // "search the codebase/source"
+  /\b(search)\s+(?:the\s+)?(?:\w+\s+)?(?:codebase|source)\b/i,
+  // "read through/over the code/source/files/implementation" / "read the code"
+  /\bread\s+(?:(?:through|over)\s+)?(?:the\s+)?(?:\w+\s+)?(?:code|source|files|implementation)\b/i,
+  // "look/go through the code/source/files/implementation"
+  /\b(?:look|go)\s+(?:through|over)\s+(?:the\s+)?(?:\w+\s+)?(?:code|source|files|implementation)\b/i,
+  // "look at the code/codebase/source/implementation"
+  /\blook\s+at\s+(?:the\s+)?(?:\w+\s+)?(?:code|codebase|source|implementation)\b/i,
+  // "investigate the codebase/implementation/code"
+  /\binvestigate\s+(?:the\s+)?(?:\w+\s+)?(?:codebase|implementation|code)\b/i,
+  // Chinese: inspect/check/search/trace/read  code/source/codebase/files
+  /(?:查看|检查|搜索|跟踪|阅读|检索)\s*(?:一下|一遍)?\s*(?:代码|源码|代码库|源文件|文件)/i,
+]
+
+const NEUTRAL_ANALYSIS_PATTERNS = [
+  // Self-described neutral analysis: "just reporting/analyzing/reviewing..."
+  /\bjust\s+(?:reporting|analyzing|reviewing|documenting|narrating|explaining|summarizing|describing)\b/i,
+  // Negated implementation intent: "not proposing/planning to implement/change..."
+  /\bnot\s+(?:proposing|planning|intending|trying)\s+to\s+(?:implement|change|fix|build|modify|edit)\b/i,
+  // Explicit "no action/change/work" — optionally followed by "needed/required"
+  /\bno\s+(?:action|change|work)(?:\s+(?:needed|required|planned))?\b/i,
+]
+
+const WORKFLOW_ENTRY_COMMAND_PATTERNS = [
+  /\bcreate-intake\b/i,
+  /\bpromote\b/i,
+  /\blist-active\b/i,
+  /\bjust-demand\b/i,
+  /(^|\s)--help\b/i,
+  /(^|\s)-h\b/i,
+]
+
+const WORKFLOW_ENTRY_NARRATION_PATTERNS = [
+  /\b(workflow\s+entry|intake\s+creation|formal\s+task\s+promotion|help\s+check|help\s+path)\b/i,
+  /\b(create|creating|created|promote|promoting|promoted|list|listing|listed|check|checking|checked|run|running|validate|validating|validated|describe|describing|described|mention|mentioned|document|documenting|explain|explaining|narrate|narrating|walk\s+through)\b/i,
+  /(创建|创建中|提升|提升为任务|列出|检查|验证|说明|描述|记录|解释|先跑|运行).*(create-intake|promote|list-active|just-demand|--help|-h)/i,
+]
+
+const INLINE_EXECUTION_INTENT_PATTERNS = [
+  /\b(implement\s+.*inline|debug\s+.*inline|finish\s+this\s+in\s+the\s+main\s+session|build\s+this\s+in\s+the\s+main\s+session|do\s+this\s+inline|main\s+session\s+.*\b(?:implement|build|fix|debug))\b/i,
+  /(直接在主会话里(?:实现|修复|调试)|主会话里(?:实现|修复|调试|做这个))/,
+]
+
+const textLooksLikeWorkflowEntryNarration = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  if (!WORKFLOW_ENTRY_COMMAND_PATTERNS.some((pattern) => pattern.test(body))) return false
+  if (INLINE_EXECUTION_INTENT_PATTERNS.some((pattern) => pattern.test(body))) return false
+  return WORKFLOW_ENTRY_NARRATION_PATTERNS.some((pattern) => pattern.test(body))
+}
+
+const textLooksLikeCodeInvestigationIntent = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  return CODE_INVESTIGATION_INTENT_PATTERNS.some((pattern) => pattern.test(body))
+}
+
+const textLooksLikeNeutralAnalysis = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  return NEUTRAL_ANALYSIS_PATTERNS.some((pattern) => pattern.test(body))
+}
 
 const normalizeWords = (text) => {
   const cleaned = String(text || "")
@@ -94,6 +166,8 @@ const extractCurrentText = (output) => {
   const outputText = joinTextParts(output?.parts)
   return [messageText, outputText].filter(Boolean).join("\n").trim()
 }
+
+const argsKeys = (args) => args && typeof args === "object" ? Object.keys(args).sort() : []
 
 const topicMemory = new Map()
 
@@ -132,6 +206,8 @@ const reminderTypeFromReasonCode = (reasonCode) => {
       return reasonCode
     case "clarify_hint":
       return "clarify"
+    case "select_task_hint":
+      return "select_task_hint"
     default:
       return null
   }
@@ -147,7 +223,32 @@ const buildControllerDecision = (text, reminderState) => {
     }
   }
 
+  // Explicit workflow skip override: agent consciously overrides the workflow
+  // route to proceed inline. Overrides execution_needed, workflow_entry_required,
+  // and select_task_hint. Does not override subagent_unavailable_pending above.
+  if (textLooksLikeExplicitWorkflowSkip(text)) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.allow,
+      reason_code: "workflow_skip_override",
+      rewrite: null,
+    }
+  }
+
   if (CROSS_SENTENCE_NEAR_MISS_PATTERNS.some((pattern) => pattern.test(text))) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.allow,
+      reason_code: "no_op",
+      rewrite: null,
+    }
+  }
+
+  // Neutral analysis/status-summary text must be checked before any active task
+  // execution detection. Text that explicitly declares itself as neutral (e.g.
+  // "just reviewing, no action needed") should not be blocked by execution
+  // candidate patterns that incidentally match past-tense verbs like "traced".
+  if (textLooksLikeNeutralAnalysis(text)) {
     return {
       phase: CONTROLLER_PHASE.route,
       action: CONTROLLER_ACTION.allow,
@@ -176,6 +277,25 @@ const buildControllerDecision = (text, reminderState) => {
       }
     }
 
+    // Block code investigation intent inside active execution tasks without
+    // assigned subagents — reading/tracing/inspecting code to execute a task
+    // is also long-context work that should route through a subagent.
+    if (textLooksLikeCodeInvestigationIntent(text) && !textLooksLikeNeutralAnalysis(text)) {
+      const currentStep = String(activeTask.current_step || "").toLowerCase()
+      const status = String(activeTask.status || "").toLowerCase()
+      const taskSignalsExecution = ["execut", "implement", "verify", "changes_requested"].some(
+        (fragment) => currentStep.includes(fragment) || status.includes(fragment),
+      )
+      if (taskSignalsExecution && !hasAssignedWorkflowSubagents(activeTask)) {
+        return {
+          phase: CONTROLLER_PHASE.execute,
+          action: CONTROLLER_ACTION.block,
+          reason_code: "execution_needed",
+          rewrite: { mode: "replace", preserve_original: true },
+        }
+      }
+    }
+
     if (taskNeedsCheckpointFollowUp(activeTask)) {
       return {
         phase: CONTROLLER_PHASE.close,
@@ -186,7 +306,26 @@ const buildControllerDecision = (text, reminderState) => {
     }
   }
 
-  if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) && !activeTask) {
+  if ((CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) || textLooksLikeCodeInvestigationIntent(text)) && !activeTask) {
+    const workflowEntryNarration = textLooksLikeWorkflowEntryNarration(text)
+    if (workflowEntryNarration) {
+      return {
+        phase: CONTROLLER_PHASE.route,
+        action: CONTROLLER_ACTION.allow,
+        reason_code: "no_op",
+        rewrite: null,
+      }
+    }
+
+    if (reminderState.hasUnselectedActiveTasks) {
+      return {
+        phase: CONTROLLER_PHASE.route,
+        action: CONTROLLER_ACTION.remind,
+        reason_code: "select_task_hint",
+        rewrite: { mode: "append" },
+      }
+    }
+
     return {
       phase: CONTROLLER_PHASE.route,
       action: CONTROLLER_ACTION.block,
@@ -261,7 +400,7 @@ const buildReminderLines = (type) => {
     case "verification_closeout":
       return [
         "- This sounds like a completion claim, but the task has not been closed with complete-verification yet.",
-        "- Run `just-demand --root . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
+        "- Run `just-demand . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
       ]
     case "checkpoint_followup":
       return [
@@ -270,8 +409,18 @@ const buildReminderLines = (type) => {
       ]
     case "workflow_entry_required":
       return [
-        "- This is concrete workflow work, but there is no active formal task yet.",
-        "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then create the intake/task before continuing.",
+        "- This is concrete workflow work, but there is no formal task yet.",
+        "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then `just-demand-intake` before continuing.",
+      ]
+    case "select_task_hint":
+      return [
+        "- Unfinished formal tasks already exist, but no current task is selected.",
+        "- Run `just-demand . list-active`, then `just-demand . select-task <task-id>` (or `resume <task-id>`) before continuing write or execution work.",
+      ]
+    case "intake_fallback":
+      return [
+        "- Prefer `update-intake-section` via the CLI for routine intake edits.",
+        "- Raw file fallback still works but is meant for recovery—use the CLI path when possible.",
       ]
     default:
       return []
@@ -324,7 +473,7 @@ const blockVerificationCloseout = (text, reminderState) => {
   return [
     CLOSEOUT_BLOCKED_HEADER,
     "- This reads like a completion claim, but the task has not passed verification closeout yet.",
-    "- Run `just-demand --root . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
+    "- Run `just-demand . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
     "",
     "Original response:",
     quotedText,
@@ -346,8 +495,9 @@ const blockExecutionNeeded = (text, reminderState) => {
 
   return [
     EXECUTION_BLOCKED_HEADER,
-    "- This reads like execution work that should run through a just-demand-* workflow subagent.",
-    "- Dispatch the supported just-demand-* subagent path before continuing the long-context work inline.",
+    "- This reads like execution work that must run through a just-demand-* workflow subagent, not inline in the main session.",
+    "- Dispatch the supported just-demand-* subagent for the current task.",
+    "- To explicitly override the workflow path and continue inline, include \"skip workflow\" or \"workflow override\" in your response.",
     "",
     "Original response:",
     quotedText,
@@ -369,12 +519,35 @@ const blockWorkflowEntryRequired = (text, reminderState) => {
 
   return [
     WORKFLOW_ENTRY_BLOCKED_HEADER,
-    "- This is concrete workflow work, but there is no active formal task yet.",
-    "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then create the intake/task before continuing.",
+    "- This is concrete workflow work, but there is no formal task yet.",
+    "- Three routes:",
+    "  · Enter workflow (recommended): `using-just-demand` → `socratic-clarification` → `just-demand-intake`",
+    "  · Direct answer: if this is a simple question or non-work inquiry, restate it without work intent.",
+    "  · Skip workflow: include \"skip workflow\" or \"workflow override\" to proceed inline.",
     "",
     "Original response:",
     quotedText,
   ].join("\n")
+}
+
+const WORKFLOW_STATE_MARKER = "[workflow-state]"
+
+const injectWorkflowStateBanner = (text, activeTaskId, activeTask, gateState) => {
+  if (typeof text !== "string") return text
+  if (text.includes(WORKFLOW_STATE_MARKER)) return text
+
+  let banner
+  if (activeTaskId && activeTask) {
+    const status = activeTask.status || "unknown"
+    const title = activeTask.title ? ` "${activeTask.title}"` : ""
+    banner = `\n\n${WORKFLOW_STATE_MARKER} Active: ${activeTaskId}${title} (${status})`
+  } else if (gateState?.reason === "no_current_task_selected") {
+    banner = `\n\n${WORKFLOW_STATE_MARKER} Unfinished tasks exist — select a task: \`just-demand . select-task <id>\``
+  } else {
+    banner = `\n\n${WORKFLOW_STATE_MARKER} No active task — routes: enter workflow | direct answer | skip workflow`
+  }
+
+  return text + banner
 }
 
 export default async ({ directory } = {}) => {
@@ -383,50 +556,67 @@ export default async ({ directory } = {}) => {
       const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       if (!workflowDirectory) return
 
-      const toolName = String(input?.tool || "").toLowerCase()
-      const rule = getWriteToolRule(toolName, output?.args)
-      if (!rule) return
-
-      const taskId = getActiveTask(workflowDirectory)
-      if (!taskId) {
-        throw new Error(buildExecutionGateError(rule.label, null, []))
-      }
-
-      const task = readTaskJson(workflowDirectory, taskId)
-      if (!taskIsReadyForExecution(task) && rule.needsExecutionGate(output?.args)) {
-        const missing = getMissingExecutionGateFields(task)
-        throw new Error(buildExecutionGateError(rule.label, taskId, missing))
-      }
+      enforceExecutionGate(workflowDirectory, input?.tool, output?.args, "state.tool.before")
     },
 
     "chat.message": async (input, output) => {
+      const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       // Keep main-session injection lightweight: reminder only, no task state dump.
       // This layer is best-effort: some OpenCode versions do not expose usable text
       // parts to chat.message, so Layer 1 system prompt injection remains the primary path.
-      if (!output || !Array.isArray(output.parts)) return
+      if (!output || !Array.isArray(output.parts)) {
+        debugLog("state.chat.message.skip", { reason: "missing_parts" }, workflowDirectory)
+        return
+      }
       const textPart = output.parts.find((part) => part?.type === "text" && typeof part.text === "string")
-      if (!textPart) return
+      if (!textPart) {
+        debugLog("state.chat.message.skip", { reason: "missing_text_part", part_types: output.parts.map((part) => part?.type).filter(Boolean) }, workflowDirectory)
+        return
+      }
 
       const sessionID = typeof input?.sessionID === "string" && input.sessionID ? input.sessionID : "main"
-      const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       const activeTaskId = getActiveTask(workflowDirectory)
       const activeTask = activeTaskId ? (readTaskJson(workflowDirectory, activeTaskId) || { id: activeTaskId }) : null
       const reminderState = getReminderState(workflowDirectory, sessionID)
+      const gateState = getExecutionGateState(workflowDirectory)
       reminderState.directory = workflowDirectory
       reminderState.sessionID = sessionID
       reminderState.activeTask = activeTask
+      reminderState.hasUnselectedActiveTasks = gateState.reason === "no_current_task_selected"
 
       const currentText = extractCurrentText(output)
       updateTopicTurns(`${workflowDirectory}::${sessionID}`, currentText, reminderState)
 
       const controllerDecision = buildControllerDecision(currentText, reminderState)
+      debugLog("state.chat.message.decision", {
+        session_id: sessionID,
+        active_task_id: activeTaskId || null,
+        phase: controllerDecision.phase,
+        action: controllerDecision.action,
+        reason_code: controllerDecision.reason_code,
+      }, workflowDirectory)
       textPart.text = applyControllerDecision(textPart.text, reminderState, controllerDecision)
+
+      // One-time per-session intake fallback warning: if the tool execution gate
+      // detected an intake fallback on the previous tool call, surface a concise
+      // reminder pointing to update-intake-section as the preferred path.
+      if (consumeIntakeFallbackPending(workflowDirectory)) {
+        if (!reminderState.intake_fallback_warning_shown) {
+          updateReminderState(workflowDirectory, sessionID, (state) => {
+            state.intake_fallback_warning_shown = true
+          })
+          textPart.text = appendReminder(textPart.text, reminderState, "intake_fallback")
+        }
+      }
 
       if (controllerDecision.reason_code !== "subagent_retry_or_skip") {
         clearSubagentUnavailablePending(workflowDirectory, sessionID)
       }
+
+      // Unconditional workflow-state injection: visible every turn.
+      textPart.text = injectWorkflowStateBanner(textPart.text, activeTaskId, activeTask, gateState)
     },
   }
 }
 
-export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE }
+export { applyControllerDecision, buildControllerDecision, CONTROLLER_ACTION, CONTROLLER_PHASE, injectWorkflowStateBanner, textLooksLikeCodeInvestigationIntent, textLooksLikeExplicitWorkflowSkip, textLooksLikeNeutralAnalysis, textLooksLikeWorkflowEntryNarration }

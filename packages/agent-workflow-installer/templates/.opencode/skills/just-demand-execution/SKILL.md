@@ -1,6 +1,6 @@
 ---
 name: just-demand-execution
-description: Use when a formal work item is ready to execute, when dispatching just-demand-research, just-demand-implement, just-demand-check, or just-demand-docs subagents, or when building context for focused execution.
+description: Use when a formal work item is ready to execute, when dispatching just-demand-researcher, just-demand-coder, just-demand-tester, or just-demand-advisor subagents, or when building context for focused execution.
 ---
 
 # Workflow Execution
@@ -20,6 +20,16 @@ Execute formal work items through focused subagents and script-owned state.
 - Implementation or verification must not start unless the current formal task already has the required task context files. Do not treat missing task context as a recoverable inline shortcut.
 - Before dispatching a subagent or starting implementation, mark the task status with `mark`.
 - Before ending a turn with unfinished work, mark the task `paused` with current progress and known impact.
+
+### No-Plugin Fallback Gate
+
+When plugins are unavailable, disabled, or unstable, this skill is only best-effort and cannot hard-block tools. The agent must self-enforce the same preconditions before any write tool or execution subagent:
+
+1. Run `just-demand . list-active`.
+2. Confirm the intended formal task exists and is ready for execution.
+3. Confirm required context files exist for the intended `just-demand-*` subagent.
+4. If unfinished tasks exist but no current task is selected, recover with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
+5. If any check still fails after selection, stop and route back to `socratic-clarification` or `just-demand-intake`; do not edit inline.
 
 ### Evidence-First Execution
 
@@ -46,12 +56,26 @@ After adding or modifying UI or a new feature, briefly list the main structure o
 
 Keep this summary short and structured. Prefer names as they appear in code. If names are unclear, propose concise labels based on the current structure.
 
+### User-Facing Execution Updates
+
+When reporting execution progress or subagent results to the user, follow the User-Facing Output Contract from `using-just-demand`:
+
+- **First-screen answer**: what changed or what is happening now.
+- **User action**: usually "none" during execution unless a real product/architecture/risk decision is needed.
+- **Recommended default**: if blocked, state the recommended next move before alternatives.
+- **Visible or diagram acceptance first**: for UI work, state the expected on-screen behavior, rejected anti-outcome, and visible side effects before routine checks; for diagram work, state the intended diagram meaning, diagram acceptance, and expression side effects before routine checks.
+- **Validation card**: when work is ready for review, state expected effect, anti-outcome, checks run, and remaining risk. Routine tests/build/lint are mandatory agent work; summarize them after the visible result unless they failed or require user action.
+- **Optional expansion**: changed files, structure summary, logs, and detailed rationale after the user-facing result.
+
+Do not make the user choose implementation details. Escalate only when the wrong guess would change user-visible behavior, architecture boundaries, compatibility, security, cost, or long-term maintenance.
+
 ## Subagent Routing
 
-- `just-demand-research`: research only; no code changes.
-- `just-demand-implement`: scoped implementation; no commits.
-- `just-demand-check`: verify requirements and fix only low-risk local issues within scope.
-- `just-demand-docs`: update workflow docs and durable notes; no business-code changes.
+- `just-demand-researcher`: research only; no code changes.
+- `just-demand-coder`: scoped implementation; no commits.
+- `just-demand-tester`: verify requirements and fix only low-risk local issues within scope.
+- `just-demand-advisor`: independent analysis and advisory for difficult or cross-boundary problems; no direct large-scale implementation.
+- Documentation, decisions, durable notes, and summaries are owned by the main agent or produced as part of a `coder`/`advisor` task. There is no standalone docs subagent.
 
 ## Subagent Unavailable Handling
 
@@ -73,7 +97,7 @@ Use the `question` tool when feasible so the user can answer with one click. Tre
 Use `mark` for high-frequency, low-token state updates:
 
 ```text
-just-demand --root . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]
+just-demand . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]
 ```
 
 ### When to mark
@@ -103,7 +127,7 @@ Start workflow subagent prompts with:
 Active task: <task-id>
 ```
 
-This is a fallback for context injection failures.
+This is a fallback for context injection failures. Keep the manual Requested Work short: state the role-specific request, target repository or paths if needed, and any turn-specific instruction. Do not paste the full task package, full clarification artifact, approach options, approval text, or repeated context sections; the plugin injects the task context automatically.
 
 ## Progressive Clarification Routing
 
@@ -133,12 +157,21 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 ## Execution Loop
 
 1. Confirm active formal work item.
-2. Run `just-demand --root . list-active` and inspect all unfinished tasks for conflict risk.
-3. Ensure the current task package has the required files for the intended subagent.
-4. Verify the clarification gate above passes. If not, route back to clarification.
-5. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
-6. Review subagent output before moving to the next phase.
-7. Run verification before claiming completion.
+2. Run `just-demand . list-active` and inspect all unfinished tasks for conflict risk.
+3. Remember that `create-intake` alone will not appear in `list-active`; only promoted formal tasks do.
+4. If `list-active` shows unfinished tasks but no current task is selected, pick the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
+5. Ensure the current task package has the required files for the intended subagent.
+6. Verify the clarification gate above passes. If not, route back to clarification.
+7. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
+8. Review subagent output before moving to the next phase.
+9. Run verification before claiming completion.
+
+Quick recovery when execution is blocked by task selection state:
+
+1. Run `just-demand . list-active`.
+2. Choose the intended unfinished task.
+3. Run `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
+4. Retry execution only after the task is current and its context files exist.
 
 ## Checkpoint Commit Policy
 
@@ -149,29 +182,29 @@ Every clean verification result should produce a checkpoint commit. The commit r
 When verification passes, the script-owned closure command creates the checkpoint commit automatically:
 
 ```text
-just-demand --root . complete-verification <task-id> passed "<summary>"
+just-demand . complete-verification <task-id> passed "<summary>"
 ```
 
 That command records verification, runs the checkpoint-commit safety gate, and archives the task. Pass `--no-checkpoint-commit` only when the user explicitly asked to avoid committing.
 
 ### Standalone commit path: mid-task checkpoints
 
-After any clean `just-demand-check` result, create a mid-task checkpoint without closing the task:
+After any clean `just-demand-tester` result, create a mid-task checkpoint without closing the task:
 
 ```text
-just-demand --root . checkpoint-commit <task-id>
+just-demand . checkpoint-commit <task-id>
 ```
 
 This is useful for:
 - Long tasks with multiple independently verified slices.
-- After fixing issues found by `just-demand-check` before moving to the next phase.
+- After fixing issues found by `just-demand-tester` before moving to the next phase.
 - Any time a safe, scoped commit would reduce risk.
 
 ### When to commit — proactively
 
 Commit after **every** meaningful clean verification:
 
-- After `just-demand-check` passes with no unresolved findings.
+- After `just-demand-tester` passes with no unresolved findings.
 - After fixing low-risk local issues and re-verifying.
 - After the user expresses positive acceptance (e.g., `effective`, `good`, `OK`, `LGTM`, `works`, `looks good`, `valid`, `不错`, `有效`, `可以`, `没问题`, `达成`, `就这样`).
 - Before ending a multi-step implementation turn, even if the full task is not done yet.
@@ -236,9 +269,9 @@ Completed and verified tasks should be archived to `tasks/archive/` rather than 
 
 ## Required Context Files
 
-- `just-demand-implement`: `context.md`, `implement.md`
-- `just-demand-check`: `context.md`, `verify.md`
-- `just-demand-docs`: `context.md`, `decisions.md`
-- `just-demand-research`: `context.md`
+- `just-demand-coder`: `context.md`, `implement.md`
+- `just-demand-tester`: `context.md`, `verify.md`
+- `just-demand-researcher`: `context.md`
+- `just-demand-advisor`: `context.md`
 
 If required files are missing, stop and create or refresh the task context package first.

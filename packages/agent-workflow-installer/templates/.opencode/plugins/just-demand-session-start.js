@@ -3,6 +3,7 @@ const SESSION_REMINDER = [
   "Load using-just-demand first for repo workflow turns.",
   "Use socratic-clarification second for any request, bug, correction, or mismatch before intake.",
   "Use just-demand subagents proactively for long-context work.",
+  "Long-context work means broad code reading, 3+ files, multi-step research/debugging, or extended verification.",
   "If a needed subagent is unavailable, ask whether to retry now or skip one turn.",
   "</JUST_DEMAND_REMINDER>",
 ].join("\n")

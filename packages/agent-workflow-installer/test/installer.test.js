@@ -36,7 +36,7 @@ describe('just-demand init', () => {
 
     // Check some key files exist
     assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/just-demand-state.js')));
-    assert.ok(fs.existsSync(path.join(target, '.opencode/agent/just-demand-implement.md')));
+    assert.ok(fs.existsSync(path.join(target, '.opencode/agent/just-demand-coder.md')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/skills/using-just-demand/SKILL.md')));
     assert.ok(fs.existsSync(path.join(target, 'AGENTS.md')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/package.json')));

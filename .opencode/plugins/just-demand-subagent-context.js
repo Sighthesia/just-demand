@@ -11,8 +11,8 @@ import {
   workflowRoot,
 } from "./just-demand-lib.js"
 
-const SUPPORTED = new Set(["just-demand-research", "just-demand-implement", "just-demand-check", "just-demand-docs"])
-const WRITABLE_SUBAGENTS = new Set(["just-demand-implement", "just-demand-check", "just-demand-docs"])
+const SUPPORTED = new Set(["just-demand-researcher", "just-demand-coder", "just-demand-tester", "just-demand-advisor"])
+const WRITABLE_SUBAGENTS = new Set(["just-demand-coder", "just-demand-tester"])
 
 // Markers to detect if prompt has already been injected with workflow context.
 // Keep the legacy header to avoid duplicate injection across old prompts.

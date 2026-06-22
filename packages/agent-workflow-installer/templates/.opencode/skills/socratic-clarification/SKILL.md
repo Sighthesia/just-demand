@@ -5,11 +5,9 @@ description: Use when the user proposes a need, request, feature, design/refacto
 
 # Socratic Clarification
 
-Force progressive clarification and design approval before any implementation work begins. This is a hard gate, not optional guidance.
+Force progressive clarification and design approval before implementation. This is a hard gate, not optional guidance.
 
-This skill is the required second routing step after `using-just-demand`. If a turn changes from ordinary Q&A into concrete work, bug fixing, mismatch analysis, or correction feedback, this skill takes priority before intake, execution, or verification routing continues.
-
-If earlier turns were only informational, reset the problem model as soon as the current turn becomes a request, bug, correction, or mismatch. Do not stay on the Q&A path and drift straight to intake.
+This skill is the required second step after `using-just-demand`. When a turn pivots from Q&A into a request, bug, correction, or mismatch, reset here before intake, execution, or verification. In skill-only fallback mode, self-enforce the same rule: approval enters intake/formal-task flow, not inline editing, and codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) is also execution work that must wait for a formal task.
 
 <HARD-GATE>
 Do NOT promote a task, dispatch a subagent, edit files, or finalize an implementation plan until you have presented a final expected effect, compared 2-3 approaches, captured the chosen approach and final implementation plan, and received explicit user approval. This applies to EVERY request regardless of perceived simplicity.
@@ -17,7 +15,7 @@ Do NOT promote a task, dispatch a subagent, edit files, or finalize an implement
 
 ## Anti-Pattern: "This Is Too Simple To Need Clarification"
 
-Every request goes through this process. A one-line fix, a config change, a single-function addition -- all of them. "Simple" requests are where unexamined assumptions cause the most wasted work. The clarification can be short (a few sentences for truly simple requests), but you MUST present the final artifact and get approval.
+Every request goes through this process. "Simple" requests still need a short final artifact and explicit approval.
 
 ## Anti-Rationalization Rules
 
@@ -40,9 +38,7 @@ Before continuing inside the user's frame, explicitly test:
 - whether a structural limitation or experiment flaw better explains the phenomenon
 - whether the current evidence can distinguish between a tuning problem and a wrong premise
 
-If the user's frame is weak, incomplete, or contradicted by stronger explanations, challenge the premise before proposing more detailed optimization. The goal is to prevent long conversations from collapsing into increasingly precise advice built on an unsupported assumption.
-
-For analysis, diagnosis, tuning, and experiment-review tasks, this premise check happens before fine-grained comparisons.
+If the user's frame is weak, incomplete, or contradicted by stronger explanations, challenge the premise before proposing narrower advice.
 
 ## Checklist
 
@@ -55,7 +51,7 @@ You MUST complete these steps in order. Do not skip steps.
 5. **Propose 2-3 approaches** -- with trade-offs and your recommendation.
 6. **Capture final artifact** -- final expected effect, scope, anti-outcomes, chosen approach, final implementation plan, validation criteria, open questions.
 7. **Get user approval** -- explicit approval on the final artifact before any execution.
-8. **Promote or execute** -- only after approval, promote to formal task or begin execution.
+8. **Promote or execute** -- only after approval, promote to a formal task when no ready task exists; begin execution only when formal execution readiness is satisfied.
 
 ## Process Flow
 
@@ -83,7 +79,7 @@ Capture final artifact
   v
 User approves final artifact?
   |-- no --> revise artifact, re-approve
-  |-- yes --> promote to task or begin execution
+  |-- yes --> promote to task, or execute only if a formal task is already ready
 ```
 
 ## Progressive Questioning Rounds
@@ -92,7 +88,7 @@ Use the rounds as a state machine. Ask only the rounds that still contain unknow
 
 ### Long-Context Reset Trigger
 
-If the conversation has spent 3 or more turns on the same phenomenon, or if the user keeps providing new samples under the same assumed explanation, pause incremental answering and restate the problem model.
+If the conversation has spent 3 or more turns on the same phenomenon, or if the user keeps providing new samples under the same assumed explanation, pause incremental answering and reset the problem model before continuing.
 
 Minimum reset structure:
 
@@ -159,24 +155,52 @@ After gathering enough context, propose 2-3 different approaches with trade-offs
 
 This proposal is the highest-information moment of the turn, so it MUST follow the Output Style rules in `using-just-demand` (BLUF, scannable, user language). The user is the product manager and architect, not the implementer.
 
+Default to a low-reading-cost decision card, not a long analysis. The user should usually be able to approve, reject, or adjust the recommendation after reading one compact block.
+
+```text
+Decision card:
+- Intent: <one sentence in user language>
+- Recommended default: <the path you would take if the user does not care>
+- Why this default: <one practical reason>
+- User action: approve, choose another option, or correct the intent
+- Confidence: <high|medium|low, only when it helps calibrate trust>
+- Escalation reason: <why this needs user input instead of agent decision, or "none">
+```
+
 - **Lead with effect, not implementation.** The first line of the proposal states what the user will be able to do, in user language. Do NOT open with an internal concern, file name, type, or dependency.
 - **Subject is the user or the system's observable behavior**, never the implementation artifact. Write "you get X" / "the system does Y", not "the CLI module calls Z".
 - **Trade-offs describe user-facing consequences** (speed, safety, cost, what could go wrong, what it feels like), not raw technical attributes. "Smaller change, but if it crashes mid-run it may stay in auto mode" beats "reuses global Arc<Mutex> mode".
+- **Name the failure mode.** Each option should say what bad outcome it risks in practical terms, so the user is not left inferring the downside.
 - **Implementation detail (files, dependencies, internal structure, symbol names) does not belong in the main proposal.** Fold it into an optional expand section the user can skip, or omit entirely.
+
+```text
+Option matrix:
+| Option | Best for | Pros | Cons | Failure mode |
+| --- | --- | --- | --- | --- |
+| A | <when to choose it> | <benefit> | <cost> | <what wrong looks like> |
+```
+
+Use the table form when it is easier to compare. Use the shorter list form when there are only two simple options.
 
 ```text
 Approach A: <name>
   - What you get: <user-visible effect in user language>
-  - Trade-offs: <user-facing pros/cons: speed, safety, cost, failure mode>
+  - Pros: <why this is good for the user>
+  - Cons: <what the user gives up>
+  - Failure mode: <what wrong looks like in practice>
   - Recommended: <yes/no with reasoning>
 
 Approach B: <name>
   - What you get: <user-visible effect>
-  - Trade-offs: <user-facing pros/cons>
+  - Pros: <why this is good for the user>
+  - Cons: <what the user gives up>
+  - Failure mode: <what wrong looks like in practice>
 
 Approach C: <name> (optional)
   - What you get: <user-visible effect>
-  - Trade-offs: <user-facing pros/cons>
+  - Pros: <why this is good for the user>
+  - Cons: <what the user gives up>
+  - Failure mode: <what wrong looks like in practice>
 ```
 
 Wait for the user to choose or approve your recommendation before proceeding.
@@ -236,6 +260,80 @@ If the user's anti-outcome mentions hard cuts, visible clipping, premature conte
 
 Do not present a containment fix as the default just because it is easiest to verify. If containment remains as a safety boundary, name the primary user-visible behavior separately, such as "slide in from the tray anchor with clip only as a guardrail".
 
+For UI, layout, animation, reveal, overflow, clipping, masking, or quality/feel approvals, the approval surface is a **visible-effect card**, not an engineering-plan card. The first screen should let the user answer: "Is this the behavior I want?"
+
+- Lead with the expected on-screen phenomenon, not files, tests, or implementation steps.
+- Include a compact current-vs-target ASCII diagram when layout, height, padding, anchor, parent-container impact, overflow, reveal direction, or motion shape matters.
+- Prefer `Touchpoints` over verbose scope in the user-facing card: one short line naming concrete files/modules/components when known, plus explicit exclusions.
+- Prefer `Visible acceptance` over validation in the user-facing card: only what the user can see, feel, or operate to confirm the result.
+- Treat routine engineering checks as agent obligations. Tests, builds, lint, JSON validation, and diff checks belong in execution/final-report detail unless they fail or require user action.
+- Prefer `Visible side effect` over risk for expected side effects. Describe the screen phenomenon, such as "the dockzone grows while lyrics are shown"; do not introduce an unchosen alternate solution there.
+
+Use this compact shape when a UI/layout/animation approval would otherwise be ambiguous:
+
+```text
+Recommended: <one sentence describing the visible effect>
+
+Current:
++-- <component/region> h=<current height> --+
+| <current visible problem>                  |
++--------------------------------------------+
+
+Target:
++-- <component/region> h=<target/content> ---+
+| padTop=<value or existing variable>         |
+| <primary content>                           |
+| <secondary/revealed content>                |
+| padBottom=<value or existing variable>      |
++--------------------------------------------+
+<parent or surrounding region effect>
+
+Touchpoints: `<file/module>` and `<component>`; not changing <explicit exclusion>.
+Visible acceptance: <1-2 visible or operational checks>.
+Visible side effect: <expected on-screen side effect, or none>.
+```
+
+### Diagram Intent Cards
+
+For flowcharts, architecture diagrams, state diagrams, data-flow/API diagrams, or other explanatory diagrams, treat the diagram as a decision surface. The user is approving what the diagram communicates, not your drawing mechanics.
+
+- Lead with the intended diagram meaning: relationship, process, boundary, ownership, state transition, or data direction.
+- Use a compact ASCII or Mermaid sketch before prose when the shape is easier to validate visually.
+- Use `Diagram acceptance` instead of generic validation: what the user should be able to identify by looking at the diagram.
+- Use `Expression side effect` instead of risk when the concern is representational: what the diagram emphasizes, collapses, hides, or intentionally omits.
+- Keep routine engineering checks out of the first-screen diagram approval unless they failed or require user action.
+- Do not force UI-specific height, padding, anchor, or motion language onto non-UI diagrams.
+
+Use this compact shape when a diagram-heavy approval would otherwise be ambiguous:
+
+```text
+Recommended: this diagram will show <core relationship/process/boundary/state/data direction>.
+
+Current / problem:
++-------------+      ?
+| A           | ---> |
++-------------+      |
+  Missing boundary, owner, branch, state, or data direction
+
+Target:
++-------------+   <relation/flow>   +-------------+
+| A: role     |  ---------------->  | B: role     |
++-------------+                     +-------------+
+       |                                   |
+       +-- <owner / branch / state note> --+
+
+Touchpoints: `<module/doc>` and `<diagram area>`; not changing <explicit exclusion>.
+Diagram acceptance: <what the user can identify from the diagram>.
+Expression side effect: <what is emphasized, collapsed, hidden, or intentionally omitted>.
+```
+
+Diagram-type acceptance cues:
+
+- **Flowchart**: entry point, decision points, success path, failure/rollback path, terminal states.
+- **Architecture diagram**: module boundaries, dependency direction, ownership, external systems, trust/security boundary when relevant.
+- **State diagram**: states, transitions, triggers, guards, terminal/error states.
+- **Data-flow/API diagram**: source, transform, destination, data owner, protocol/API boundary, trust/security boundary when relevant.
+
 ## Final Artifact Shape
 
 Before execution, capture this artifact and get explicit user approval.
@@ -243,12 +341,22 @@ Before execution, capture this artifact and get explicit user approval.
 Present it under the same Output Style rules as the approach comparison: BLUF, user language, effect first. The `Final implementation plan` is the only section that names steps; keep even those at the level of observable behavior plus referenced files/symbols by name, not line-by-line code. Push internal mechanics into an optional expand section.
 
 ```text
+Decision card:
+- Intent: <one-sentence interpretation>
+- Recommended default: <chosen path unless user changes it>
+- Why: <short rationale>
+- User action: <approve / choose / correct / no action needed>
+- Confidence: <high|medium|low when useful>
+- Escalation reason: <why the user must decide, or "none">
+
+Option matrix:
+- <2-3 choices with best-for, pros, cons, and failure mode; omit if no real choice remains>
+
 Final expected effect:
 - <user-visible outcome in user language>
 
-Scope:
-- In: <what is included, described as user-facing capability>
-- Out: <what is explicitly excluded>
+Touchpoints / scope:
+- <one short line naming concrete files/modules/components when known, plus explicit exclusions; keep the formal `Scope` field for runtime readiness>
 
 Anti-outcomes:
 - <what would feel wrong even if technically complete>
@@ -261,8 +369,25 @@ Final implementation plan:
 2. <step>
 3. <verification step>
 
-Validation:
-- <how we will verify the result matches the expected effect>
+Visible acceptance:
+- <what the user can see, feel, or operate to confirm the result>
+
+Diagram acceptance:
+- <for diagram-heavy work, what the user can identify from the diagram: flow, boundary, owner, state, transition, source, transform, or destination>
+
+Validation card:
+- Quick check 1: <observable expectation>
+- Quick check 2: <observable expectation>
+- Quick check 3: <observable expectation>
+
+Visible side effect:
+- <expected screen/operational side effect, or "none"; do not introduce alternate unchosen solutions here>
+
+Expression side effect:
+- <for diagram-heavy work, what the diagram emphasizes, collapses, hides, or intentionally omits>
+
+Diagram:
+- <ASCII or Mermaid diagram when UI, layout, workflow, architecture, state, data flow, or process shape would otherwise be ambiguous; for UI layout prefer current-vs-target ASCII with size/padding/anchor/parent impact labels; for explanatory diagrams prefer a diagram-intent sketch with relationship/process/boundary/state/data labels>
 
 Open questions:
 - <any remaining non-blocking questions, or "none">
@@ -276,6 +401,25 @@ A proposal the user cannot read is a failed proposal, even if it is technically 
 - **Drop pure-symbol jargon entirely.** Symbols like `Ku`, `Tu`, `Kp/Ki/Kd`, raw type names, or internal field names carry no decision value for the user. Omit them from the main proposal.
 - **Explain a tradeoff's stakes, not just its name.** If an option is "less safe", say what unsafe looks like in practice.
 - Keep MVK proportional: one sentence per term, not a tutorial. If the user already demonstrated the knowledge, skip it.
+
+Use this compact shape when any option depends on unfamiliar terms:
+
+```text
+Minimum viable knowledge:
+- <term>: <one plain-language sentence explaining only what the user needs to decide>
+```
+
+## Diagram Trigger
+
+Use a simple diagram when it lets the user validate shape faster than prose. Prefer Mermaid or ASCII, and keep it small.
+
+- UI/layout: show current vs target regions, height/width when relevant, padding, anchors, reveal direction, overflow boundary, and parent-container impact.
+- Workflow/process: show entry points, decision points, success path, failure/rollback path, and terminal states.
+- Architecture: show module boundaries, dependency direction, ownership, external systems, and trust/security boundaries when relevant.
+- State/mode behavior: show states, transitions, triggers, guards, and terminal/error states.
+- Data/API flow: show source, transform, destination, owner, protocol/API boundary, and trust/security boundary when relevant.
+
+Skip the diagram when the request is local, textual, or the diagram would repeat obvious prose.
 
 ## Question Filtering Gate
 
