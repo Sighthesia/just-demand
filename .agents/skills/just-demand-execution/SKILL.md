@@ -1,0 +1,260 @@
+---
+name: just-demand-execution
+description: Use when a formal work item is ready to execute, when dispatching just-demand-researcher, just-demand-coder, just-demand-tester, or just-demand-advisor subagents, or when building context for focused execution.
+---
+
+# Workflow Execution
+
+Execute formal work items through focused subagents and script-owned state.
+
+## Core Rules
+
+- Main agent coordinates; subagents execute focused work.
+- Subagents do not inherit full chat history.
+- Scripts are the only write path for workflow machine state under `.just-demand/`.
+- Plugins and agents may read state, but lifecycle transitions must go through scripts.
+- Do not dispatch implementation before the user has confirmed the direction and the task is ready.
+- Long-context implementation, research, and verification must run through subagents. The main session should coordinate and summarize, not absorb the full execution context inline.
+- When a suitable `just-demand-*` subagent exists for long-context work, prefer dispatch over continuing inline in the main session.
+- When reporting progress or a result, lead with the user-visible effect or the decision the user needs to make; treat task state, mark commands, and checkpoint mechanics as supporting detail.
+- If a suitable subagent is unavailable, ask the user to retry now or skip one turn rather than silently falling back.
+- Implementation or verification must not start unless the current formal task already has the required task context files. Do not treat missing task context as a recoverable inline shortcut.
+- Before dispatching a subagent or starting implementation, mark the task status with `mark`.
+- Before ending a turn with unfinished work, mark the task `paused` with current progress and known impact.
+
+## Role Dispatch Guide
+
+- `just-demand-researcher`: use for evidence gathering, repository inspection, option comparison, and risk identification before the implementation path is chosen.
+- `just-demand-coder`: use for scoped implementation once the task is clarified and the chosen approach is explicit.
+- `just-demand-tester`: use for validation against the task brief, visible-effect checks, and low-risk local fixes after implementation or when a result needs review.
+- `just-demand-advisor`: use for fresh-context diagnosis, repeated failures, cross-boundary framing, or when the main session needs an independent recommendation before choosing a path.
+
+## Output Handoff Rules
+
+- Researcher findings should feed the main agent's scope and option selection.
+- Coder output should feed verification and any remaining implementation gaps.
+- Tester output should drive pass/fail, low-risk fixes, and closeout readiness.
+- Advisor output should reframe the problem or sharpen the next decision, not replace execution.
+
+### No-Plugin Fallback Gate
+
+When plugins are unavailable, disabled, or unstable, this skill is only best-effort and cannot hard-block tools. The agent must self-enforce the same preconditions before any write tool or execution subagent:
+
+1. Run `just-demand . list-active`.
+2. Confirm the intended formal task exists and is ready for execution.
+3. Confirm required context files exist for the intended `just-demand-*` subagent.
+4. If unfinished tasks exist but no current task is selected, recover with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
+5. If any check still fails after selection, stop and route back to `socratic-clarification` or `just-demand-intake`; do not edit inline.
+
+### Evidence-First Execution
+
+- Evidence over stale memory. When information may be outdated or uncertain, verify against current codebase state.
+- Prioritize business value over technical cleverness. Stability and maintainability over short-term speed.
+
+### Dependency Justification
+
+Before introducing a new dependency, briefly explain:
+
+1. Why standard library or existing modules are insufficient
+2. Maturity and ecosystem position
+3. Alternatives considered
+4. Why the benefit justifies maintenance cost
+
+### Post-Change Structure Summary
+
+After adding or modifying UI or a new feature, briefly list the main structure of the changed area:
+
+- Changed components/modules (use actual names from code)
+- Key containers
+- Important props/state
+- Entry points
+
+Keep this summary short and structured. Prefer names as they appear in code. If names are unclear, propose concise labels based on the current structure.
+
+### User-Facing Execution Updates
+
+When reporting execution progress or subagent results to the user, follow the User-Facing Output Contract from `using-just-demand` and keep the first screen effect-first:
+
+- **First-screen answer**: what changed or what is happening now, in user-visible terms.
+- **User action**: usually "none" during execution unless a real product/architecture/risk decision is needed.
+- **Recommended default**: if blocked, state the recommended next move before alternatives.
+- **Visible or diagram acceptance first**: for UI work, state the expected on-screen behavior, rejected anti-outcome, and visible side effects before routine checks; for diagram work, state the intended diagram meaning, diagram acceptance, and expression side effects before routine checks.
+- **Validation card**: when work is ready for review, state expected effect, anti-outcome, checks run, and remaining risk. Routine tests/build/lint are mandatory agent work; summarize them after the visible result unless they failed or require user action.
+- **Optional expansion**: changed files, structure summary, logs, and detailed rationale after the user-facing result.
+
+When summarizing subagent work back to the user, preserve the subagent's role-specific payload:
+
+- Researcher: scope, evidence, sources, recommendation.
+- Coder: files changed, verification, concerns.
+- Tester: findings, fixes applied, verification results, residual risk.
+- Advisor: frame, key findings, confidence, recommendation, alternative explanations.
+
+Do not make the user choose implementation details. Escalate only when the wrong guess would change user-visible behavior, architecture boundaries, compatibility, security, cost, or long-term maintenance.
+
+## Subagent Routing
+
+- `just-demand-researcher`: research only; no code changes.
+- `just-demand-coder`: scoped implementation; no commits.
+- `just-demand-tester`: verify requirements and fix only low-risk local issues within scope.
+- `just-demand-advisor`: independent analysis and advisory for difficult or cross-boundary problems; no direct large-scale implementation.
+- Documentation, decisions, durable notes, and summaries are owned by the main agent or produced as part of a `coder`/`advisor` task. There is no standalone docs subagent.
+
+## Subagent Unavailable Handling
+
+If a suitable workflow subagent is expected but unavailable, dispatch fails, or the tool appears temporarily unusable, do not silently fall back and do not stop trying forever after one failure.
+
+Immediate next step:
+
+1. Tell the user the subagent path is currently unavailable.
+2. Ask the user to choose one of these options:
+   - retry now
+   - skip one turn
+3. If the user chooses retry, attempt the subagent path again on the next turn.
+4. If the user chooses skip one turn, continue locally for that turn only if it is safe and scoped.
+
+Use the `question` tool when feasible so the user can answer with one click. Treat the failure as transient unless there is strong evidence the subagent path is structurally unavailable.
+
+## Task Marking Policy
+
+Use `mark` for high-frequency, low-token state updates:
+
+```text
+just-demand . mark <task-id> <status> [--progress N] [--impact PATH] [--note TEXT]
+```
+
+### When to mark
+
+- **Before dispatch/implementation**: mark `executing` with progress and impact scope.
+- **Diagnosing failures**: mark `debugging` with note about what's being investigated.
+- **Near completion, minor adjustments**: mark `tweaking` with high progress.
+- **Turn ending with unfinished work**: mark `paused` with current progress and known impact.
+- **Completion**: do not use `mark` to set `done`; completion must flow through verification so archive-on-done can preserve and close the task.
+
+### Status semantics
+
+- `debugging`: actively diagnosing or fixing; higher conflict/instability signal.
+- `tweaking`: mostly complete, low-risk adjustment only; lower conflict signal.
+- `paused`: not currently being modified; progress and impact remain visible.
+- `executing`: actively implementing; standard conflict signal.
+
+### Impact scope
+
+List the main directories, modules, or files affected. Use short user-readable paths like `.just-demand/scripts/`, `tests/just_demand/`, or `.opencode/skills/just-demand-execution/`. This helps other agents avoid overestimating conflict risk.
+
+## Dispatch Prompt
+
+Start workflow subagent prompts with:
+
+```text
+Active task: <task-id>
+```
+
+This is a fallback for context injection failures. Keep the manual Requested Work short: state the role-specific request, target repository or paths if needed, and any turn-specific instruction. Do not paste the full task package, full clarification artifact, approach options, approval text, or repeated context sections; the plugin injects the task context automatically.
+
+## Progressive Clarification Routing
+
+Before execution, if the active task still contains unresolved uncertainty about the user's intended effect, observed phenomenon, boundaries, or tradeoffs, load `socratic-clarification` and route back to clarification. Do not dispatch implementation while the final expected effect and final implementation plan are not explicit.
+
+If the work is long-context and a subagent should be used, but no supported subagent is available right now, ask the user to retry now or skip one turn instead of silently taking over the long-context work inline.
+
+## Clarification Gate Before Execution
+
+Before dispatching any implementation subagent, verify that the task is sufficiently clarified:
+
+1. Check that `blocking_questions` in the task's clarification data is empty.
+2. Check that `scope`, `expected_behavior`, and `actual_behavior` (for bug work) are non-empty.
+3. For design and implementation tasks, check that `final_expected_effect`, `chosen_approach`, `final_implementation_plan`, and `approval` are non-empty.
+4. If any blocking question remains or critical fields are empty, DO NOT dispatch. Route back to clarification instead: update the intake with the gaps and ask the user.
+5. Do not guess what the user wants to fill in missing fields. Ask.
+6. When clarifying gaps, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options.
+
+### Visual Interaction Execution Gate
+
+Before dispatching UI, animation, layout, reveal, overflow, clipping, or quality/feel work, check that the task context names the intended user-visible solution shape. If containment, synchronized entrance, and layout/reflow would feel different, the chosen approach must say which one is primary.
+
+Do not dispatch implementation when the plan only says "fix overflow" or "clip it" but the user's feedback is about foreground/background timing, entrance choreography, layout feel, hard cuts, or visual quality. Route back to `socratic-clarification` and present the relevant options.
+
+If clipping, masking, opacity, or delayed drawing is used only as a safety guardrail, record the primary behavior separately so subagents do not mistake the guardrail for the design.
+
+## Execution Loop
+
+1. Confirm active formal work item.
+2. Run `just-demand . list-active` and inspect all unfinished tasks for conflict risk.
+3. Remember that `create-intake` alone will not appear in `list-active`; only promoted formal tasks do.
+4. If `list-active` shows unfinished tasks but no current task is selected, pick the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
+5. Ensure the current task package has the required files for the intended subagent.
+6. Verify the clarification gate above passes. If not, route back to clarification.
+7. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
+8. Review subagent output before moving to the next phase.
+9. Run verification before claiming completion.
+
+Quick recovery when execution is blocked by task selection state:
+
+1. Run `just-demand . list-active`.
+2. Choose the intended unfinished task.
+3. Run `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
+4. Retry execution only after the task is current and its context files exist.
+
+## Checkpoint Commit Policy
+
+Every clean verification result should produce a checkpoint commit. The commit represents "this verified slice passed engineering checks", not permanent product finality. **Commits are the default, not the exception.** The script handles most of the work; the agent just needs to make sure the conditions are met and call the right command.
+
+### Primary commit path: via `complete-verification`
+
+When verification passes, the script-owned closure command creates the checkpoint commit automatically:
+
+```text
+just-demand . complete-verification <task-id> passed "<summary>"
+```
+
+That command records verification, runs the checkpoint-commit safety gate, and archives the task. Pass `--no-checkpoint-commit` only when the user explicitly asked to avoid committing.
+
+### Standalone commit path: mid-task checkpoints
+
+After any clean `just-demand-tester` result, create a mid-task checkpoint without closing the task:
+
+```text
+just-demand . checkpoint-commit <task-id>
+```
+
+This is useful for:
+- Long tasks with multiple independently verified slices.
+- After fixing issues found by `just-demand-tester` before moving to the next phase.
+- Any time a safe, scoped commit would reduce risk.
+
+### When to commit — proactively
+
+Commit after **every** meaningful clean verification:
+
+- After `just-demand-tester` passes with no unresolved findings.
+- After fixing low-risk local issues and re-verifying.
+- After the user expresses positive acceptance (e.g., `effective`, `good`, `OK`, `LGTM`, `works`, `looks good`, `valid`, `不错`, `有效`, `可以`, `没问题`, `达成`, `就这样`).
+- Before ending a multi-step implementation turn, even if the full task is not done yet.
+
+Do not wait for perfect conditions. If the verified slice is clean, commit it.
+
+### Impact scope recommendation (not a gate)
+
+Setting `impact` via `mark --impact PATH` scopes the commit to only task-related files. If impact is not set, the script commits all non-generated changed files automatically. Impact scoping is **recommended** for precision but **not required** for the commit to proceed.
+
+### When NOT to commit
+
+- The user explicitly says to avoid committing.
+- No agent-made changes exist yet (planning/discussion phase only).
+- The task is in `debugging` or `tweaking` status with repeated unstable feedback (pause auto-commit until next clean check).
+- Tests fail and the user has not overridden.
+
+### Correction commits
+
+- Small corrections: use follow-up commits on the same branch.
+- Fundamentally wrong direction: use a revert commit.
+- Do not rewrite history; prefer follow-up or revert commits.
+
+### Pre-commit safety gate (script-owned, no manual steps needed)
+
+The `create_checkpoint_commit` function in `workflow_core.py` handles the entire safety gate:
+
+1. Reads git status and diffs the candidate paths.
+2. Verifies the task directory exists and changes are scoped.
+3. Stages only non-generated files (`__pycache__/`, `.pyc`, `.pytest_cache/`, `.opencode/node_modules/` are excluded automatically).
+4. Creates a conventional commit message with the task title and type prefix.

@@ -58,11 +58,14 @@ Prefer the narrowest source that can answer the question, but do not avoid exter
 
 End every response with a brief summary containing:
 - **Investigation scope**: what was examined and why
+- **Key findings**: the most important information discovered
 - **Sources checked**: files, docs, repos, or tools consulted
 - **Sources not checked**: relevant sources intentionally skipped, if any, and why
 - **Evidence**: the strongest facts or examples supporting the conclusion
 - **Uncertainty**: what remains unresolved or could still be wrong
 - **Recommendation**: the best next step or decision, if applicable
+
+Prefer dedicated read-only tools first.
 
 If external search was skipped, say why local evidence was sufficient.
 
