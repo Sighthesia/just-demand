@@ -13,6 +13,7 @@ Verify outcomes against the task brief and active validation revision.
 - Verification failure must not be collapsed into done.
 - User correction after implementation creates a new validation revision unless it is purely explanatory.
 - The user may correct drift in outcome language without knowing implementation details.
+- When `just-demand-tester` is used, treat its report as the active verification record: it should name findings, any low-risk fixes applied, verification results, and residual risk.
 
 ## Status Flow
 
@@ -168,6 +169,13 @@ The following items must be COVERED, but coverage means a scannable mention, not
 - Whether the task is ready for archival.
 - Whether checkpoint commit was created, skipped, or blocked, with reason.
 - For analysis-style conclusions: confidence, live alternative explanations, and what evidence would overturn the current conclusion.
+
+When the verification work is coming from `just-demand-tester`, preserve the tester's short report shape and use it as the evidence record for main-agent closeout:
+
+- **Findings**: what passed or failed.
+- **Fixes applied**: low-risk local fixes only, if any.
+- **Verification results**: commands or checks and their outcomes.
+- **Residual risk**: anything that still might feel wrong even if the checks pass.
 
 ### Default Final Report
 

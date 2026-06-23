@@ -319,3 +319,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-22-redesign-agent-team-roles-task (Redesign agent team roles) completed with status 'done'.
   Verification summary: Team-style agent role redesign verified: active roles are researcher/coder/tester/advisor, docs role removed from active surface, advisor added as fresh-context advisory helper, plugin/install/workflow tests passed.
+
+- Task 2026-06-22-add-agent-inner-loop-contracts-task (Add agent inner-loop contracts) completed with status 'done'.
+  Verification summary: Agent inner-loop contracts verified: all four active agent prompts define role-specific mission, inputs, workflow loop, boundaries, output contract, and escalation rules; execution and verification guidance align; install/plugin/package checks passed.

@@ -9,6 +9,7 @@ OpenCode-first local agent workflow runtime: Python scripts own workflow state, 
 - Do not skip the clarification gate. In this repo, `using-just-demand` routes first and `socratic-clarification` is the hard gate before promotion, subagent dispatch, or code edits.
 - Long-context implementation, research, and verification belong in `just-demand-*` subagents, not inline in the main session.
 - The user is the boss/product lead/architecture approver; the main agent owns workflow dispatch, verification, and closure.
+- Subagent inner loops are execution contracts, not autonomous lifecycle owners: they may research, implement, verify, or advise within scope, but they do not create/promote/close tasks or dispatch other subagents.
 
 ## Skill-Only Fallback
 

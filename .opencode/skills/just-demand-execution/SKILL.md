@@ -21,6 +21,20 @@ Execute formal work items through focused subagents and script-owned state.
 - Before dispatching a subagent or starting implementation, mark the task status with `mark`.
 - Before ending a turn with unfinished work, mark the task `paused` with current progress and known impact.
 
+## Role Dispatch Guide
+
+- `just-demand-researcher`: use for evidence gathering, repository inspection, option comparison, and risk identification before the implementation path is chosen.
+- `just-demand-coder`: use for scoped implementation once the task is clarified and the chosen approach is explicit.
+- `just-demand-tester`: use for validation against the task brief, visible-effect checks, and low-risk local fixes after implementation or when a result needs review.
+- `just-demand-advisor`: use for fresh-context diagnosis, repeated failures, cross-boundary framing, or when the main session needs an independent recommendation before choosing a path.
+
+## Output Handoff Rules
+
+- Researcher findings should feed the main agent's scope and option selection.
+- Coder output should feed verification and any remaining implementation gaps.
+- Tester output should drive pass/fail, low-risk fixes, and closeout readiness.
+- Advisor output should reframe the problem or sharpen the next decision, not replace execution.
+
 ### No-Plugin Fallback Gate
 
 When plugins are unavailable, disabled, or unstable, this skill is only best-effort and cannot hard-block tools. The agent must self-enforce the same preconditions before any write tool or execution subagent:
@@ -66,6 +80,13 @@ When reporting execution progress or subagent results to the user, follow the Us
 - **Visible or diagram acceptance first**: for UI work, state the expected on-screen behavior, rejected anti-outcome, and visible side effects before routine checks; for diagram work, state the intended diagram meaning, diagram acceptance, and expression side effects before routine checks.
 - **Validation card**: when work is ready for review, state expected effect, anti-outcome, checks run, and remaining risk. Routine tests/build/lint are mandatory agent work; summarize them after the visible result unless they failed or require user action.
 - **Optional expansion**: changed files, structure summary, logs, and detailed rationale after the user-facing result.
+
+When summarizing subagent work back to the user, preserve the subagent's role-specific payload:
+
+- Researcher: scope, evidence, sources, recommendation.
+- Coder: files changed, verification, concerns.
+- Tester: findings, fixes applied, verification results, residual risk.
+- Advisor: frame, key findings, confidence, recommendation, alternative explanations.
 
 Do not make the user choose implementation details. Escalate only when the wrong guess would change user-visible behavior, architecture boundaries, compatibility, security, cost, or long-term maintenance.
 

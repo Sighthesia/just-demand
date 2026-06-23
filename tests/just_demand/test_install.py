@@ -343,7 +343,8 @@ class InstallIntegrationTests(unittest.TestCase):
 
             for content in (coder_agent, tester_agent):
                 self.assertIn('bash: allow', content)
-                self.assertIn('Prefer dedicated tools first', content)
+                self.assertIn('## Workflow Loop', content)
+                self.assertIn('## Stop / Escalation Rules', content)
                 self.assertIn('task: deny', content)
 
             for content in (researcher_agent, advisor_agent):
