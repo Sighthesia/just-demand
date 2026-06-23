@@ -126,6 +126,13 @@ Treat one failed subagent attempt as a transient exception, not as permission to
 - Stability and maintainability over short-term speed.
 - Structural explanations over repeated local tuning when the data suggests the premise may be wrong.
 
+### External Evidence Triggers
+
+- Proactively use external references when the task touches third-party libraries, external APIs, unfamiliar domains, current ecosystem practice, open-source architecture, or behavior that may be outdated or ambiguous.
+- Treat local repository evidence and model memory as sufficient for simple, well-understood, purely local changes; do not force network search when the answer is already supported by the repo.
+- If external references are skipped, briefly note that local evidence was sufficient or that the behavior is stable enough to rely on current repo evidence.
+- Choose the right tool for the evidence source: `context7` for official docs and API/framework behavior, `deepwiki` for repo-level architecture and module relationships, `github` for exact implementations and concrete code examples, `exa` for broad current search and cross-source validation, and `webfetch` for a specific page when the other tools do not expose enough detail.
+
 ## Output Style
 
 Users skim. Output past ~300 characters is usually not read closely, so every main-session reply must be bottom-line-up-front and scannable by default:

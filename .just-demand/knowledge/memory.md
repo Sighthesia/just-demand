@@ -331,3 +331,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-23-expand-readme-workflow-positioning-task (Expand README workflow positioning) completed with status 'done'.
   Verification summary: README.md expanded for workflow evaluators and custom agent workflow builders with pain-point analysis, communication/dispatch diagrams, responsibility tables, comparisons, and design lessons; README markdown check passed; unrelated pre-existing working-tree changes remain.
+
+- Task 2026-06-23-improve-proactive-external-research-guidance-task (Improve proactive external research guidance) completed with status 'done'.
+  Verification summary: Prompt guidance updated so main agent proactively considers external evidence and researcher treats context7, deepwiki, github, exa, and webfetch fallback as first-class evidence sources; verification passed; no runtime/plugin hard gate added.
