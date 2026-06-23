@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 const REMINDER_STATE = new Map()
@@ -6,6 +6,7 @@ const REMINDER_STATE = new Map()
 const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
 const WORKFLOW_SUBAGENTS = new Set(["just-demand-researcher", "just-demand-coder", "just-demand-tester", "just-demand-advisor"])
 const EXECUTION_GATED_SUBAGENTS = new Set(["just-demand-coder", "just-demand-tester"])
+const LAST_SUBAGENT_DISPATCH_FILE = "last_subagent_dispatch.json"
 const DEBUG_ENV_VALUES = new Set(["1", "true", "yes", "on"])
 const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
   "design",
@@ -209,6 +210,96 @@ export const clearSubagentUnavailablePending = (directory, sessionID) => {
   const state = getReminderState(directory, sessionID)
   state.subagent_unavailable_pending = false
   return state
+}
+
+const getLastSubagentDispatchPath = (directory) => join(workflowRoot(directory), "state", LAST_SUBAGENT_DISPATCH_FILE)
+
+const readLastSubagentDispatchState = (directory) => readJson(getLastSubagentDispatchPath(directory)) || {}
+
+const extractTaskIdFromValue = (value, depth = 0) => {
+  if (depth > 4 || value == null) return null
+
+  if (typeof value === "string") {
+    const text = value.trim()
+    if (!text) return null
+
+    if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+      try {
+        return extractTaskIdFromValue(JSON.parse(text), depth + 1)
+      } catch {
+        // fall through to pattern matching
+      }
+    }
+
+    const directMatch = text.match(/\b(?:task[_-]?id|session[_-]?id)\s*[:=]\s*([A-Za-z0-9._:-]+)/i)
+    if (directMatch) return directMatch[1]
+    return null
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractTaskIdFromValue(item, depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+
+  if (typeof value === "object") {
+    for (const key of ["task_id", "taskId", "session_id", "sessionId"]) {
+      if (key in value) {
+        const raw = value[key]
+        if (typeof raw === "string") {
+          const trimmed = raw.trim()
+          if (trimmed) return trimmed
+        }
+        const found = extractTaskIdFromValue(raw, depth + 1)
+        if (found) return found
+      }
+    }
+
+    for (const key of ["result", "output", "response", "data", "message", "parts", "content"]) {
+      if (key in value) {
+        const found = extractTaskIdFromValue(value[key], depth + 1)
+        if (found) return found
+      }
+    }
+
+    for (const nested of Object.values(value)) {
+      const found = extractTaskIdFromValue(nested, depth + 1)
+      if (found) return found
+    }
+  }
+
+  return null
+}
+
+export const getLastSubagentDispatchTaskId = (directory, workflowTaskId, subagentName) => {
+  if (!workflowTaskId || !subagentName) return null
+  const state = readLastSubagentDispatchState(directory)
+  return state?.[workflowTaskId]?.[subagentName]?.task_id || null
+}
+
+export const recordLastSubagentDispatchTaskId = (directory, workflowTaskId, subagentName, taskId) => {
+  if (!workflowTaskId || !subagentName || !taskId) return null
+
+  const path = getLastSubagentDispatchPath(directory)
+  const state = readLastSubagentDispatchState(directory)
+  const current = state[workflowTaskId] || {}
+  current[subagentName] = {
+    task_id: taskId,
+    recorded_at: new Date().toISOString(),
+  }
+  state[workflowTaskId] = current
+
+  mkdirSync(join(workflowRoot(directory), "state"), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf8")
+  return current[subagentName]
+}
+
+export const getRecoveredSubagentTaskId = (directory, workflowTaskId, subagentName, output = null) => {
+  const fromOutput = extractTaskIdFromValue(output)
+  if (fromOutput) return fromOutput
+  return getLastSubagentDispatchTaskId(directory, workflowTaskId, subagentName)
 }
 
 export const updateReminderState = (directory, sessionID, updater) => {

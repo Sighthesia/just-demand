@@ -374,6 +374,7 @@ const buildReminderLines = (type) => {
     case "subagent_retry_or_skip":
       return [
         "- A needed subagent was unavailable on the last turn.",
+        "- This is usually a transient model provider or network error.",
         "- Choose: retry now, or skip one turn and continue in the main session.",
       ]
     case "reset":

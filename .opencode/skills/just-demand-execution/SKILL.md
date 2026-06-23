@@ -109,10 +109,12 @@ Immediate next step:
 2. Ask the user to choose one of these options:
    - retry now
    - skip one turn
-3. If the user chooses retry, attempt the subagent path again on the next turn.
+3. If the user chooses retry, attempt the same subagent path again on the next turn and resume the prior subagent session when a `task_id` is available.
 4. If the user chooses skip one turn, continue locally for that turn only if it is safe and scoped.
 
 Use the `question` tool when feasible so the user can answer with one click. Treat the failure as transient unless there is strong evidence the subagent path is structurally unavailable.
+
+Subagent interruptions are often caused by model provider or network errors, so retrying the same session is usually the right first move.
 
 ## Task Marking Policy
 

@@ -4,8 +4,12 @@ import {
   enforceExecutionGate,
   getActiveTask,
   getMissingRequiredContextFiles,
+  getLastSubagentDispatchTaskId,
+  getRecoveredSubagentTaskId,
+  getReminderState,
   getWorkflowSubagentName,
   markSubagentUnavailablePending,
+  recordLastSubagentDispatchTaskId,
   readTaskContext,
   readTaskJson,
   workflowRoot,
@@ -22,6 +26,24 @@ const argsKeys = (args) => args && typeof args === "object" ? Object.keys(args).
 
 export default async ({ directory }) => {
   return {
+    "tool.execute.after": async (input, output) => {
+      if (!existsSync(workflowRoot(directory))) return
+      const toolName = String(input?.tool || "").toLowerCase()
+      if (toolName !== "task") return
+
+      const args = output?.args
+      const subagentName = getWorkflowSubagentName(args)
+      if (!args || !SUPPORTED.has(subagentName)) return
+
+      const taskId = getActiveTask(directory)
+      if (!taskId) return
+
+      const recoveredTaskId = getRecoveredSubagentTaskId(directory, taskId, subagentName, output)
+      if (!recoveredTaskId) return
+
+      recordLastSubagentDispatchTaskId(directory, taskId, subagentName, recoveredTaskId)
+      debugLog("subagent.tool.after.record", { task_id: taskId, workflow_subagent: subagentName, resumed_task_id: recoveredTaskId }, directory)
+    },
     "tool.execute.before": async (input, output) => {
       if (!existsSync(workflowRoot(directory))) {
         debugLog("subagent.tool.before.skip", { reason: "missing_workflow_root" }, directory)
@@ -51,6 +73,14 @@ export default async ({ directory }) => {
       if (!taskId) {
         debugLog("subagent.tool.before.skip", { reason: "no_active_task", workflow_subagent: subagentName }, directory)
         return
+      }
+      const reminderState = getReminderState(directory, input?.sessionID || "main")
+      const resumedTaskId = reminderState.subagent_unavailable_pending
+        ? getLastSubagentDispatchTaskId(directory, taskId, subagentName)
+        : null
+      if (resumedTaskId && !args.task_id) {
+        output.args.task_id = resumedTaskId
+        debugLog("subagent.tool.before.resume", { task_id: taskId, workflow_subagent: subagentName, resumed_task_id: resumedTaskId }, directory)
       }
       const missing = getMissingRequiredContextFiles(directory, taskId, subagentName)
       if (missing.length > 0) {

@@ -16,6 +16,8 @@ import {
   isIntakeFilePath,
   isWorkflowControlCommand,
   getApplyPatchTargetPath,
+  getLastSubagentDispatchTaskId,
+  recordLastSubagentDispatchTaskId,
   listUnfinishedTasks,
   looksLikeIntakeOperation,
   markSubagentUnavailablePending,
@@ -1862,6 +1864,45 @@ test("subagent-context injects context for supported subagent type", async () =>
   assert.match(output.args.prompt, /Remaining Open Questions/)
   assert.match(output.args.prompt, /# Requested Work/)
   assert.match(output.args.prompt, /Do the work/)
+})
+
+test("subagent-context resumes prior subagent session after unavailable retry", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
+  recordLastSubagentDispatchTaskId(root, "task-a", "just-demand-coder", "opencode-task-123")
+  markSubagentUnavailablePending(root, "main")
+
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task", sessionID: "main" }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+
+  await plugin["tool.execute.before"](input, output)
+
+  assert.equal(output.args.task_id, "opencode-task-123")
+  assert.match(output.args.prompt, /Active task: task-a/)
+})
+
+test("subagent-context records recovered task ids from task tool output", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
+
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task" }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" }, task_id: "opencode-task-456" }
+
+  await plugin["tool.execute.after"](input, output)
+
+  assert.equal(getLastSubagentDispatchTaskId(root, "task-a", "just-demand-coder"), "opencode-task-456")
 })
 
 test("subagent-context injects context when runtime uses agent argument key", async () => {
