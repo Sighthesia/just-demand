@@ -2,6 +2,8 @@
 
 OpenCode-first local agent workflow runtime: Python scripts own workflow state, OpenCode plugins inject lightweight guardrails/context, and `.opencode/skills/` hold the detailed workflow rules.
 
+Highly inspired by [Trellis](https://github.com/mindfold-ai/Trellis) and [superpowers](https://github.com/obra/superpowers)
+
 ## Just Demand Workflow Philosophy
 
 Just Demand is a workflow runtime, not a one-shot prompt bundle.
@@ -214,12 +216,12 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 
 ## Skills To Load
 
-| Skill | Use when |
-| --- | --- |
-| `.opencode/skills/using-just-demand/SKILL.md` | First step for repo workflow turns or runtime changes. |
-| `.opencode/skills/socratic-clarification/SKILL.md` | Any request, bug, correction, or mismatch before intake/execution. |
-| `.opencode/skills/just-demand-intake/SKILL.md` | Shaping clarified work into a promotable intake/task. |
-| `.opencode/skills/just-demand-execution/SKILL.md` | Dispatching subagents or executing a formal task. |
-| `.opencode/skills/just-demand-verification/SKILL.md` | Completion claims, failed checks, or correction feedback. |
-| `.opencode/skills/just-demand-memory/SKILL.md` | Recording durable decisions, facts, preferences, or deferred options. |
-| `.agents/skills/capture-lessons/SKILL.md` | After non-trivial debugging produced a reusable pattern. |
+| Skill                                                | Use when                                                              |
+| ---------------------------------------------------- | --------------------------------------------------------------------- |
+| `.opencode/skills/using-just-demand/SKILL.md`        | First step for repo workflow turns or runtime changes.                |
+| `.opencode/skills/socratic-clarification/SKILL.md`   | Any request, bug, correction, or mismatch before intake/execution.    |
+| `.opencode/skills/just-demand-intake/SKILL.md`       | Shaping clarified work into a promotable intake/task.                 |
+| `.opencode/skills/just-demand-execution/SKILL.md`    | Dispatching subagents or executing a formal task.                     |
+| `.opencode/skills/just-demand-verification/SKILL.md` | Completion claims, failed checks, or correction feedback.             |
+| `.opencode/skills/just-demand-memory/SKILL.md`       | Recording durable decisions, facts, preferences, or deferred options. |
+| `.agents/skills/capture-lessons/SKILL.md`            | After non-trivial debugging produced a reusable pattern.              |
