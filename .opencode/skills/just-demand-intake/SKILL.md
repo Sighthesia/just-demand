@@ -45,11 +45,11 @@ Treat blocking questions as promotion blockers. Non-blocking questions may stay 
 
 For design and implementation work, the intake must include the final artifact before promotion:
 
-- **Decision Card**: one-sentence intent, recommended default, reason, and the user's expected action
+- **Decision Card**: first-screen, user-facing summary with one-sentence intent, recommended default, reason, and the user's expected action
 - **User Action**: what the user needs to do next, or "no action needed"
 - **Recommended Default**: the path the agent recommends if the user does not care
 - **Option Matrix**: compact comparison of real alternatives by best-for, pros, cons, and failure mode
-- **Final Expected Effect**: user-visible outcome in user language
+- **Final Expected Effect**: user-visible outcome in user language; this is a first-screen field, not an execution note
 - **Approach Options**: 2-3 approaches with pros, cons, and practical failure modes; for UI/interaction work these must be meaningful user-visible alternatives, not placeholders
 - **Chosen Approach**: selected approach with brief rationale
 - **Final Implementation Plan**: ordered steps including verification
@@ -68,6 +68,8 @@ For design and implementation work, the intake must include the final artifact b
 - **Approval**: explicit user approval of the final artifact
 
 Promotion is blocked for design/implementation tasks when Final Expected Effect, Chosen Approach, Final Implementation Plan, or Approval are missing.
+
+The first-screen user-facing fields are Decision Card, Final Expected Effect, Visible Acceptance, and Visible Side Effect. The remaining sections support execution and review, but they should not make the user feel like they are writing the implementation plan for us.
 
 ## Blocking Questions Policy
 
@@ -200,7 +202,7 @@ Preferred prompts:
 - "Which choice would materially change the implementation path if guessed wrong?"
 - "Which details are nice-to-have and can stay open until execution?"
 
-Default to this low-reading-cost shape before asking the user to make a tradeoff:
+Default to this low-reading-cost shape before asking the user to make a tradeoff; keep it readable as a decision card, not a spec template:
 
 ```text
 Decision card:

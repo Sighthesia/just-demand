@@ -322,3 +322,6 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-22-add-agent-inner-loop-contracts-task (Add agent inner-loop contracts) completed with status 'done'.
   Verification summary: Agent inner-loop contracts verified: all four active agent prompts define role-specific mission, inputs, workflow loop, boundaries, output contract, and escalation rules; execution and verification guidance align; install/plugin/package checks passed.
+
+- Task 2026-06-22-audit-workflow-boss-pm-experience-task (Audit workflow boss-PM experience) completed with status 'done'.
+  Verification summary: Boss/PM workflow experience audit and prompt alignment verified: prompts now emphasize user-visible effects, proactive defaults/options, low user burden, and main-agent coordination of the subagent team; plugin and package checks passed.

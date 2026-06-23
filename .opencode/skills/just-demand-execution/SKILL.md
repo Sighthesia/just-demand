@@ -16,6 +16,7 @@ Execute formal work items through focused subagents and script-owned state.
 - Do not dispatch implementation before the user has confirmed the direction and the task is ready.
 - Long-context implementation, research, and verification must run through subagents. The main session should coordinate and summarize, not absorb the full execution context inline.
 - When a suitable `just-demand-*` subagent exists for long-context work, prefer dispatch over continuing inline in the main session.
+- When reporting progress or a result, lead with the user-visible effect or the decision the user needs to make; treat task state, mark commands, and checkpoint mechanics as supporting detail.
 - If a suitable subagent is unavailable, ask the user to retry now or skip one turn rather than silently falling back.
 - Implementation or verification must not start unless the current formal task already has the required task context files. Do not treat missing task context as a recoverable inline shortcut.
 - Before dispatching a subagent or starting implementation, mark the task status with `mark`.
@@ -72,9 +73,9 @@ Keep this summary short and structured. Prefer names as they appear in code. If 
 
 ### User-Facing Execution Updates
 
-When reporting execution progress or subagent results to the user, follow the User-Facing Output Contract from `using-just-demand`:
+When reporting execution progress or subagent results to the user, follow the User-Facing Output Contract from `using-just-demand` and keep the first screen effect-first:
 
-- **First-screen answer**: what changed or what is happening now.
+- **First-screen answer**: what changed or what is happening now, in user-visible terms.
 - **User action**: usually "none" during execution unless a real product/architecture/risk decision is needed.
 - **Recommended default**: if blocked, state the recommended next move before alternatives.
 - **Visible or diagram acceptance first**: for UI work, state the expected on-screen behavior, rejected anti-outcome, and visible side effects before routine checks; for diagram work, state the intended diagram meaning, diagram acceptance, and expression side effects before routine checks.
