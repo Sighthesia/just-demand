@@ -2,7 +2,7 @@
 
 Local installer for the Just Demand runtime. Copies the workflow templates into a target workspace via `just-demand init`.
 
-Source: https://github.com/Sighthesia/on-demand
+Source: https://github.com/Sighthesia/just-demand
 
 ## Install locally
 

@@ -1,6 +1,8 @@
 # Just Demand
 
-Just Demand is an OpenCode-first local agent workflow runtime.
+Just Demand is an OpenCode-first local agent workflow runtime. My personal coding workflow.
+
+Highly inspired by [Trellis](https://github.com/mindfold-ai/Trellis) and [superpowers](https://github.com/obra/superpowers)
 
 - Python scripts own workflow state.
 - OpenCode plugins inject lightweight context.
@@ -107,14 +109,14 @@ request
 
 ### Responsibility Table
 
-| Role | Owns | Does not own |
-| --- | --- | --- |
-| **User** | Goals, constraints, tradeoff preferences, final approval | Internal routing mechanics, subagent orchestration, workflow state writes |
-| **Main agent** | Clarification, task shaping, dispatch, closure, summaries | Broad implementation work that should be delegated when a task boundary exists |
-| **Researcher** | Evidence gathering, problem mapping, source comparison | Code changes, task promotion, verification closeout |
-| **Coder** | Scoped implementation inside the task boundary | Workflow ownership, task lifecycle decisions, cross-task re-planning |
-| **Tester** | Acceptance verification, failure discovery, regression checking | Rewriting the implementation plan or reassigning ownership |
-| **Advisor** | Fresh-context framing, tradeoff analysis, cross-boundary judgment | Executing the task or closing it unilaterally |
+| Role           | Owns                                                              | Does not own                                                                   |
+| -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **User**       | Goals, constraints, tradeoff preferences, final approval          | Internal routing mechanics, subagent orchestration, workflow state writes      |
+| **Main agent** | Clarification, task shaping, dispatch, closure, summaries         | Broad implementation work that should be delegated when a task boundary exists |
+| **Researcher** | Evidence gathering, problem mapping, source comparison            | Code changes, task promotion, verification closeout                            |
+| **Coder**      | Scoped implementation inside the task boundary                    | Workflow ownership, task lifecycle decisions, cross-task re-planning           |
+| **Tester**     | Acceptance verification, failure discovery, regression checking   | Rewriting the implementation plan or reassigning ownership                     |
+| **Advisor**    | Fresh-context framing, tradeoff analysis, cross-boundary judgment | Executing the task or closing it unilaterally                                  |
 
 The user defines goals, constraints, and final approval. The main agent owns workflow shape, routing, and closure. Subagents execute focused role contracts inside the task boundary.
 
@@ -177,11 +179,11 @@ They do not independently create, promote, close, or re-route tasks. That keeps 
 
 ### Comparison With Simpler Patterns
 
-| Pattern | What it is good at | Where it breaks down | Why Just Demand is different |
-| --- | --- | --- | --- |
-| **One-shot prompting** | Fast starts and small, self-contained asks | Loses context, collapses roles, and depends on the transcript staying readable | Separates durable workflow state from conversational prompting |
-| **Prompt-only control** | Lightweight guidance when the task is tiny | Hard to enforce gates, ownership, and closure discipline | Moves the important workflow truth into explicit state, scripts, and plugins |
-| **Ad hoc subagents** | Cheap parallelism for isolated chores | Handoffs get messy and task boundaries blur | Subagents are dispatched only after formal task shaping and with role-specific contracts |
+| Pattern                 | What it is good at                         | Where it breaks down                                                           | Why Just Demand is different                                                             |
+| ----------------------- | ------------------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| **One-shot prompting**  | Fast starts and small, self-contained asks | Loses context, collapses roles, and depends on the transcript staying readable | Separates durable workflow state from conversational prompting                           |
+| **Prompt-only control** | Lightweight guidance when the task is tiny | Hard to enforce gates, ownership, and closure discipline                       | Moves the important workflow truth into explicit state, scripts, and plugins             |
+| **Ad hoc subagents**    | Cheap parallelism for isolated chores      | Handoffs get messy and task boundaries blur                                    | Subagents are dispatched only after formal task shaping and with role-specific contracts |
 
 ### Practical Design Lessons For Custom Agent Workflows
 

@@ -2,7 +2,6 @@
 
 OpenCode-first local agent workflow runtime: Python scripts own workflow state, OpenCode plugins inject lightweight guardrails/context, and `.opencode/skills/` hold the detailed workflow rules.
 
-Highly inspired by [Trellis](https://github.com/mindfold-ai/Trellis) and [superpowers](https://github.com/obra/superpowers)
 
 ## Just Demand Workflow Philosophy
 
