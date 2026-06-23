@@ -113,6 +113,8 @@ Instead, immediately ask the user to choose:
 
 Treat one failed subagent attempt as a transient exception, not as permission to stop using subagents for the rest of the conversation.
 
+Subagent interruptions are often caused by model provider or network errors. If the user chooses retry and a prior subagent `task_id` is available, continue that same subagent session instead of dispatching a fresh subagent.
+
 ### Role Model
 
 - **User**: boss, product manager, and architecture approver. Defines goals, constraints, module boundaries, and tradeoff preferences.

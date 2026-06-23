@@ -5,7 +5,7 @@ const SESSION_REMINDER = [
   "Use just-demand subagents proactively for long-context work.",
   "Long-context work means broad code reading, 3+ files, multi-step research/debugging, or extended verification.",
   "If a needed subagent is unavailable, ask whether to retry now or skip one turn.",
-  "Subagent interruptions are often caused by model provider or network errors; retry can resume the prior session when available.",
+  "Subagent interruptions are often caused by model provider or network errors; retry should resume the prior session when available.",
   "</JUST_DEMAND_REMINDER>",
 ].join("\n")
 

@@ -227,7 +227,7 @@ const extractTaskIdFromValue = (value, depth = 0) => {
       try {
         return extractTaskIdFromValue(JSON.parse(text), depth + 1)
       } catch {
-        // fall through to pattern matching
+        // Fall through to direct pattern matching.
       }
     }
 
