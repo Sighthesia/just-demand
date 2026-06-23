@@ -325,3 +325,9 @@ No blocking workspace-level questions are open for the first implementation plan
 
 - Task 2026-06-22-audit-workflow-boss-pm-experience-task (Audit workflow boss-PM experience) completed with status 'done'.
   Verification summary: Boss/PM workflow experience audit and prompt alignment verified: prompts now emphasize user-visible effects, proactive defaults/options, low user burden, and main-agent coordination of the subagent team; plugin and package checks passed.
+
+- Task 2026-06-23-document-just-demand-workflow-philosophy-task (Document Just Demand workflow philosophy) completed with status 'done'.
+  Verification summary: README.md and AGENTS.md now contain the same comprehensive Just Demand Workflow Philosophy section covering lifecycle, identities, skills/plugins/CLI layers, main-agent identity sources, subagent inner loops, and output principles; documentation verification passed.
+
+- Task 2026-06-23-expand-readme-workflow-positioning-task (Expand README workflow positioning) completed with status 'done'.
+  Verification summary: README.md expanded for workflow evaluators and custom agent workflow builders with pain-point analysis, communication/dispatch diagrams, responsibility tables, comparisons, and design lessons; README markdown check passed; unrelated pre-existing working-tree changes remain.

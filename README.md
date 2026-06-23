@@ -6,6 +6,229 @@ Just Demand is an OpenCode-first local agent workflow runtime.
 - OpenCode plugins inject lightweight context.
 - Project skills hold detailed workflow rules.
 
+## Just Demand Workflow Philosophy
+
+Just Demand is a workflow runtime, not a one-shot prompt bundle.
+
+It is written for two audiences:
+
+- people evaluating whether an agent workflow is worth adopting
+- people designing their own agent workflow and looking for reusable patterns
+
+If you only want a clever prompt, this project is probably more structure than you need. If you need repeatable task handling, explicit handoffs, and a durable way to keep an agent from drifting, the layered model below is the point.
+
+### Why An Agent Workflow Exists
+
+A single prompt can start a task, but it usually cannot reliably carry the full lifecycle of real work.
+
+Common pain points this workflow is meant to solve:
+
+- **Memory fade**: the agent forgets earlier decisions after a few turns.
+- **Role drift**: the same model starts acting like planner, implementer, and reviewer at once.
+- **Hidden state**: progress exists only in conversation, so it is hard to resume or audit.
+- **Prompt brittleness**: the more behavior you cram into a single prompt, the easier it is to break.
+- **Unclear ownership**: nobody knows who is responsible for clarification, execution, verification, or closure.
+- **Ad hoc handoffs**: subagents are spawned without a stable task boundary or success criteria.
+
+### How Just Demand Solves Those Problems
+
+Just Demand uses a layered workflow so each layer carries one kind of truth:
+
+- **README / AGENTS / docs** explain the model and the rules of the game.
+- **Skills** tell the main agent how to route work and when to slow down for clarification.
+- **Plugins** keep the current task, workflow state, and execution gates visible in the runtime.
+- **CLI + `.just-demand/` state** store the durable lifecycle record so work can survive sessions.
+
+That layering keeps prompt text light while moving durable workflow truth into explicit state and scripts. The result is a system that can be resumed, verified, and archived without depending on the chat transcript alone.
+
+### Guiding Principle
+
+The system is designed to keep durable workflow truth in explicit state and scripts, while keeping prompt-layer guidance light, readable, and role-specific.
+
+```text
+user goal
+  -> clarify
+  -> intake
+  -> promote
+  -> context
+  -> dispatch
+  -> verify
+  -> complete-verification
+  -> archive
+```
+
+### Operating Model At A Glance
+
+```text
+User
+  |  goals, constraints, approval
+  v
+Main agent
+  |  clarifies, shapes, routes, verifies
+  v
+Subagent(s)
+  |  focused execution inside a task boundary
+  v
+Verified result -> archive
+```
+
+#### Communication diagram
+
+```text
+user
+  |  intent / constraints / approval
+  v
+main agent
+  |  task shape / context / dispatch / closure
+  +------------------------------+
+  |                              |
+  v                              v
+researcher / coder / tester / advisor
+  |  evidence / implementation / checks / tradeoffs
+  +------------------------------+
+                 v
+          main agent consolidates
+                 v
+                user
+```
+
+#### Dispatch diagram
+
+```text
+request
+  -> clarify
+  -> promote to formal task
+  -> attach task context
+  -> dispatch the right subagent
+  -> verify against acceptance criteria
+  -> complete-verification
+  -> archive
+```
+
+### Responsibility Table
+
+| Role | Owns | Does not own |
+| --- | --- | --- |
+| **User** | Goals, constraints, tradeoff preferences, final approval | Internal routing mechanics, subagent orchestration, workflow state writes |
+| **Main agent** | Clarification, task shaping, dispatch, closure, summaries | Broad implementation work that should be delegated when a task boundary exists |
+| **Researcher** | Evidence gathering, problem mapping, source comparison | Code changes, task promotion, verification closeout |
+| **Coder** | Scoped implementation inside the task boundary | Workflow ownership, task lifecycle decisions, cross-task re-planning |
+| **Tester** | Acceptance verification, failure discovery, regression checking | Rewriting the implementation plan or reassigning ownership |
+| **Advisor** | Fresh-context framing, tradeoff analysis, cross-boundary judgment | Executing the task or closing it unilaterally |
+
+The user defines goals, constraints, and final approval. The main agent owns workflow shape, routing, and closure. Subagents execute focused role contracts inside the task boundary.
+
+### Main Agent Output Style
+
+The main agent should optimize for low cognitive load:
+
+- **Effect first**: lead with the user-visible result.
+- **Defaults first**: mention the recommended path before alternatives.
+- **Options only when needed**: present tradeoffs when the choice changes behavior, compatibility, cost, security, or long-term maintenance.
+- **Implementation details last**: mention files and mechanics only when they help the decision or verification.
+
+### Control Layers And Why They Exist
+
+```text
+docs / AGENTS / README
+    -> explain the philosophy and roles
+
+skills
+    -> route the main agent and clarify intake/execution/verification habits
+
+plugins
+    -> inject lightweight runtime state, execution gates, and subagent context
+
+CLI + .just-demand state
+    -> durable source of truth for task lifecycle and archive history
+```
+
+This layered model exists because pure one-time injection fades after the first turn, and pure prompt-only control is too soft for durable task lifecycle and gatekeeping. The runtime needs persistent state, explicit promotion, and structured handoff between roles.
+
+### What Each Layer Is For
+
+- **Skills**: encode the main-agent identity, routing, clarification, intake, execution, verification, and memory habits.
+- **Plugins**: inject the current workflow state, enforce execution gates, and attach the right task context to subagents.
+- **CLI / `.just-demand/` state**: provide the durable lifecycle source of truth for active tasks, archives, and workflow transitions.
+- **Task context files**: give each subagent the scoped facts it needs without re-reading the whole workspace.
+
+### Main-Agent Identity Sources
+
+The main agent’s working identity is reinforced from several places at once:
+
+1. `AGENTS.md`
+2. `using-just-demand`
+3. the workflow-state plugin banner / guardrails
+4. the current task context files
+5. subagent prompts, for subagents only
+
+These sources agree on the same role model so the main agent stays a dispatcher and workflow owner rather than drifting into an ad hoc helper.
+
+### Subagent Inner Loops
+
+Subagents are not miniature workflow owners. Their inner loops are role-specific execution contracts:
+
+- **researcher**: gather evidence and map the problem space.
+- **coder**: implement the scoped change.
+- **tester**: verify the task against acceptance criteria.
+- **advisor**: frame hard decisions and cross-boundary tradeoffs.
+
+They do not independently create, promote, close, or re-route tasks. That keeps lifecycle ownership centralized and prevents role drift.
+
+### Comparison With Simpler Patterns
+
+| Pattern | What it is good at | Where it breaks down | Why Just Demand is different |
+| --- | --- | --- | --- |
+| **One-shot prompting** | Fast starts and small, self-contained asks | Loses context, collapses roles, and depends on the transcript staying readable | Separates durable workflow state from conversational prompting |
+| **Prompt-only control** | Lightweight guidance when the task is tiny | Hard to enforce gates, ownership, and closure discipline | Moves the important workflow truth into explicit state, scripts, and plugins |
+| **Ad hoc subagents** | Cheap parallelism for isolated chores | Handoffs get messy and task boundaries blur | Subagents are dispatched only after formal task shaping and with role-specific contracts |
+
+### Practical Design Lessons For Custom Agent Workflows
+
+If you are borrowing ideas from Just Demand for your own workflow, the reusable lessons are:
+
+1. **Make lifecycle explicit.** State when work is clarified, promoted, verified, and archived.
+2. **Separate policy from state.** Keep the instructions lightweight and store durable truth somewhere structured.
+3. **Give each role one job.** The more roles overlap, the faster the agent starts to self-conflict.
+4. **Require a task boundary before delegation.** Subagents work best when they receive a bounded brief, not a vague conversation.
+5. **Keep ownership centralized.** Someone must own routing, closure, and recovery when the work goes sideways.
+6. **Optimize for resume-ability.** If the session disappears, the workflow should still tell you what was happening.
+7. **Prefer readable scaffolding over clever prompts.** A simple, durable system outlasts a denser but fragile prompt stack.
+
+### Workflow Lifecycle And Handoff Shape
+
+```text
+clarify
+  -> intake
+  -> promote
+  -> context
+  -> dispatch
+  -> verify
+  -> complete-verification
+  -> archive
+```
+
+Each step exists to reduce ambiguity before work starts, keep the active task explicit, and make closure durable enough to survive future sessions.
+
+### Why Not One-Time Injection Or Prompt-Only Control
+
+- **One-time injection** is easy to forget, easy to drift from, and weak across long sessions.
+- **Prompt-only control** cannot reliably enforce gates, task state, or archival discipline.
+- **Persistent runtime state** plus **lightweight prompt guidance** gives the best balance of durability, clarity, and operability.
+
+### Scannable Mental Model
+
+```text
+human intent
+  -> workflow policy
+  -> state transition
+  -> role-specific execution
+  -> verification
+  -> archived memory
+```
+
+Think of Just Demand as an operating system for agent work: the docs explain the model, skills teach the habits, plugins enforce the current frame, and the CLI/state layer records what actually happened.
+
 ## Install
 
 Just Demand is not yet published as an npm, uv, or pipx package.

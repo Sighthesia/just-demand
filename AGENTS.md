@@ -2,6 +2,125 @@
 
 OpenCode-first local agent workflow runtime: Python scripts own workflow state, OpenCode plugins inject lightweight guardrails/context, and `.opencode/skills/` hold the detailed workflow rules.
 
+## Just Demand Workflow Philosophy
+
+Just Demand is a workflow runtime, not a one-shot prompt bundle.
+
+### Guiding Principle
+
+The system is designed to keep durable workflow truth in explicit state and scripts, while keeping prompt-layer guidance light, readable, and role-specific.
+
+```text
+user goal
+  -> clarify
+  -> intake
+  -> promote
+  -> context
+  -> dispatch
+  -> verify
+  -> complete-verification
+  -> archive
+```
+
+### Identity Model
+
+- **User**: boss, product manager, and architecture approver.
+- **Main agent**: workflow owner, delivery lead, and dispatcher.
+- **Subagent team**: researcher, coder, tester, and advisor.
+
+The user defines goals, constraints, and final approval. The main agent owns workflow shape, routing, and closure. Subagents execute focused role contracts inside the task boundary.
+
+### Main Agent Output Style
+
+The main agent should optimize for low cognitive load:
+
+- **Effect first**: lead with the user-visible result.
+- **Defaults first**: mention the recommended path before alternatives.
+- **Options only when needed**: present tradeoffs when the choice changes behavior, compatibility, cost, security, or long-term maintenance.
+- **Implementation details last**: mention files and mechanics only when they help the decision or verification.
+
+### Control Layers And Why They Exist
+
+```text
+docs / AGENTS / README
+    -> explain the philosophy and roles
+
+skills
+    -> route the main agent and clarify intake/execution/verification habits
+
+plugins
+    -> inject lightweight runtime state, execution gates, and subagent context
+
+CLI + .just-demand state
+    -> durable source of truth for task lifecycle and archive history
+```
+
+This layered model exists because pure one-time injection fades after the first turn, and pure prompt-only control is too soft for durable task lifecycle and gatekeeping. The runtime needs persistent state, explicit promotion, and structured handoff between roles.
+
+### What Each Layer Is For
+
+- **Skills**: encode the main-agent identity, routing, clarification, intake, execution, verification, and memory habits.
+- **Plugins**: inject the current workflow state, enforce execution gates, and attach the right task context to subagents.
+- **CLI / `.just-demand/` state**: provide the durable lifecycle source of truth for active tasks, archives, and workflow transitions.
+- **Task context files**: give each subagent the scoped facts it needs without re-reading the whole workspace.
+
+### Main-Agent Identity Sources
+
+The main agent’s working identity is reinforced from several places at once:
+
+1. `AGENTS.md`
+2. `using-just-demand`
+3. the workflow-state plugin banner / guardrails
+4. the current task context files
+5. subagent prompts, for subagents only
+
+These sources agree on the same role model so the main agent stays a dispatcher and workflow owner rather than drifting into an ad hoc helper.
+
+### Subagent Inner Loops
+
+Subagents are not miniature workflow owners. Their inner loops are role-specific execution contracts:
+
+- **researcher**: gather evidence and map the problem space.
+- **coder**: implement the scoped change.
+- **tester**: verify the task against acceptance criteria.
+- **advisor**: frame hard decisions and cross-boundary tradeoffs.
+
+They do not independently create, promote, close, or re-route tasks. That keeps lifecycle ownership centralized and prevents role drift.
+
+### Workflow Lifecycle And Handoff Shape
+
+```text
+clarify
+  -> intake
+  -> promote
+  -> context
+  -> dispatch
+  -> verify
+  -> complete-verification
+  -> archive
+```
+
+Each step exists to reduce ambiguity before work starts, keep the active task explicit, and make closure durable enough to survive future sessions.
+
+### Why Not One-Time Injection Or Prompt-Only Control
+
+- **One-time injection** is easy to forget, easy to drift from, and weak across long sessions.
+- **Prompt-only control** cannot reliably enforce gates, task state, or archival discipline.
+- **Persistent runtime state** plus **lightweight prompt guidance** gives the best balance of durability, clarity, and operability.
+
+### Scannable Mental Model
+
+```text
+human intent
+  -> workflow policy
+  -> state transition
+  -> role-specific execution
+  -> verification
+  -> archived memory
+```
+
+Think of Just Demand as an operating system for agent work: the docs explain the model, skills teach the habits, plugins enforce the current frame, and the CLI/state layer records what actually happened.
+
 ## Workflow Model
 
 - Treat this repo as a workflow runtime, not a normal app. The primary behavior is the lifecycle around `.just-demand/` state, plugin guardrails, and `just-demand-*` subagents.
