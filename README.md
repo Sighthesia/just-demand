@@ -233,7 +233,31 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 
 ## Install
 
-Just Demand is now installable through the npm/pnpm-friendly `just-demand` package, while the repository itself remains the reference source for the runtime.
+### Primary Path: npm / pnpm
+
+Install the published package globally:
+
+```bash
+npm install -g just-demand
+# or
+pnpm add -g just-demand
+```
+
+Then initialize a project explicitly:
+
+```bash
+just-demand "/path/to/project" init
+```
+
+You can also run it without a global install:
+
+```bash
+npm exec --yes --package just-demand -- just-demand "./demo-workspace" init
+```
+
+### Secondary Path: Source / Developer Mode
+
+If you are developing Just Demand itself or testing directly from this repository, use the repo checkout as the installation source.
 
 ### Linux / macOS
 
@@ -243,12 +267,6 @@ From this repository root, run the installer package directly:
 
 ```bash
 npm exec --yes --package ./packages/agent-workflow-installer -- just-demand "./demo-workspace" init
-```
-
-Once published to the registry, the equivalent command is:
-
-```bash
-npm exec --yes --package just-demand -- just-demand "./demo-workspace" init
 ```
 
 For a global OpenCode install, use the repository CLI:
@@ -325,7 +343,7 @@ just-demand install --opencode --global --config-root "C:\Users\You\.config\open
 
 ## Enable In A Project
 
-After the global install, each project needs its own local `.just-demand/` state created by `init`.
+After either installation path, each project needs its own local `.just-demand/` state created by `init`.
 
 Linux / macOS:
 
@@ -453,20 +471,27 @@ It also removes the managed `just-demand` PATH entry that the installer created.
 
 ### Linux / macOS
 
-1. Clone or keep this repository at a stable local path.
-2. Install globally once:
+1. Install the published package once:
 
 ```bash
-just-demand install --opencode --global
+npm install -g just-demand
 ```
 
-3. For each project you want to use Just Demand in:
+2. For each project you want to use Just Demand in:
 
 ```bash
 just-demand "/target/project" init
 ```
 
-4. After updating this repository, refresh the global runtime assets:
+3. Optional: if you are developing Just Demand itself, clone or keep this repository at a stable local path.
+
+4. Source/developer mode global install from the repo:
+
+```bash
+just-demand install --opencode --global
+```
+
+5. After updating this repository in source/developer mode, refresh the global runtime assets:
 
 ```bash
 just-demand update --opencode --global
@@ -474,21 +499,27 @@ just-demand update --opencode --global
 
 ### Windows
 
-1. Clone or keep this repository at a stable local path (e.g. `C:\Users\You\just-demand`).
-
-2. Install globally once:
+1. Install the published package once:
 
 ```powershell
-just-demand install --opencode --global
+npm install -g just-demand
 ```
 
-3. For each project you want to use Just Demand in:
+2. For each project you want to use Just Demand in:
 
 ```powershell
 just-demand "C:\path\to\target\project" init
 ```
 
-4. After updating this repository, refresh the global runtime assets:
+3. Optional: if you are developing Just Demand itself, clone or keep this repository at a stable local path (e.g. `C:\Users\You\just-demand`).
+
+4. Source/developer mode global install from the repo:
+
+```powershell
+just-demand install --opencode --global
+```
+
+5. After updating this repository in source/developer mode, refresh the global runtime assets:
 
 ```powershell
 just-demand update --opencode --global

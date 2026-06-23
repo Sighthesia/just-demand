@@ -12,7 +12,24 @@ npm install -g just-demand
 pnpm add -g just-demand
 ```
 
-## Install locally
+This is the primary installation path for end users.
+
+## Quick Start
+
+```bash
+just-demand "./my-project" init
+```
+
+You can also run the published package without a global install:
+
+```bash
+npm exec --yes --package just-demand -- just-demand "./my-project" init
+pnpm dlx just-demand just-demand "./my-project" init
+```
+
+## Source / Developer Mode
+
+If you are working on this repository itself, use the local checkout directly.
 
 ```bash
 # From the repo root
@@ -38,11 +55,7 @@ pnpm add ./just-demand-0.1.0.tgz
 ## Usage
 
 ```bash
-# Run directly from the package (npm/pnpm friendly)
-npm exec --yes --package just-demand -- just-demand "./my-project" init
-pnpm dlx just-demand just-demand "./my-project" init
-
-# Install globally, then run the CLI from PATH
+# Install globally from the current checkout, then run the CLI from PATH
 npm install -g .
 just-demand "./my-project" init
 
