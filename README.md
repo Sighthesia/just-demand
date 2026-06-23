@@ -233,7 +233,7 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 
 ## Install
 
-Just Demand is now installable through the npm/pnpm-friendly `packages/agent-workflow-installer/` package, while the repository itself remains the reference source for the runtime.
+Just Demand is now installable through the npm/pnpm-friendly `just-demand` package, while the repository itself remains the reference source for the runtime.
 
 ### Linux / macOS
 
@@ -242,7 +242,13 @@ Just Demand is now installable through the npm/pnpm-friendly `packages/agent-wor
 From this repository root, run the installer package directly:
 
 ```bash
-npm exec --yes --package ./packages/agent-workflow-installer -- just-demand init ./demo-workspace
+npm exec --yes --package ./packages/agent-workflow-installer -- just-demand "./demo-workspace" init
+```
+
+Once published to the registry, the equivalent command is:
+
+```bash
+npm exec --yes --package just-demand -- just-demand "./demo-workspace" init
 ```
 
 For a global OpenCode install, use the repository CLI:
@@ -386,6 +392,10 @@ just-demand "C:\path\to\project" init
 ```
 
 `update --opencode --global` refreshes only the global OpenCode runtime assets under the OpenCode config root. It does not fan out to previously initialized project workspaces because project workspaces only hold local state. `init` is idempotent and is the explicit project bootstrap step.
+
+## License
+
+This repository and the publishable npm package use the `MIT` license.
 
 ## Check Status
 

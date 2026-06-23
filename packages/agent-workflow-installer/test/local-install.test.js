@@ -48,15 +48,16 @@ describe('just-demand install', () => {
     assert.ok(output.includes('Done'));
 
     // The tarball should have been cleaned up
-    const tgzFiles = fs.readdirSync(path.join(__dirname, '..')).filter(f => f.endsWith('.tgz') && f.startsWith('just-demand-installer-'));
+    const tgzFiles = fs.readdirSync(path.join(__dirname, '..')).filter(f => f.endsWith('.tgz') && f.startsWith('just-demand-'));
     // After clean run, no leftover tarball from this test (there may be pre-existing ones)
     // We just verify the install succeeded by checking node_modules
-    const installedPkg = path.join(target, 'node_modules', 'just-demand-installer');
+    const installedPkg = path.join(target, 'node_modules', 'just-demand');
     assert.ok(fs.existsSync(installedPkg), 'package should be installed in node_modules');
 
     // Verify the installed package has expected files
     assert.ok(fs.existsSync(path.join(installedPkg, 'bin', 'just-demand.js')));
     assert.ok(fs.existsSync(path.join(installedPkg, 'package.json')));
+    assert.ok(fs.existsSync(path.join(installedPkg, 'templates', '.opencode', 'skills')));
 
     const installedPkgJson = JSON.parse(
       fs.readFileSync(path.join(installedPkg, 'package.json'), 'utf8')
@@ -74,7 +75,7 @@ describe('just-demand install', () => {
     });
 
     assert.ok(output.includes('created target directory'));
-    assert.ok(fs.existsSync(path.join(target, 'node_modules', 'just-demand-installer')));
+    assert.ok(fs.existsSync(path.join(target, 'node_modules', 'just-demand')));
   });
 
   it('supports positional target argument', () => {
@@ -87,7 +88,7 @@ describe('just-demand install', () => {
     });
 
     assert.ok(output.includes(target));
-    assert.ok(fs.existsSync(path.join(target, 'node_modules', 'just-demand-installer')));
+    assert.ok(fs.existsSync(path.join(target, 'node_modules', 'just-demand')));
   });
 
   it('shows help message with --help', () => {

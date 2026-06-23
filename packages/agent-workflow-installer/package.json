@@ -1,7 +1,7 @@
 {
-  "name": "just-demand-installer",
+  "name": "just-demand",
   "version": "0.1.0",
-  "description": "Local installer for the Just Demand runtime",
+  "description": "OpenCode-first local agent workflow runtime installer and project bootstrapper",
   "bin": {
     "just-demand": "./bin/just-demand.js"
   },
@@ -13,9 +13,24 @@
     "bin/",
     "templates/"
   ],
-  "license": "UNLICENSED",
-  "private": true,
-  "dependencies": {
-    "just-demand-installer": "file:just-demand-installer-0.1.0.tgz"
+  "license": "MIT",
+  "author": "Sighthesia",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sighthesia/just-demand.git"
+  },
+  "homepage": "https://github.com/Sighthesia/just-demand#readme",
+  "bugs": {
+    "url": "https://github.com/Sighthesia/just-demand/issues"
+  },
+  "keywords": [
+    "opencode",
+    "workflow",
+    "agent",
+    "cli",
+    "just-demand"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

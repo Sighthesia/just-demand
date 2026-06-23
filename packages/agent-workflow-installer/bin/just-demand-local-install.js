@@ -66,7 +66,7 @@ function main() {
   const targetDir = path.resolve(parsed.target);
   ensureTargetDir(targetDir);
 
-  console.log(`Packing just-demand-installer for ${targetDir}`);
+  console.log(`Packing just-demand for ${targetDir}`);
   const tarballName = execFileSync('npm', ['pack'], {
     cwd: packageRoot,
     encoding: 'utf8',

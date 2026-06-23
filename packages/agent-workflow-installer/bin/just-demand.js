@@ -5,7 +5,7 @@
  *
  * Installs or upgrades the Just Demand runtime templates in a target workspace.
  * Templates are derived from the Just Demand runtime in this repository:
- * https://github.com/Sighthesia/on-demand
+ * https://github.com/Sighthesia/just-demand
  *
  * Default behavior: skip existing files, report created/skipped.
  */
@@ -51,16 +51,20 @@ function parseArgs(argv) {
   let command = 'init';
   let target = '.';
   let force = false;
+  const commandNames = new Set(['init', 'upgrade']);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === 'init') {
       command = 'init';
     } else if (args[i] === 'upgrade') {
       command = 'upgrade';
-      force = true;
     } else if (args[i] === '--force') {
       force = true;
     } else if (args[i] === '--target' && args[i + 1]) {
       target = args[i + 1];
+      i++;
+    } else if (!args[i].startsWith('-') && args[i + 1] && commandNames.has(args[i + 1])) {
+      target = args[i];
+      command = args[i + 1];
       i++;
     } else if (!args[i].startsWith('-')) {
       target = args[i];
@@ -104,10 +108,14 @@ function copyTemplateRecursive(srcRel, destRoot, stats, force = false) {
   console.log(`  create ${srcRel}`);
 }
 
-function mergeGitignore(targetRoot) {
+function mergeGitignore(targetRoot, allowMutation = true) {
   const gitignorePath = path.join(targetRoot, '.gitignore');
   let existing = '';
   if (fs.existsSync(gitignorePath)) {
+    if (!allowMutation) {
+      console.log('  skip  .gitignore (already exists)');
+      return;
+    }
     existing = fs.readFileSync(gitignorePath, 'utf8');
   }
 
@@ -127,10 +135,37 @@ function mergeGitignore(targetRoot) {
   console.log(`  .gitignore updated with ${linesToAdd.length} new rule(s)`);
 }
 
-function mergeOpencodePackageJson(targetRoot) {
+function mirrorPublicSkills(targetRoot, force = false) {
+  const runtimeSkillsRoot = path.join(targetRoot, '.opencode', 'skills');
+  const publicSkillsRoot = path.join(targetRoot, '.agents', 'skills');
+
+  if (!fs.existsSync(runtimeSkillsRoot)) {
+    console.log('  skip  .agents/skills (source .opencode/skills missing)');
+    return;
+  }
+
+  if (fs.existsSync(publicSkillsRoot) && !force) {
+    console.log('  skip  .agents/skills (already exists)');
+    return;
+  }
+
+  ensureDirSync(path.dirname(publicSkillsRoot));
+  if (fs.existsSync(publicSkillsRoot) && force) {
+    fs.rmSync(publicSkillsRoot, { recursive: true, force: true });
+  }
+
+  fs.cpSync(runtimeSkillsRoot, publicSkillsRoot, { recursive: true });
+  console.log('  create .agents/skills');
+}
+
+function mergeOpencodePackageJson(targetRoot, allowMutation = true) {
   const pkgPath = path.join(targetRoot, '.opencode', 'package.json');
   let pkg = {};
   if (fs.existsSync(pkgPath)) {
+    if (!allowMutation) {
+      console.log('  skip  .opencode/package.json (already exists)');
+      return;
+    }
     try {
       pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     } catch (e) {
@@ -205,10 +240,13 @@ function main() {
   }
 
   // Merge .opencode/package.json
-  mergeOpencodePackageJson(targetRoot);
+  mergeOpencodePackageJson(targetRoot, command === 'init' || force);
+
+  // Mirror the public skills surface from runtime skills.
+  mirrorPublicSkills(targetRoot, force);
 
   // Append .gitignore rules
-  mergeGitignore(targetRoot);
+  mergeGitignore(targetRoot, command === 'init' || force);
 
   // Write installer metadata
   writeInstallerMetadata(targetRoot, command);

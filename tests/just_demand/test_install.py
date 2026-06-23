@@ -79,6 +79,22 @@ class InstallCoreTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertFalse((root / ".just-demand" / "scripts").exists())
 
+    def test_split_project_root_accepts_project_before_command(self):
+        from install import split_project_root
+
+        project_root, cmd_args = split_project_root(["/tmp/demo", "init"])
+
+        self.assertEqual(project_root, Path("/tmp/demo"))
+        self.assertEqual(cmd_args, ["init"])
+
+    def test_split_project_root_leaves_normal_command_form_unchanged(self):
+        from install import split_project_root
+
+        project_root, cmd_args = split_project_root(["init", "/tmp/demo"])
+
+        self.assertIsNone(project_root)
+        self.assertEqual(cmd_args, ["init", "/tmp/demo"])
+
     def test_sync_public_skills_mirrors_runtime_skills_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

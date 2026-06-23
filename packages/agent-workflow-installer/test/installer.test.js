@@ -38,6 +38,7 @@ describe('just-demand init', () => {
     assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/just-demand-state.js')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/agent/just-demand-coder.md')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/skills/using-just-demand/SKILL.md')));
+    assert.ok(fs.existsSync(path.join(target, '.agents/skills/using-just-demand/SKILL.md')));
     assert.ok(fs.existsSync(path.join(target, 'AGENTS.md')));
     assert.ok(fs.existsSync(path.join(target, '.opencode/package.json')));
     assert.ok(fs.existsSync(path.join(target, '.gitignore')));
@@ -53,6 +54,15 @@ describe('just-demand init', () => {
     fs.mkdirSync(target, { recursive: true });
 
     execSync(`node ${CLI} init ${target}`, { encoding: 'utf8' });
+
+    assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/just-demand-state.js')));
+  });
+
+  it('supports project path before the init subcommand', () => {
+    const target = path.join(tmpDir, 'project-first-init');
+    fs.mkdirSync(target, { recursive: true });
+
+    execSync(`node ${CLI} ${target} init`, { encoding: 'utf8' });
 
     assert.ok(fs.existsSync(path.join(target, '.opencode/plugins/just-demand-state.js')));
   });
@@ -268,7 +278,7 @@ describe('just-demand upgrade', () => {
     rmTempDir(tmpDir);
   });
 
-  it('overwrites managed files in an existing workspace', () => {
+  it('skips managed files in an existing workspace', () => {
     const target = path.join(tmpDir, 'upgrade-overwrite');
     fs.mkdirSync(target, { recursive: true });
 
@@ -285,22 +295,20 @@ describe('just-demand upgrade', () => {
     const output = execSync(`node ${CLI} upgrade ${target}`, { encoding: 'utf8' });
     console.log(output);
 
-    // Should report overwrite for both files
-    assert.ok(output.includes('overwrite AGENTS.md'));
-    assert.ok(output.includes('overwrite .opencode/plugins/just-demand-state.js'));
+    // Should report skip for both files
+    assert.ok(output.includes('skip  AGENTS.md (already exists)'));
+    assert.ok(output.includes('skip  .opencode/plugins/just-demand-state.js (already exists)'));
 
-    // AGENTS.md should be overwritten with template content
+    // AGENTS.md should remain untouched
     const agentsContent = fs.readFileSync(agentsMdPath, 'utf8');
-    assert.ok(agentsContent.includes('Just Demand'));
-    assert.ok(!agentsContent.includes('# Old AGENTS.md'));
+    assert.strictEqual(agentsContent, '# Old AGENTS.md\n');
 
-    // Plugin file should be overwritten with template content
+    // Plugin file should remain untouched
     const pluginContent = fs.readFileSync(pluginPath, 'utf8');
-    assert.ok(pluginContent.includes('[just-demand reminder]'));
-    assert.ok(!pluginContent.includes('// old plugin'));
+    assert.strictEqual(pluginContent, '// old plugin\n');
   });
 
-  it('preserves .opencode/package.json merge behavior', () => {
+  it('skips .opencode/package.json and .gitignore when upgrading existing workspace files', () => {
     const target = path.join(tmpDir, 'upgrade-pkg');
     fs.mkdirSync(target, { recursive: true });
 
@@ -311,19 +319,25 @@ describe('just-demand upgrade', () => {
       path.join(pkgDir, 'package.json'),
       JSON.stringify({ name: 'my-project', version: '1.0.0', dependencies: {} }, null, 2)
     );
+    fs.writeFileSync(path.join(target, '.gitignore'), 'node_modules/\n.env\n');
 
     const output = execSync(`node ${CLI} upgrade ${target}`, { encoding: 'utf8' });
     console.log(output);
 
-    // .opencode/package.json should preserve existing fields and ensure type
+    assert.ok(output.includes('skip  .opencode/package.json (already exists)'));
+    assert.ok(output.includes('skip  .gitignore (already exists)'));
+
+    // .opencode/package.json should preserve existing fields unchanged
     const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
-    assert.strictEqual(pkg.type, 'module');
     assert.strictEqual(pkg.name, 'my-project');
     assert.strictEqual(pkg.version, '1.0.0');
     assert.deepStrictEqual(pkg.dependencies, {});
+
+    const gitignore = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
+    assert.strictEqual(gitignore, 'node_modules/\n.env\n');
   });
 
-  it('preserves .gitignore merge behavior', () => {
+  it('skips .gitignore for existing upgrade targets', () => {
     const target = path.join(tmpDir, 'upgrade-gitignore');
     fs.mkdirSync(target, { recursive: true });
 
@@ -336,17 +350,12 @@ describe('just-demand upgrade', () => {
     const output = execSync(`node ${CLI} upgrade ${target}`, { encoding: 'utf8' });
     console.log(output);
 
-    // Should report .gitignore updated (some lines missing)
-    assert.ok(output.includes('.gitignore updated with'));
+    // Should report skip instead of mutating the existing file
+    assert.ok(output.includes('skip  .gitignore (already exists)'));
 
-    // Check that missing lines were added
+    // Check that the file was left untouched
     const content = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
-    assert.ok(content.includes('.just-demand/state/'));
-    assert.ok(content.includes('.just-demand/knowledge/'));
-    // Should NOT duplicate existing line
-    const lines = content.split('\n');
-    const nodeModulesCount = lines.filter(l => l === 'node_modules/').length;
-    assert.strictEqual(nodeModulesCount, 1);
+    assert.strictEqual(content, 'node_modules/\n.env\n# Custom rule\n/custom/\n');
   });
 
   it('creates the target directory when it does not exist', () => {
@@ -366,6 +375,16 @@ describe('just-demand upgrade', () => {
 
     assert.ok(output.includes('Upgrading Just Demand in:'));
     assert.ok(!output.includes('Initializing Just Demand into:'));
+  });
+
+  it('supports project path before the upgrade subcommand', () => {
+    const target = path.join(tmpDir, 'project-first-upgrade');
+    fs.mkdirSync(target, { recursive: true });
+
+    const output = execSync(`node ${CLI} ${target} upgrade`, { encoding: 'utf8' });
+
+    assert.ok(output.includes('Upgrading Just Demand in:'));
+    assert.ok(fs.existsSync(path.join(target, '.just-demand', 'installer-metadata.json')));
   });
 
   it('writes installer metadata on upgrade', () => {
