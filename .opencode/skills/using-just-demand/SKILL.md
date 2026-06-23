@@ -46,7 +46,8 @@ Treat every turn as a routing reset. If the turn proposes concrete work, bug fix
 No active formal task -> use just-demand-intake.
 Formal task ready to execute -> use just-demand-execution.
 Implementation/check output needs verification -> use just-demand-verification.
-Durable preferences, decisions, facts, open questions, or deferred options appear -> use just-demand-memory.
+Reusable lesson or recurring workflow pattern appears -> use capture-lessons.
+Task-specific decisions or open questions remain -> keep them in the task archive.
 ```
 
 ## Clarification Is A Hard Gate
@@ -117,7 +118,7 @@ Treat one failed subagent attempt as a transient exception, not as permission to
 - **User**: boss, product manager, and architecture approver. Defines goals, constraints, module boundaries, and tradeoff preferences.
 - **Main agent**: workflow owner and dispatcher. Owns clarification, intake, promotion, subagent routing, verification closeout, and summaries.
 - **Subagent team**: `just-demand-researcher` investigates, `just-demand-coder` implements, `just-demand-tester` verifies, and `just-demand-advisor` gives fresh-context diagnosis or solution framing for hard cross-boundary problems.
-- **Documentation ownership**: decisions, durable notes, and summaries stay with the main workflow or are produced inside a scoped coder/advisor task; there is no active standalone docs role.
+- **Documentation ownership**: reusable lessons become skills, and task-only decisions stay in the archive or task-local notes; there is no active standalone docs role.
 
 ### Priorities
 
@@ -183,8 +184,8 @@ These skills describe routing; runtime plugins enforce workflow entry and task-g
 | User reports a bug, regression, vague failure, or expected-vs-actual mismatch before direction is fully clear | `socratic-clarification` first, then `just-demand-intake` |
 | A formal work item is ready for execution or subagent dispatch | `just-demand-execution` |
 | Reporting completion, failed verification, or correction feedback | `just-demand-verification` |
-| Recording durable decisions, preferences, facts, open questions, or deferred options | `just-demand-memory` |
-| Non-trivial debugging produced a reusable pattern (>=3 attempts, architectural trap) | `capture-lessons` (global skill) via `just-demand-verification` or `just-demand-execution` |
+| Non-trivial debugging produced a reusable pattern (>=3 attempts, architectural trap) | `capture-lessons` via `just-demand-verification` or `just-demand-execution` |
+| Task-specific decisions, facts, or open questions | keep in the task archive and task-local notes |
 
 ## Runtime Boundaries
 

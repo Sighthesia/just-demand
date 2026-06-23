@@ -104,12 +104,10 @@ def ensure_workspace(root: Path) -> None:
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 
-    memory_files = {
-        base / "knowledge" / "memory.md": "# Just Demand Memory\n\n## Decisions\n\n## Facts\n\n## Preferences\n\n## Deferred Options\n\n## Open Questions\n\n",
+    for path, content in {
         base / "state" / "events.jsonl": "",
         base / "state" / "locks.json": json.dumps({"schema_version": SCHEMA_VERSION, "locks": []}, indent=2) + "\n",
-    }
-    for path, content in memory_files.items():
+    }.items():
         if not path.exists():
             path.write_text(content, encoding="utf-8")
 
@@ -1558,97 +1556,11 @@ def cleanup_completed_task(root: Path, task_id: str) -> dict[str, Any]:
     return {"task_id": task_id, "cleaned": True}
 
 
-def _extract_task_decisions(root: Path, task_dir: Path) -> Optional[str]:
-    """Extract meaningful decisions from task decisions.md.
-
-    Returns the extracted content if there are actual decisions beyond the header,
-    otherwise returns None.
-    """
-    decisions_path = task_dir / "decisions.md"
-    if not decisions_path.is_file():
-        return None
-
-    content = decisions_path.read_text(encoding="utf-8")
-    lines = content.splitlines()
-
-    # Skip header lines (# Decisions and blank lines after it)
-    decision_lines = []
-    header_passed = False
-    for line in lines:
-        if not header_passed:
-            if line.startswith("# "):
-                header_passed = True
-                continue
-            elif line.strip() == "":
-                continue
-            else:
-                header_passed = True
-        if header_passed:
-            decision_lines.append(line)
-
-    # Check if there's meaningful content (not just blank lines)
-    meaningful_content = "\n".join(decision_lines).strip()
-    if not meaningful_content:
-        return None
-
-    return meaningful_content
-
-
-def _extract_task_facts(root: Path, task_dir: Path) -> Optional[str]:
-    """Extract verification summary and task info as facts.
-
-    Returns a formatted string suitable for knowledge memory.md,
-    or None if there's nothing useful to extract.
-    """
-    task_json_path = task_dir / "task.json"
-    if not task_json_path.is_file():
-        return None
-
-    task_data = read_json(task_json_path)
-    task_id = task_data.get("id", "")
-    title = task_data.get("title", "")
-    verification_status = task_data.get("verification_status", "")
-    status = task_data.get("status", "")
-
-    # Find verification output file
-    outputs_dir = task_dir / "outputs"
-    verification_file = None
-    if outputs_dir.is_dir():
-        for f in outputs_dir.iterdir():
-            if f.name.startswith("verification-") and f.name.endswith(".md"):
-                verification_file = f
-                break
-
-    lines = []
-    lines.append(f"- Task {task_id} ({title}) completed with status '{status}'.")
-
-    if verification_file:
-        # Read verification summary
-        vcontent = verification_file.read_text(encoding="utf-8")
-        summary = None
-        in_summary = False
-        for line in vcontent.splitlines():
-            if line.startswith("## Summary"):
-                in_summary = True
-                continue
-            if in_summary:
-                if line.startswith("##") or line.strip() == "":
-                    if summary:
-                        break
-                    continue
-                summary = line.strip()
-                break
-        if summary:
-            lines.append(f"  Verification summary: {summary}")
-
-    return "\n".join(lines)
-
-
 def archive_task(root: Path, task_id: str) -> dict[str, Any]:
     """Archive a completed task by moving it to state/archive/.
 
     This preserves the full task directory while removing it from active state.
-    Durable decisions and facts are extracted to knowledge/memory.md before archival.
+    Archive preserves task history directly; reusable lessons are captured elsewhere.
     """
     ensure_workspace(root)
 
@@ -1671,37 +1583,14 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
     if archive_task_dir.exists():
         raise FileExistsError(f"Archive destination already exists: {archive_task_dir}")
 
-    # 1. Extract durable knowledge before moving
-    extraction_errors = []
-
-    # Extract decisions
-    try:
-        decisions_content = _extract_task_decisions(root, task_dir)
-        if decisions_content:
-            knowledge_memory = knowledge_dir(root) / "memory.md"
-            with knowledge_memory.open("a", encoding="utf-8") as f:
-                f.write(f"\n\n### From Task: {task_id}\n\n{decisions_content}\n")
-    except Exception as e:
-        extraction_errors.append(f"decisions extraction failed: {e}")
-
-    # Extract facts
-    try:
-        facts_content = _extract_task_facts(root, task_dir)
-        if facts_content:
-            knowledge_memory = knowledge_dir(root) / "memory.md"
-            with knowledge_memory.open("a", encoding="utf-8") as f:
-                f.write(f"\n{facts_content}\n")
-    except Exception as e:
-        extraction_errors.append(f"facts extraction failed: {e}")
-
-    # 2. Move task directory to archive
+    # 1. Move task directory to archive
     try:
         shutil.move(str(task_dir), str(archive_task_dir))
     except Exception as e:
         # If move fails, report error but keep task in active state
         raise RuntimeError(f"Failed to archive task {task_id}: {e}")
 
-    # 3. Update workspace state
+    # 2. Update workspace state
     with workflow_mutation_lock(root):
         state_path = state_dir(root) / "state.json"
         state = read_json(state_path)
@@ -1730,7 +1619,7 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
         ]
         write_json_atomic(locks_file, locks_data)
 
-    # 5. Append workspace event
+    # 3. Append workspace event
     append_workspace_event(
         root,
         "task_archived",
@@ -1739,11 +1628,7 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
         f"Archived completed task {task_id}",
     )
 
-    result = {"task_id": task_id, "archived": True, "archive_path": str(archive_task_dir)}
-    if extraction_errors:
-        result["extraction_warnings"] = extraction_errors
-
-    return result
+    return {"task_id": task_id, "archived": True, "archive_path": str(archive_task_dir)}
 
 
 # ---------------------------------------------------------------------------

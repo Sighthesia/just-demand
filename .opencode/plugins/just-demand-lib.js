@@ -575,7 +575,6 @@ export const listUnfinishedTasks = (directory) => {
 
 export const readTaskContext = (directory, taskId, agentName) => {
   const taskDir = join(workflowRoot(directory), "state", "active", taskId)
-  const knowledgeDir = join(workflowRoot(directory), "knowledge")
   const parts = []
   const task = readTaskJson(directory, taskId)
 
@@ -612,8 +611,6 @@ export const readTaskContext = (directory, taskId, agentName) => {
       break
     }
     case "just-demand-researcher": {
-      const facts = readTextIfExists(join(knowledgeDir, "memory.md"))
-      if (facts) parts.push(`# Workspace Facts\n\n${facts}`)
       const researchDir = join(taskDir, "research")
       if (existsSync(researchDir)) {
         parts.push("Research outputs: write any artifacts under this task's local research/ directory.")
@@ -621,9 +618,6 @@ export const readTaskContext = (directory, taskId, agentName) => {
       break
     }
     case "just-demand-advisor": {
-      const wsDecisions = readTextIfExists(join(knowledgeDir, "memory.md"))
-      if (wsDecisions) parts.push(`# Workspace Facts\n\n${wsDecisions}`)
-      // Advisor gets workspace memory context plus task context
       const advisorDir = join(taskDir, "advisor")
       if (existsSync(advisorDir)) {
         parts.push("Advisory outputs: write any analysis artifacts under this task's local advisor/ directory.")

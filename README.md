@@ -149,7 +149,7 @@ This layered model exists because pure one-time injection fades after the first 
 
 ### What Each Layer Is For
 
-- **Skills**: encode the main-agent identity, routing, clarification, intake, execution, verification, and memory habits.
+- **Skills**: encode the main-agent identity, routing, clarification, intake, execution, verification, and lesson-capture habits.
 - **Plugins**: inject the current workflow state, enforce execution gates, and attach the right task context to subagents.
 - **CLI / `.just-demand/` state**: provide the durable lifecycle source of truth for active tasks, archives, and workflow transitions.
 - **Task context files**: give each subagent the scoped facts it needs without re-reading the whole workspace.
@@ -226,22 +226,26 @@ human intent
   -> state transition
   -> role-specific execution
   -> verification
-  -> archived memory
+  -> archived task history
 ```
 
 Think of Just Demand as an operating system for agent work: the docs explain the model, skills teach the habits, plugins enforce the current frame, and the CLI/state layer records what actually happened.
 
 ## Install
 
-Just Demand is not yet published as an npm, uv, or pipx package.
-
-Use this repository directly as the installation source.
+Just Demand is now installable through the npm/pnpm-friendly `packages/agent-workflow-installer/` package, while the repository itself remains the reference source for the runtime.
 
 ### Linux / macOS
 
 #### 1. Install globally for OpenCode
 
-From this repository root, run:
+From this repository root, run the installer package directly:
+
+```bash
+npm exec --yes --package ./packages/agent-workflow-installer -- just-demand init ./demo-workspace
+```
+
+For a global OpenCode install, use the repository CLI:
 
 ```bash
 just-demand install --opencode --global
@@ -259,6 +263,8 @@ Installed assets include:
 - `agents/`
 - `skills/`
 - `package.json`
+
+The workspace installer also mirrors the public reference surface into `.agents/skills` so humans and other agents can inspect the skills without OpenCode-specific context.
 
 The installer also creates a persistent `just-demand` entry in a user-writable bin directory that is already on `PATH` when possible, so new shells can run `just-demand` directly.
 
@@ -337,6 +343,7 @@ The normal model is:
 
 - global install provides reusable OpenCode runtime capability
 - each project stores its own local `.just-demand/` state and knowledge files
+- `.agents/skills` is the public reference layer; `.opencode/skills` stays the runtime layer
 
 No per-project `.opencode/` copy is required for the normal flow.
 
@@ -368,7 +375,7 @@ just-demand update --opencode --global --config-root "C:\Users\You\.config\openc
 
 Project-local state usually does not need migration for this workflow change. If a project has not been initialized yet, run `init` for that project.
 
-If you have existing initialized projects, rerun `init` for each project from the updated repository checkout to refresh local state if needed:
+Existing initialized projects are left alone by package upgrades; rerun `init` explicitly only when you want to bootstrap a fresh project or deliberately refresh a workspace with `--force`.
 
 ```bash
 just-demand "/target/project" init

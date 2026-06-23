@@ -23,6 +23,7 @@ from install import (
     load_manifest,
     save_manifest,
     deploy_config_file,
+    sync_public_skills,
     DEPLOYED_FILES,
 )
 
@@ -37,7 +38,8 @@ class InstallCoreTests(unittest.TestCase):
             self.assertIn("stored local state only", result["message"])
             self.assertTrue((root / ".just-demand").exists())
             self.assertTrue((root / ".just-demand" / "state" / "state.json").exists())
-            self.assertTrue((root / ".just-demand" / "knowledge" / "memory.md").exists())
+            self.assertTrue((root / ".just-demand" / "knowledge").is_dir())
+            self.assertFalse((root / ".just-demand" / "knowledge" / "memory.md").exists())
 
     def test_init_project_keeps_global_cli_entrypoints_outside_workspace(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -76,6 +78,22 @@ class InstallCoreTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "success")
             self.assertFalse((root / ".just-demand" / "scripts").exists())
+
+    def test_sync_public_skills_mirrors_runtime_skills_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / ".opencode" / "skills" / "example"
+            source.mkdir(parents=True)
+            (source / "SKILL.md").write_text("example skill\n", encoding="utf-8")
+
+            result = sync_public_skills(root)
+
+            self.assertEqual(result["files_copied"], 1)
+            self.assertTrue((root / ".agents" / "skills" / "example" / "SKILL.md").exists())
+            self.assertEqual(
+                (root / ".agents" / "skills" / "example" / "SKILL.md").read_text(encoding="utf-8"),
+                "example skill\n",
+            )
     
     def test_get_repo_root_returns_path(self):
         repo_root = get_repo_root()
@@ -244,7 +262,7 @@ class InstallCoreTests(unittest.TestCase):
         self.assertLess(DEPLOYED_FILES["skills"].index("using-just-demand"), DEPLOYED_FILES["skills"].index("socratic-clarification"))
         self.assertIn("just-demand-execution", DEPLOYED_FILES["skills"])
         self.assertIn("just-demand-intake", DEPLOYED_FILES["skills"])
-        self.assertIn("just-demand-memory", DEPLOYED_FILES["skills"])
+        self.assertIn("capture-lessons", DEPLOYED_FILES["skills"])
         self.assertIn("just-demand-verification", DEPLOYED_FILES["skills"])
 
 

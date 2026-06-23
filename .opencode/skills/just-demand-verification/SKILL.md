@@ -107,7 +107,7 @@ This does not require long prose. Keep it scannable, but do not omit the uncerta
 
 ## Lesson Capture Gate
 
-After verification passes, check whether the task involved non-trivial debugging. If any of the following are true, load the global `capture-lessons` skill and use its pattern before final closure:
+After verification passes, check whether the task involved non-trivial debugging. If any of the following are true, load the project-native `capture-lessons` skill and use its pattern before final closure:
 
 - The same issue required at least three meaningful fix attempts.
 - Repeated debugging was needed to reach the root cause.
@@ -115,9 +115,9 @@ After verification passes, check whether the task involved non-trivial debugging
 
 ### How to route
 
-1. If the lesson is clearly reusable across modules or projects, use `capture-lessons` to create a new pattern-based skill under `.agents/skills/<pattern-name>/SKILL.md`. Update the skills index if creating a new skill.
-2. If the lesson is durable but project-local (e.g., this repo's conventions, scripts, or architecture), store it in workspace memory instead.
-3. If the lesson is task-only, write to the task's `decisions.md`.
+1. If the lesson is clearly reusable across modules or projects, use the project-native `capture-lessons` skill to create a new pattern-based skill under `.opencode/skills/<pattern-name>/SKILL.md`.
+2. If the lesson is durable but Just Demand-specific, extend the relevant existing `.opencode/skills/` guidance instead of creating a memory layer.
+3. If the lesson is task-only, keep it in the task archive and task-local notes.
 
 ### Capture boundaries
 
@@ -132,8 +132,8 @@ Do not create a skill for:
 When reporting completion, state:
 
 - Whether `capture-lessons` was used.
-- Where the lesson was stored (new skill path, workspace memory key, or task decisions).
-- If skipped, why the lesson was not reusable or global enough.
+- Where the lesson was stored (new skill path, updated skill, or archive-only).
+- If skipped, why the lesson was not reusable or skill-worthy enough.
 
 If the debugging was trivial or the lesson is one-off, skip this gate.
 

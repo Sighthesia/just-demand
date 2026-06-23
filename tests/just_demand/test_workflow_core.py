@@ -106,7 +106,7 @@ def git_stdout(root: Path, *args: str) -> str:
 
 
 class WorkflowCoreTests(unittest.TestCase):
-    def test_ensure_workspace_creates_state_and_memory_files(self):
+    def test_ensure_workspace_creates_state_and_knowledge_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
 
@@ -114,7 +114,8 @@ class WorkflowCoreTests(unittest.TestCase):
 
             workflow = root / ".just-demand"
             self.assertTrue((workflow / "state" / "state.json").is_file())
-            self.assertTrue((workflow / "knowledge" / "memory.md").is_file())
+            self.assertTrue((workflow / "knowledge").is_dir())
+            self.assertFalse((workflow / "knowledge" / "memory.md").exists())
             self.assertTrue((workflow / "state" / "events.jsonl").is_file())
             state = read_json(workflow / "state" / "state.json")
             self.assertEqual(state["schema_version"], "1.0")
@@ -965,7 +966,7 @@ class WorkflowCoreTests(unittest.TestCase):
             event_types = [json.loads(e)["type"] for e in events if e]
             self.assertIn("task_archived", event_types)
 
-    def test_archive_task_extracts_decisions(self):
+    def test_archive_task_preserves_decisions_without_memory_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Decision extraction", "Build extraction", "s1")
@@ -988,13 +989,12 @@ class WorkflowCoreTests(unittest.TestCase):
             # Archive the task
             archive_task(root, task_id)
 
-            # Verify decisions were extracted to knowledge
-            knowledge_memory = knowledge_dir(root) / "memory.md"
-            content = knowledge_memory.read_text(encoding="utf-8")
-            self.assertIn(f"### From Task: {task_id}", content)
-            self.assertIn("Use atomic writes", content)
+            archive_dir = tasks_dir(root) / "archive" / task_id
+            self.assertTrue((archive_dir / "decisions.md").is_file())
+            self.assertFalse((knowledge_dir(root) / "memory.md").exists())
+            self.assertIn("Use atomic writes", (archive_dir / "decisions.md").read_text(encoding="utf-8"))
 
-    def test_archive_task_extracts_facts(self):
+    def test_archive_task_preserves_facts_without_memory_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             intake = create_intake(root, "Fact extraction", "Build extraction", "s1")
@@ -1010,11 +1010,10 @@ class WorkflowCoreTests(unittest.TestCase):
             # Archive the task
             archive_task(root, task_id)
 
-            # Verify facts were extracted to knowledge
-            knowledge_memory = knowledge_dir(root) / "memory.md"
-            content = knowledge_memory.read_text(encoding="utf-8")
-            self.assertIn(task_id, content)
-            self.assertIn("Fact extraction", content)
+            archive_dir = tasks_dir(root) / "archive" / task_id
+            self.assertTrue((archive_dir / "outputs").is_dir())
+            self.assertFalse((knowledge_dir(root) / "memory.md").exists())
+            self.assertIn(task_id, (archive_dir / "task.json").read_text(encoding="utf-8"))
 
     def test_archive_task_preserves_original_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1088,8 +1087,7 @@ class WorkflowCoreTests(unittest.TestCase):
                 archive_task(root, task_id)
 
             self.assertTrue((tasks_dir(root) / "active" / task_id).is_dir())
-            knowledge_memory = (knowledge_dir(root) / "memory.md").read_text(encoding="utf-8")
-            self.assertNotIn("Collision guard", knowledge_memory)
+            self.assertFalse((knowledge_dir(root) / "memory.md").exists())
 
     def test_complete_verification_auto_archives_on_pass(self):
         with tempfile.TemporaryDirectory() as tmp:

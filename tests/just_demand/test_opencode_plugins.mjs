@@ -44,10 +44,8 @@ function makeRoot() {
 function scaffoldWorkflow(root) {
   const base = join(root, ".just-demand")
   mkdirSync(join(base, "state"), { recursive: true })
-  mkdirSync(join(base, "knowledge"), { recursive: true })
   mkdirSync(join(base, "state", "active"), { recursive: true })
   writeFileSync(join(base, "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
-  writeFileSync(join(base, "knowledge", "memory.md"), "# Just Demand Memory\n\n## Facts\n\nKey fact: system uses JSONL.\n\n## Decisions\n\nChose approach A.\n\n## Deferred Options\n\nOption X deferred.\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -272,10 +270,11 @@ test("readTaskContext for just-demand-researcher includes workspace facts", () =
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "decisions.md"), "# Decisions\n\n## Decision: Prefer task-local notes\n\nTask history stays in the archive.\n")
   const context = readTaskContext(root, "task-a", "just-demand-researcher")
   assert.match(context, /# Context/)
-  assert.match(context, /workspace facts/i)
-  assert.match(context, /JSONL/)
+  assert.match(context, /task history stays in the archive/i)
+  assert.doesNotMatch(context, /workspace facts/i)
 })
 
 test("readTaskContext for just-demand-researcher avoids absolute research path leakage", () => {
@@ -294,27 +293,30 @@ test("readTaskContext for just-demand-researcher avoids absolute research path l
 // ---------------------------------------------------------------------------
 // lib: readTaskContext - advisor
 // ---------------------------------------------------------------------------
-test("readTaskContext for just-demand-advisor includes workspace memory", () => {
+test("readTaskContext for just-demand-advisor includes task decisions", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "decisions.md"), "# Decisions\n\n## Decision: Use archive-only history\n\nReusable lessons belong in skills.\n")
   const context = readTaskContext(root, "task-a", "just-demand-advisor")
   assert.match(context, /# Context/)
-  assert.match(context, /workspace facts/i)
-  assert.match(context, /approach A/)
+  assert.match(context, /reusable lessons belong in skills/i)
+  assert.doesNotMatch(context, /workspace facts/i)
 })
 
-test("readTaskContext for just-demand-advisor includes deferred options", () => {
+test("readTaskContext for just-demand-advisor keeps archive-only lessons in decisions", () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "decisions.md"), "# Decisions\n\n## Decision: Keep task history in archive\n\nReusable lessons belong in skills.\n")
   const context = readTaskContext(root, "task-a", "just-demand-advisor")
-  assert.match(context, /deferred options/i)
-  assert.match(context, /Option X/)
+  assert.match(context, /keep task history in archive/i)
+  assert.match(context, /reusable lessons belong in skills/i)
+  assert.doesNotMatch(context, /workspace facts/i)
 })
 
 test("getMissingRequiredContextFiles reports missing coder context files", () => {

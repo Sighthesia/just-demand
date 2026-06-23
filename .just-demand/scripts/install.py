@@ -34,11 +34,11 @@ DEPLOYED_FILES = {
         "just-demand-tester.md",
     ],
     "skills": [
+        "capture-lessons",
         "using-just-demand",
         "socratic-clarification",
         "just-demand-execution",
         "just-demand-intake",
-        "just-demand-memory",
         "just-demand-verification",
     ],
     "config": [
@@ -370,6 +370,42 @@ def deploy_directory(source_dir: Path, target_dir: Path, manifest: dict[str, Any
     return copied_count, numstat_entries
 
 
+def sync_public_skills(project_root: Path, force: bool = False) -> dict[str, Any]:
+    """Mirror runtime skills into the public .agents/skills surface.
+
+    The runtime source remains .opencode/skills; .agents/skills is a readable
+    mirror for agent-neutral reference. Existing public files are preserved
+    unless force is explicitly requested.
+    """
+    source_dir = project_root / ".opencode" / "skills"
+    target_dir = project_root / ".agents" / "skills"
+
+    result = {
+        "source_exists": source_dir.exists(),
+        "target_created": False,
+        "files_copied": 0,
+        "skipped_existing": [],
+    }
+
+    if not source_dir.exists():
+        return result
+
+    for source in source_dir.rglob("*"):
+        if source.is_dir():
+            continue
+        relative = source.relative_to(source_dir)
+        target = target_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and not force:
+            result["skipped_existing"].append(str(relative))
+            continue
+        shutil.copy2(source, target)
+        result["files_copied"] += 1
+        result["target_created"] = True
+
+    return result
+
+
 def install_opencode_global(config_root: Optional[Path] = None) -> dict[str, Any]:
     """Install Just Demand OpenCode runtime assets globally.
     
@@ -611,7 +647,7 @@ def migrate_workspace(project_root: Path) -> dict[str, Any]:
     - Creating state/ directory
     - Moving state files from workspace/ to state/
     - Moving tasks from tasks/ to state/
-    - Merging knowledge files into memory.md
+    - Preserving legacy knowledge files without routing normal workflow through memory.md
     - Updating .gitignore with correct entries
     
     Returns migration result with details of what was migrated.
@@ -690,7 +726,7 @@ def migrate_workspace(project_root: Path) -> dict[str, Any]:
         except OSError:
             pass
     
-    # 4. Merge knowledge files into memory.md if old files exist
+    # 4. Preserve legacy knowledge files if old files exist
     if knowledge_dir.exists():
         old_knowledge_files = [
             "decisions.md",
@@ -699,28 +735,11 @@ def migrate_workspace(project_root: Path) -> dict[str, Any]:
             "open_questions.md",
             "preferences.md",
         ]
-        memory_path = knowledge_dir / "memory.md"
         has_old_files = any((knowledge_dir / f).exists() for f in old_knowledge_files)
-        
-        if has_old_files and not memory_path.exists():
-            # Create memory.md from old files
-            sections = []
-            for filename in old_knowledge_files:
-                source = knowledge_dir / filename
-                if source.exists():
-                    content = source.read_text(encoding="utf-8").strip()
-                    if content:
-                        sections.append(content)
-            
-            if sections:
-                memory_path.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
-                result["knowledge_merged"] = True
-            
-            # Remove old files
-            for filename in old_knowledge_files:
-                source = knowledge_dir / filename
-                if source.exists():
-                    source.unlink()
+
+        if has_old_files:
+            # Keep legacy files intact so archival history remains available.
+            result["knowledge_merged"] = False
     
     # 5. Remove old global directory if it exists
     old_global_dir = workflow_root / "global"
@@ -893,17 +912,20 @@ def init_project(project_root: Optional[Path] = None) -> dict[str, Any]:
     
     try:
         ensure_workspace(project_root)
+        skills_sync = sync_public_skills(project_root)
         sync_result = sync_workspace(project_root)
         return {
             "status": "success",
             "project_root": str(project_root),
             "just_demand_dir": str(project_root / ".just-demand"),
+            "public_skills_synced": skills_sync["files_copied"],
             "scripts_synced": sync_result["scripts_synced"],
             "legacy_removed": sync_result["legacy_removed"],
             "numstat": sync_result["numstat"],
             "message": (
                 f"Initialized project workspace in {project_root / '.just-demand'}; "
-                "stored local state only and removed the need for workspace-local workflow scripts"
+                "stored local state only, mirrored public skills into .agents/skills, "
+                "and removed the need for workspace-local workflow scripts"
             ),
         }
     except Exception as e:

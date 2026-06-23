@@ -60,7 +60,7 @@ This layered model exists because pure one-time injection fades after the first 
 
 ### What Each Layer Is For
 
-- **Skills**: encode the main-agent identity, routing, clarification, intake, execution, verification, and memory habits.
+- **Skills**: encode the main-agent identity, routing, clarification, intake, execution, verification, and lesson-capture habits.
 - **Plugins**: inject the current workflow state, enforce execution gates, and attach the right task context to subagents.
 - **CLI / `.just-demand/` state**: provide the durable lifecycle source of truth for active tasks, archives, and workflow transitions.
 - **Task context files**: give each subagent the scoped facts it needs without re-reading the whole workspace.
@@ -117,7 +117,7 @@ human intent
   -> state transition
   -> role-specific execution
   -> verification
-  -> archived memory
+  -> archived task history
 ```
 
 Think of Just Demand as an operating system for agent work: the docs explain the model, skills teach the habits, plugins enforce the current frame, and the CLI/state layer records what actually happened.
@@ -125,7 +125,7 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 ## Workflow Model
 
 - Treat this repo as a workflow runtime, not a normal app. The primary behavior is the lifecycle around `.just-demand/` state, plugin guardrails, and `just-demand-*` subagents.
-- Working flow: clarify -> intake -> promote to formal task -> inspect unfinished tasks -> ensure required task context files exist -> dispatch `just-demand-*` subagent -> verify -> `complete-verification` -> checkpoint commit -> archive -> extract durable memory.
+- Working flow: clarify -> intake -> promote to formal task -> inspect unfinished tasks -> ensure required task context files exist -> dispatch `just-demand-*` subagent -> verify -> `complete-verification` -> checkpoint commit -> archive.
 - Do not skip the clarification gate. In this repo, `using-just-demand` routes first and `socratic-clarification` is the hard gate before promotion, subagent dispatch, or code edits.
 - Main-agent default: lead with the likely effect and the recommended option first, then ask only for the decision that would change visible behavior, architecture, compatibility, security, cost, or long-term maintainability.
 - Long-context implementation, research, and verification belong in `just-demand-*` subagents, not inline in the main session.
@@ -186,7 +186,7 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 ## Repository Map
 
 - `.just-demand/scripts/`: workflow CLI and state transitions; the only write path for workflow machine state.
-- `.just-demand/knowledge/`: durable memory that survives tasks.
+- `.just-demand/knowledge/`: legacy workspace knowledge location retained for compatibility and migration only.
 - `.just-demand/state/`: runtime state only; includes `intake/`, `active/`, `archive/`, event logs, and locks.
 - `.opencode/plugins/`: OpenCode guardrails and task-context injection.
 - `.opencode/agent/`: subagent definitions for `just-demand-*` roles.
@@ -206,7 +206,7 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 
 - Checkpoint commits are the default after clean verification. Use `complete-verification` for the normal path; it records verification, attempts the checkpoint commit, and archives on pass.
 - `impact` on `mark` is recommended because checkpoint commits can scope to task-related paths, but the script will fall back to all non-generated changed files when impact is absent.
-- Completed tasks should be archived, not destructively removed first. Durable decisions/facts are extracted to `.just-demand/knowledge/memory.md` during archival.
+- Completed tasks should be archived, not destructively removed first. Task-only history stays in the archive; reusable lessons should be captured as skills.
 
 ## OpenCode / Node Gotchas
 
@@ -222,5 +222,4 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 | `.opencode/skills/just-demand-intake/SKILL.md`       | Shaping clarified work into a promotable intake/task.                 |
 | `.opencode/skills/just-demand-execution/SKILL.md`    | Dispatching subagents or executing a formal task.                     |
 | `.opencode/skills/just-demand-verification/SKILL.md` | Completion claims, failed checks, or correction feedback.             |
-| `.opencode/skills/just-demand-memory/SKILL.md`       | Recording durable decisions, facts, preferences, or deferred options. |
-| `.agents/skills/capture-lessons/SKILL.md`            | After non-trivial debugging produced a reusable pattern.              |
+| `.opencode/skills/capture-lessons/SKILL.md`          | After verified debugging or reusable workflow lessons.                |

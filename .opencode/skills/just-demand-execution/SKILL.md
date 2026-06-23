@@ -273,7 +273,7 @@ No manual `git status` / `git diff` / `git add` inspection is needed. The script
 When execution involves repeated debugging (>=3 attempts, or non-obvious root cause involving tools, frameworks, or state):
 
 1. After the fix passes verification, route through the lesson-capture gate in `just-demand-verification` before claiming completion.
-2. Reusable patterns should become skills via the global `capture-lessons` skill. Project-local lessons go to workspace memory. Task-only lessons go to task `decisions.md`.
+2. Reusable patterns should become skills via the project-native `capture-lessons` skill. Project-local lessons should extend an existing Just Demand skill when they are broadly useful; otherwise keep them archived with the task.
 3. Do not skip the capture gate just because the user already accepted the fix. If a reusable pattern was discovered, record it.
 
 ### Circuit Breaker
