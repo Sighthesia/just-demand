@@ -1222,6 +1222,43 @@ def render_execution_packet_markdown(packet: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_task_readiness_card(readiness: dict[str, Any]) -> str:
+    """Render a compact readiness diagnostic card for CLI output."""
+    lines = [
+        "# Task Readiness",
+        "",
+        f"Task: {readiness.get('task_id', '')}",
+        f"Current: {readiness.get('current_state', readiness.get('status', ''))}",
+        f"Safe to continue: {'yes' if readiness.get('safe_to_continue') else 'no'}",
+        "",
+    ]
+
+    blocked_reason = str(readiness.get("blocked_reason", "") or "").strip()
+    if blocked_reason:
+        lines.extend([
+            "Why blocked:",
+            f"- {blocked_reason}",
+            "",
+        ])
+
+    missing = readiness.get("missing", []) or []
+    if missing:
+        lines.append("Missing fields:")
+        for field in missing:
+            lines.append(f"- {field}")
+        lines.append("")
+
+    recommended_next = str(readiness.get("recommended_next", readiness.get("recommended_recovery", "")) or "").strip()
+    if recommended_next:
+        lines.extend([
+            "Recommended next:",
+            f"- {recommended_next}",
+            "",
+        ])
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 # ---------------------------------------------------------------------------
 # Readiness diagnostics
 # ---------------------------------------------------------------------------
@@ -1251,36 +1288,48 @@ def show_task_readiness(root: Path, task_id: str) -> dict[str, Any]:
     ready = task_is_ready_for_execution(task)
     missing = [] if ready else get_missing_execution_fields(task)
     writes_allowed = status in WRITE_ALLOWED_STATUSES
+    safe_to_continue = bool(ready and writes_allowed and status != "done")
 
     # Determine recommended recovery step
     recommended_recovery: str
+    blocked_reason: str
     if status == "done":
         recommended_recovery = "No recovery needed — task is complete."
+        blocked_reason = "Task is already complete."
     elif not writes_allowed:
         recommended_recovery = (
             f"Recovery: change status to a writable status first "
             f"(e.g., `mark {task_id} planning`), then run "
             f"`update-clarification {task_id} --field key=value`."
         )
+        blocked_reason = f"Task status '{status}' does not allow clarification updates."
     elif not ready:
         recommended_recovery = (
             f"Recovery: run `update-clarification {task_id} --field key=value` "
             f"for each missing field. "
             f"Missing fields: {', '.join(missing)}"
         )
+        blocked_reason = f"Missing required clarification fields: {', '.join(missing)}"
     else:
         recommended_recovery = (
             "Task is execution-ready. "
             "Start execution when ready."
         )
+        blocked_reason = ""
+
+    recommended_next = recommended_recovery
 
     return {
         "task_id": task_id,
         "status": status,
+        "current_state": status,
         "ready": ready,
         "missing": missing,
         "writes_allowed": writes_allowed,
         "write_allowed_statuses": sorted(WRITE_ALLOWED_STATUSES),
+        "safe_to_continue": safe_to_continue,
+        "blocked_reason": blocked_reason,
+        "recommended_next": recommended_next,
         "recommended_recovery": recommended_recovery,
     }
 

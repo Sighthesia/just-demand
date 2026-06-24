@@ -465,9 +465,9 @@ class WorkflowCoreTests(unittest.TestCase):
 
             payload = json.loads(result.stdout)
             self.assertTrue(payload["ready"])
-            self.assertIn("Result: task is ready", result.stderr)
-            self.assertIn("Writes allowed:", result.stderr)
-            self.assertIn("Next action:", result.stderr)
+            self.assertIn("Current:", result.stderr)
+            self.assertIn("Safe to continue: yes", result.stderr)
+            self.assertIn("Recommended next:", result.stderr)
 
     def test_cli_update_intake_section_missing_intake(self):
         import subprocess
@@ -2342,6 +2342,10 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(result["missing"], [])
             self.assertTrue(result["writes_allowed"])
             self.assertIn("execution-ready", result["recommended_recovery"])
+            self.assertEqual(result["current_state"], "planning")
+            self.assertTrue(result["safe_to_continue"])
+            self.assertEqual(result["blocked_reason"], "")
+            self.assertEqual(result["recommended_next"], "Task is execution-ready. Start execution when ready.")
 
     def test_show_task_readiness_not_ready_missing_fields(self):
         from workflow_core import show_task_readiness, write_json_atomic
@@ -2366,6 +2370,10 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("Chosen Approach", result["missing"])
             self.assertTrue(result["writes_allowed"])
             self.assertIn("update-clarification", result["recommended_recovery"])
+            self.assertEqual(result["current_state"], "planning")
+            self.assertFalse(result["safe_to_continue"])
+            self.assertIn("Missing required clarification fields", result["blocked_reason"])
+            self.assertEqual(result["recommended_next"], result["recommended_recovery"])
 
     def test_show_task_readiness_writes_not_allowed_in_paused(self):
         from workflow_core import mark_task, show_task_readiness
@@ -2456,9 +2464,52 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(payload["ready"])
             self.assertEqual(payload["missing"], [])
             self.assertTrue(payload["writes_allowed"])
+            self.assertTrue(payload["safe_to_continue"])
             self.assertIn("task_id", payload)
             self.assertIn("status", payload)
             self.assertIn("write_allowed_statuses", payload)
+            self.assertIn("current_state", payload)
+            self.assertIn("blocked_reason", payload)
+            self.assertIn("recommended_next", payload)
+
+            self.assertIn("Current:", result.stderr)
+            self.assertIn("Safe to continue: yes", result.stderr)
+            self.assertIn("Recommended next:", result.stderr)
+
+    def test_show_task_readiness_cli_blocked_outputs_diagnostic_card(self):
+        import subprocess
+
+        from workflow_core import promote_to_task, write_json_atomic
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI blocked", "CLI blocked", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "CLI blocked", "CLI blocked", "implementation", ["CLI blocked"])
+            task_id = promoted["task_id"]
+
+            task_path = tasks_dir(root) / "active" / task_id / "task.json"
+            task = read_json(task_path)
+            task["clarification"]["chosen_approach"] = ""
+            write_json_atomic(task_path, task)
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "show-readiness", task_id],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["ready"])
+            self.assertFalse(payload["safe_to_continue"])
+            self.assertIn("blocked_reason", payload)
+            self.assertIn("recommended_next", payload)
+            self.assertIn("Why blocked:", result.stderr)
+            self.assertIn("Safe to continue: no", result.stderr)
+            self.assertIn("Missing fields:", result.stderr)
+            self.assertIn("Recommended next:", result.stderr)
 
     def test_show_task_readiness_cli_missing_task(self):
         import subprocess

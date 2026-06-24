@@ -21,6 +21,7 @@ from workflow_core import (
     parse_markdown_clarification_fields,
     promote_to_task,
     render_execution_packet_markdown,
+    render_task_readiness_card,
     select_task,
     show_task_readiness,
     start_verification,
@@ -184,20 +185,7 @@ def print_structured_summary(command: str, result: dict[str, Any], stream=None) 
             lines.append("Tasks: none")
             lines.append("Next action: create an intake when new work arrives.")
     elif command == "show-readiness":
-        ready = bool(result.get("ready"))
-        missing = result.get("missing", []) or []
-        lines.extend([
-            f"Result: task is {'ready' if ready else 'not ready'}",
-            f"Task ID: {result.get('task_id', '')}",
-            f"Status: {result.get('status', '')}",
-            f"Writes allowed: {'yes' if result.get('writes_allowed') else 'no'}",
-        ])
-        if missing:
-            lines.append("Missing fields:")
-            lines.extend([f"  - {field}" for field in missing])
-        recovery = result.get("recommended_recovery")
-        if recovery:
-            lines.append(f"Next action: {recovery}")
+        lines.extend(render_task_readiness_card(result).rstrip().splitlines())
     elif command == "mark":
         lines.extend([
             "Result: task marked",
