@@ -368,6 +368,107 @@ class WorkflowCoreTests(unittest.TestCase):
             text = intake_path.read_text(encoding="utf-8")
             self.assertIn("## Scope\nCLI-updated scope.\n\n", text)
 
+    def test_cli_create_intake_emits_structured_summary_on_stderr(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "create-intake", "Readable intake", "Write a readable CLI summary.", "--session", "session-main"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertIn("intake_id", payload)
+            self.assertIn("Result: intake created", result.stderr)
+            self.assertIn("Intake ID:", result.stderr)
+            self.assertIn("Next action:", result.stderr)
+
+    def test_cli_list_active_emits_structured_summary_on_stderr(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Readable list", "List me", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promote_to_task(root, intake["intake_id"], "Readable list", "Build readable output", "design", ["Readable summary"])
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "list-active"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(len(payload["tasks"]), 1)
+            self.assertIn("Result: 1 unfinished task", result.stderr)
+            self.assertIn("Tasks:", result.stderr)
+            self.assertIn("Next action:", result.stderr)
+
+    def test_cli_promote_and_select_include_next_action_summary(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Readable flow", "Promote me", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            script = REPO_ROOT / "just-demand"
+
+            promote_result = subprocess.run(
+                [sys.executable, str(script), str(root), "promote", intake["intake_id"], "Readable flow", "Promote readable output", "--type", "implementation", "--acceptance", "Summary is obvious."],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            promote_payload = json.loads(promote_result.stdout)
+            self.assertIn("next_actions", promote_payload)
+            self.assertIn("Result: task promoted", promote_result.stderr)
+            self.assertIn("Next actions:", promote_result.stderr)
+
+            mark_task(root, promote_payload["task_id"], "paused")
+            select_result = subprocess.run(
+                [sys.executable, str(script), str(root), "select-task", promote_payload["task_id"]],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            select_payload = json.loads(select_result.stdout)
+            self.assertTrue(select_payload["ok"])
+            self.assertIn("Result: task selected", select_result.stderr)
+            self.assertIn("Next actions:", select_result.stderr)
+
+    def test_cli_show_readiness_emits_clear_recovery_summary(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Readiness summary", "Check readiness", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Readiness summary", "Check readiness", "design", ["Ready summary"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "show-readiness", task_id],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ready"])
+            self.assertIn("Result: task is ready", result.stderr)
+            self.assertIn("Writes allowed:", result.stderr)
+            self.assertIn("Next action:", result.stderr)
+
     def test_cli_update_intake_section_missing_intake(self):
         import subprocess
 

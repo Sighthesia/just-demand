@@ -70,6 +70,22 @@ TASK_SELECTION_NEXT_ACTIONS = [
     "Confirm required task context files exist before implementation or verification.",
 ]
 
+SUMMARY_COMMANDS = {
+    "archive-task",
+    "checkpoint-commit",
+    "create-intake",
+    "list-active",
+    "mark",
+    "promote",
+    "resume",
+    "select-task",
+    "show-readiness",
+    "start-verification",
+    "update-intake-section",
+    "complete-verification",
+    "cleanup-task",
+}
+
 
 def _parse_field_args(raw_fields: list[str]) -> dict[str, str]:
     """Parse --field key=value arguments into a dict."""
@@ -91,6 +107,155 @@ def with_task_selection_next_actions(result: dict) -> dict:
         result = dict(result)
         result["next_actions"] = TASK_SELECTION_NEXT_ACTIONS
     return result
+
+
+def _print_summary_line(label: str, value: object, *, stream) -> None:
+    if value is None:
+        return
+    if isinstance(value, list):
+        if not value:
+            return
+        stream.write(f"{label}:\n")
+        for item in value:
+            stream.write(f"  - {item}\n")
+        return
+    stream.write(f"{label}: {value}\n")
+
+
+def print_structured_summary(command: str, result: dict[str, Any], stream=None) -> None:
+    """Emit a concise, stable success summary to stderr for fast scanning."""
+    if not isinstance(result, dict) or result.get("status") == "error":
+        return
+
+    out = stream if stream is not None else sys.stderr
+    lines: list[str] = []
+
+    if command == "create-intake":
+        lines.extend([
+            "Result: intake created",
+            f"Intake ID: {result.get('intake_id', '')}",
+            f"Path: {result.get('path', '')}",
+            "Next action: fill in Scope and the remaining clarification fields.",
+        ])
+    elif command == "update-intake-section":
+        lines.extend([
+            "Result: intake section updated",
+            f"Intake ID: {result.get('intake_id', '')}",
+            f"Section: {result.get('section', '')}",
+            "Next action: continue filling the remaining intake sections.",
+        ])
+    elif command == "promote":
+        lines.extend([
+            "Result: task promoted",
+            f"Task ID: {result.get('task_id', '')}",
+            f"Path: {result.get('path', '')}",
+        ])
+        next_actions = result.get("next_actions") or []
+        if next_actions:
+            lines.append("Next actions:")
+            lines.extend([f"  - {action}" for action in next_actions])
+    elif command in {"select-task", "resume"}:
+        lines.extend([
+            "Result: task selected",
+            f"Task ID: {result.get('task_id', '')}",
+            f"Status: {result.get('status', '')}",
+        ])
+        next_actions = result.get("next_actions") or []
+        if next_actions:
+            lines.append("Next actions:")
+            lines.extend([f"  - {action}" for action in next_actions])
+    elif command == "list-active":
+        tasks = result.get("tasks", []) or []
+        lines.append(f"Result: {len(tasks)} unfinished task{'s' if len(tasks) != 1 else ''}")
+        if tasks:
+            lines.append("Tasks:")
+            for task in tasks:
+                progress = task.get("progress")
+                progress_text = f"{progress}%" if progress is not None else "n/a"
+                impact = task.get("impact") or []
+                impact_text = ", ".join(impact) if impact else "none"
+                title = task.get("title", "")
+                lines.append(
+                    f"  - {task.get('id', '')} | {task.get('status', '')} | {progress_text} | {title}"
+                )
+                lines.append(f"    Impact: {impact_text}")
+            lines.append("Next action: select a task with `just-demand . select-task <task-id>` or `resume <task-id>`.")
+        else:
+            lines.append("Tasks: none")
+            lines.append("Next action: create an intake when new work arrives.")
+    elif command == "show-readiness":
+        ready = bool(result.get("ready"))
+        missing = result.get("missing", []) or []
+        lines.extend([
+            f"Result: task is {'ready' if ready else 'not ready'}",
+            f"Task ID: {result.get('task_id', '')}",
+            f"Status: {result.get('status', '')}",
+            f"Writes allowed: {'yes' if result.get('writes_allowed') else 'no'}",
+        ])
+        if missing:
+            lines.append("Missing fields:")
+            lines.extend([f"  - {field}" for field in missing])
+        recovery = result.get("recommended_recovery")
+        if recovery:
+            lines.append(f"Next action: {recovery}")
+    elif command == "mark":
+        lines.extend([
+            "Result: task marked",
+            f"Task ID: {result.get('id', '')}",
+            f"Status: {result.get('status', '')}",
+        ])
+        if result.get("progress") is not None:
+            lines.append(f"Progress: {result.get('progress')}%")
+    elif command == "start-verification":
+        lines.extend([
+            "Result: verification started",
+            f"Task ID: {result.get('id', result.get('task_id', ''))}",
+            f"Status: {result.get('status', '')}",
+            "Next action: complete verification with `just-demand . complete-verification`.",
+        ])
+    elif command == "complete-verification":
+        verification_status = result.get("verification_status", result.get("status", ""))
+        lines.extend([
+            f"Result: verification {verification_status}",
+            f"Task ID: {result.get('id', result.get('task_id', ''))}",
+            f"Status: {result.get('status', '')}",
+            f"Archived: {'yes' if result.get('archived') else 'no'}",
+        ])
+        checkpoint = result.get("checkpoint_commit") or {}
+        if isinstance(checkpoint, dict) and checkpoint:
+            checkpoint_state = "created" if checkpoint.get("created") else f"skipped ({checkpoint.get('reason', 'unknown')})"
+            lines.append(f"Checkpoint commit: {checkpoint_state}")
+    elif command == "checkpoint-commit":
+        created = bool(result.get("created"))
+        lines.extend([
+            f"Result: checkpoint commit {'created' if created else 'skipped'}",
+            f"Task ID: {result.get('task_id', '')}",
+        ])
+        if result.get("commit_hash"):
+            lines.append(f"Commit: {result.get('commit_hash')}")
+        if result.get("reason"):
+            lines.append(f"Reason: {result.get('reason')}")
+    elif command in {"archive-task", "cleanup-task"}:
+        lines.extend([
+            f"Result: task {'archived' if command == 'archive-task' else 'cleaned up'}",
+            f"Task ID: {result.get('task_id', '')}",
+        ])
+        if command == "archive-task":
+            lines.append(f"Archive path: {result.get('archive_path', '')}")
+    else:
+        lines.append(f"Result: {result.get('status', 'success')}")
+        for key, value in result.items():
+            if key == "status":
+                continue
+            if key == "next_actions":
+                _print_summary_line("Next actions", value, stream=out)
+                continue
+            _print_summary_line(key.replace("_", " ").title(), value, stream=out)
+        return
+
+    for line in lines:
+        out.write(line + "\n")
+    out.flush()
 
 
 def split_project_root(argv: list[str]) -> tuple[Path | None, list[str]]:
@@ -443,6 +608,8 @@ def execute_command(root: Path, args: list[str]) -> int:
     except Exception as exc:
         result = {"status": "error", "message": str(exc)}
 
+    if parsed.command in SUMMARY_COMMANDS:
+        print_structured_summary(parsed.command, result, stream=sys.stderr)
     print(json.dumps(result, ensure_ascii=False))
     if isinstance(result, dict):
         if result.get("status") == "success":
