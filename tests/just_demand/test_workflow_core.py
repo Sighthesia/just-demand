@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from workflow_core import (
     acquire_lock,
     archive_task,
+    build_execution_packet,
     cleanup_completed_task,
     complete_verification,
     create_intake,
@@ -28,6 +29,7 @@ from workflow_core import (
     promote_to_task,
     read_json,
     select_task,
+    render_execution_packet_markdown,
     start_execution,
     start_verification,
     state_dir,
@@ -2374,6 +2376,132 @@ class WorkflowCoreTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "error")
             self.assertIn("not found", payload["message"])
+
+    # -----------------------------------------------------------------------
+    # execution packet
+    # -----------------------------------------------------------------------
+
+    def test_build_execution_packet_prefers_selected_subtask_and_role_focus(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Packet task", "Build packet", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Packet task", "Build packet", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["subtasks"] = [
+                {"id": "sub-1", "title": "Patch helper", "status": "done", "scope": "Old work"},
+                {"id": "sub-2", "title": "Implement packet", "status": "open", "scope": "Current work"},
+            ]
+            write_json_atomic(task_dir / "task.json", task)
+
+            packet = build_execution_packet(root, task_id, role="coder", hints={"focus": "Keep scope tight."})
+
+            self.assertTrue(packet["ready"])
+            self.assertEqual(packet["selected_subtask"]["id"], "sub-2")
+            self.assertIn("Keep scope tight.", packet["focus"])
+            self.assertIn("Current work", packet["focus"])
+            self.assertGreaterEqual(len(packet["subtasks"]), 2)
+
+    def test_build_execution_packet_flags_overweight_background(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Packet lint", "Build packet lint", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Packet lint", "Build packet lint", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            packet = build_execution_packet(
+                root,
+                task_id,
+                role="tester",
+                hints={"background_notes": ["x" * 500, "y" * 500, "z" * 500]},
+            )
+
+            self.assertTrue(any(item["code"] == "background_overweight" for item in packet["lint"]))
+            rendered = render_execution_packet_markdown(packet)
+            self.assertIn("## Lint", rendered)
+            self.assertIn("background notes are too large", rendered.lower())
+
+    def test_build_packet_cli_renders_markdown(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Packet CLI", "Build packet CLI", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Packet CLI", "Build packet CLI", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "build-packet", task_id, "--role", "tester", "--format", "markdown"],
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("# Execution Packet", result.stdout)
+            self.assertIn("## Testing Targets", result.stdout)
+
+    def test_render_context_cli_renders_markdown(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Render context", "Render packet markdown", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Render context", "Render packet markdown", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "render-context", task_id, "--role", "coder"],
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("# Execution Packet", result.stdout)
+            self.assertIn("## Implementation Targets", result.stdout)
+
+    def test_lint_packet_cli_reports_findings_and_exit_code(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Lint packet", "Lint packet CLI", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Lint packet", "Lint packet CLI", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    str(root),
+                    "lint-packet",
+                    task_id,
+                    "--hint",
+                    "background_notes=" + ("x" * 1000),
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["task_id"], task_id)
+            self.assertTrue(payload["ready"])
+            self.assertTrue(any(item["code"] == "background_overweight" for item in payload["lint"]))
 
     # -----------------------------------------------------------------------
     # update_task_clarification

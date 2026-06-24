@@ -11,6 +11,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from workflow_core import (
     archive_task,
+    build_execution_packet,
     cleanup_completed_task,
     complete_verification,
     create_checkpoint_commit,
@@ -19,6 +20,7 @@ from workflow_core import (
     mark_task,
     parse_markdown_clarification_fields,
     promote_to_task,
+    render_execution_packet_markdown,
     select_task,
     show_task_readiness,
     start_verification,
@@ -36,6 +38,7 @@ from install import (
 
 COMMANDS = {
     "archive-task",
+    "build-packet",
     "checkpoint-commit",
     "cleanup-task",
     "complete-verification",
@@ -43,9 +46,11 @@ COMMANDS = {
     "doctor",
     "init",
     "install",
+    "lint-packet",
     "list-active",
     "mark",
     "promote",
+    "render-context",
     "resume",
     "select-task",
     "show-readiness",
@@ -150,6 +155,25 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint = sub.add_parser("checkpoint-commit", help="Create a checkpoint commit for a task (requires passed verification)")
     checkpoint.add_argument("task_id", help="Task ID to create a checkpoint commit for")
 
+    packet = sub.add_parser("build-packet", help="Build an execution packet for a task")
+    packet.add_argument("task_id", help="Task ID to build a packet for")
+    packet.add_argument("--role", default="coder", choices=["coder", "tester", "advisor", "researcher"], help="Role-specific packet view")
+    packet.add_argument("--subtask-id", default=None, help="Select a specific subtask for the packet")
+    packet.add_argument("--hint", action="append", default=[], help="Supplemental hint (format: key=value, repeatable)")
+    packet.add_argument("--format", default="json", choices=["json", "markdown"], help="Output format")
+
+    render_context = sub.add_parser("render-context", help="Render compact role-specific context for a task")
+    render_context.add_argument("task_id", help="Task ID to render context for")
+    render_context.add_argument("--role", default="coder", choices=["coder", "tester", "advisor", "researcher"], help="Role-specific context view")
+    render_context.add_argument("--subtask-id", default=None, help="Select a specific subtask for the rendered context")
+    render_context.add_argument("--hint", action="append", default=[], help="Supplemental hint (format: key=value, repeatable)")
+
+    lint_packet = sub.add_parser("lint-packet", help="Lint an execution packet for a task")
+    lint_packet.add_argument("task_id", help="Task ID to lint packet for")
+    lint_packet.add_argument("--role", default="coder", choices=["coder", "tester", "advisor", "researcher"], help="Role-specific packet view")
+    lint_packet.add_argument("--subtask-id", default=None, help="Select a specific subtask for the packet")
+    lint_packet.add_argument("--hint", action="append", default=[], help="Supplemental hint (format: key=value, repeatable)")
+
     cleanup = sub.add_parser("cleanup-task", help="Clean up a completed task and remove its runtime references")
     cleanup.add_argument("task_id", help="Task ID to clean up (must be status 'done')")
 
@@ -221,6 +245,40 @@ def execute_command(root: Path, args: list[str]) -> int:
             result = update_intake_section(root, parsed.intake_id, parsed.section, parsed.value)
         elif parsed.command == "checkpoint-commit":
             result = create_checkpoint_commit(root, parsed.task_id)
+        elif parsed.command in {"build-packet", "render-context", "lint-packet"}:
+            hints: dict[str, Any] = {}
+            for raw_hint in parsed.hint:
+                if "=" not in raw_hint:
+                    raise ValueError(f"Invalid --hint format: '{raw_hint}'. Expected key=value")
+                key, _, value = raw_hint.partition("=")
+                key = key.strip()
+                if not key:
+                    raise ValueError(f"Empty key in --hint '{raw_hint}'")
+                hints.setdefault(key, [])
+                if key == "focus":
+                    hints[key] = value
+                else:
+                    hints[key].append(value)
+            packet = build_execution_packet(root, parsed.task_id, role=parsed.role, subtask_id=parsed.subtask_id, hints=hints)
+            if parsed.command == "lint-packet":
+                result = {
+                    "task_id": packet.get("task_id"),
+                    "role": packet.get("role"),
+                    "requested_subtask_id": packet.get("requested_subtask_id"),
+                    "selected_subtask_id": (packet.get("selected_subtask") or {}).get("id"),
+                    "ready": packet.get("ready"),
+                    "lint": packet.get("lint", []),
+                }
+                print(json.dumps(result, ensure_ascii=False))
+                return 0 if packet.get("ready") else 2
+            if parsed.command == "render-context":
+                print(render_execution_packet_markdown(packet), end="")
+                return 0 if packet.get("ready") else 2
+            if parsed.format == "markdown":
+                print(render_execution_packet_markdown(packet), end="")
+            else:
+                print(json.dumps(packet, ensure_ascii=False))
+            return 0 if packet.get("ready") else 2
         elif parsed.command == "update-clarification":
             fields: dict[str, Any] = {}
             # Load from-file first (base), then --field overrides on top
@@ -401,6 +459,9 @@ def show_help():
     print("  list-active [--verbose]           List unfinished tasks")
     print("  create-intake <title> <request>   Create intake note")
     print("  promote <id> <title> <goal>       Promote intake to task")
+    print("  build-packet <id>                Build execution packet for a task")
+    print("  render-context <id>              Render role-specific packet markdown")
+    print("  lint-packet <id>                 Lint execution packet for a task")
     print("  select-task <id>                  Select current task")
     print("  resume <id>                       Resume/select current task")
     print("  mark <id> <status> [--progress N] Mark task status")

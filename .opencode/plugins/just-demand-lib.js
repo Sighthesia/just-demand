@@ -1,7 +1,12 @@
+import { execFileSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { join, resolve } from "node:path"
 
 const REMINDER_STATE = new Map()
+const PLUGIN_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)))
+const REPO_ROOT = resolve(PLUGIN_DIR, "..", "..")
+const JUST_DEMAND_CLI = join(REPO_ROOT, "just-demand")
 
 const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
 const WORKFLOW_SUBAGENTS = new Set(["just-demand-researcher", "just-demand-coder", "just-demand-tester", "just-demand-advisor"])
@@ -663,11 +668,129 @@ export const listUnfinishedTasks = (directory) => {
 }
 
 
+const packetRoleForAgent = (agentName) => {
+  switch (agentName) {
+    case "just-demand-coder":
+      return "coder"
+    case "just-demand-tester":
+      return "tester"
+    case "just-demand-advisor":
+      return "advisor"
+    case "just-demand-researcher":
+      return "researcher"
+    default:
+      return null
+  }
+}
+
+const isCompletedSubtaskStatus = (status) => {
+  const normalized = String(status || "").trim().toLowerCase()
+  return normalized === "done" || normalized === "complete" || normalized === "completed"
+}
+
+const selectPacketSubtaskId = (task) => {
+  const subtasks = Array.isArray(task?.subtasks) ? task.subtasks : []
+  if (subtasks.length === 0) return null
+
+  const currentStep = String(task?.current_step || "").trim()
+  if (currentStep) {
+    const matched = subtasks.find((subtask) => {
+      const id = String(subtask?.id || subtask?.subtask_id || "").trim()
+      const title = String(subtask?.title || subtask?.name || subtask?.goal || "").trim()
+      return currentStep === id || currentStep === title
+    })
+    if (matched) {
+      return String(matched.id || matched.subtask_id || "").trim() || null
+    }
+  }
+
+  const openSubtasks = subtasks.filter((subtask) => !isCompletedSubtaskStatus(subtask?.status))
+  if (openSubtasks.length === 1) {
+    return String(openSubtasks[0].id || openSubtasks[0].subtask_id || "").trim() || null
+  }
+
+  return null
+}
+
+const buildPacketHintArgs = (task) => {
+  const args = []
+  const currentStep = String(task?.current_step || "").trim()
+  if (currentStep) {
+    args.push("--hint", `focus=${currentStep}`)
+  }
+
+  const impacts = Array.isArray(task?.impact) ? task.impact : []
+  for (const impact of impacts) {
+    const text = String(impact || "").trim()
+    if (text) {
+      args.push("--hint", `recent_diff=${text}`)
+    }
+  }
+
+  return args
+}
+
+const readRenderedTaskContext = (directory, taskId, agentName, task = null) => {
+  const role = packetRoleForAgent(agentName)
+  if (!role || !existsSync(JUST_DEMAND_CLI)) return null
+
+  try {
+    const subtaskId = selectPacketSubtaskId(task)
+    const hintArgs = buildPacketHintArgs(task)
+    const command = [JUST_DEMAND_CLI, directory, "render-context", taskId, "--role", role]
+    if (subtaskId) command.push("--subtask-id", subtaskId)
+    command.push(...hintArgs)
+    const rendered = execFileSync("python3", command, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    return String(rendered || "").trim() || null
+  } catch {
+    return null
+  }
+}
+
+const readPacketLintWarnings = (directory, taskId, agentName, task = null) => {
+  const role = packetRoleForAgent(agentName)
+  if (!role || !existsSync(JUST_DEMAND_CLI)) return []
+
+  try {
+    const subtaskId = selectPacketSubtaskId(task)
+    const hintArgs = buildPacketHintArgs(task)
+    const command = [JUST_DEMAND_CLI, directory, "lint-packet", taskId, "--role", role]
+    if (subtaskId) command.push("--subtask-id", subtaskId)
+    command.push(...hintArgs)
+    const raw = execFileSync("python3", command, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const payload = JSON.parse(String(raw || "{}"))
+    if (!Array.isArray(payload?.lint)) return []
+    return payload.lint
+      .filter((item) => item && item.severity === "warning" && item.message)
+      .map((item) => `- [WARNING] ${item.message}`)
+  } catch {
+    return []
+  }
+}
+
+
 
 export const readTaskContext = (directory, taskId, agentName) => {
+  const task = readTaskJson(directory, taskId)
+  const renderedContext = readRenderedTaskContext(directory, taskId, agentName, task)
+  if (renderedContext) {
+    const lintWarnings = readPacketLintWarnings(directory, taskId, agentName, task)
+    if (lintWarnings.length > 0) {
+      return `${renderedContext}\n\n## Packet Warnings\n${lintWarnings.join("\n")}`
+    }
+    return renderedContext
+  }
+
   const taskDir = join(workflowRoot(directory), "state", "active", taskId)
   const parts = []
-  const task = readTaskJson(directory, taskId)
 
   const context = readTextIfExists(join(taskDir, "context.md"))
   if (context) parts.push(context)

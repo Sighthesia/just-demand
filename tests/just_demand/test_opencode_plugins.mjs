@@ -180,18 +180,14 @@ test("readTaskContext combines context and implement brief", () => {
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Should we keep the legacy label?\n")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { expected_behavior: "Saving shows a toast.", actual_behavior: "Saving does nothing.", reproduction: "1. Click save", scope: "Save flow only.", non_blocking_questions: ["Should we keep the legacy label?"] } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", type: "design", clarification: { expected_behavior: "Saving shows a toast.", actual_behavior: "Saving does nothing.", reproduction: "1. Click save", scope: "Save flow only.", final_expected_effect: "Saving shows a toast.", chosen_approach: "Direct save flow fix.", final_implementation_plan: "1. Fix save path\n2. Verify toast", approval: "Approved.", non_blocking_questions: ["Should we keep the legacy label?"] } }))
   writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
   const context = readTaskContext(root, "task-a", "just-demand-coder")
-  assert.match(context, /# Context/)
-  assert.match(context, /# Execution Context/)
-  assert.match(context, /## Goal/)
+  assert.match(context, /# Execution Packet/)
+  assert.match(context, /## Scope/)
   assert.match(context, /Saving shows a toast/)
-  assert.match(context, /## Current Reality/)
-  assert.match(context, /Saving does nothing/)
   assert.match(context, /Save flow only/)
-  assert.match(context, /# Implement/)
-  assert.match(context, /Remaining Open Questions/)
+  assert.match(context, /## Implementation Targets/)
   assert.doesNotMatch(context, /# Verify/)
 })
 
@@ -202,13 +198,11 @@ test("readTaskContext includes open questions for just-demand-tester", () => {
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Is analytics coverage required?\n")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { expected_behavior: "Event fires once.", actual_behavior: "Event fires twice.", reproduction: "Submit the form once.", scope: "Analytics submit path.", non_blocking_questions: ["Is analytics coverage required?"] } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", type: "design", clarification: { expected_behavior: "Event fires once.", actual_behavior: "Event fires twice.", reproduction: "Submit the form once.", scope: "Analytics submit path.", final_expected_effect: "Event fires once.", chosen_approach: "Fix duplicate event path.", final_implementation_plan: "1. Fix event path\n2. Verify single event", validation: "Run analytics submit check.", approval: "Approved.", non_blocking_questions: ["Is analytics coverage required?"] } }))
   const context = readTaskContext(root, "task-a", "just-demand-tester")
-  assert.match(context, /# Execution Context/)
+  assert.match(context, /# Execution Packet/)
   assert.match(context, /Event fires once/)
-  assert.match(context, /Event fires twice/)
-  assert.match(context, /Remaining Open Questions/)
-  assert.match(context, /analytics coverage/)
+  assert.match(context, /## Testing Targets/)
 })
 
 test("readTaskContext injects compact execution artifact for coder and tester", () => {
@@ -236,18 +230,139 @@ test("readTaskContext injects compact execution artifact for coder and tester", 
   const testerContext = readTaskContext(root, "task-a", "just-demand-tester")
 
   for (const context of [coderContext, testerContext]) {
-    assert.match(context, /# Execution Context/)
-    assert.match(context, /## Goal/)
+    assert.match(context, /# Execution Packet/)
     assert.match(context, /User can save settings confidently/)
-    assert.match(context, /Chosen Approach/)
+    assert.match(context, /## Scope/)
     assert.match(context, /Approach A: inline save/)
-    assert.match(context, /Implementation Plan/)
-    assert.match(context, /Validation/)
+    assert.match(context, /## (Implementation Targets|Testing Targets)/)
     assert.doesNotMatch(context, /Approach Options/)
     assert.doesNotMatch(context, /Background save/)
-    assert.doesNotMatch(context, /Approval/)
-    assert.doesNotMatch(context, /User approved Approach A/)
+    assert.doesNotMatch(context, /Approval:/)
   }
+  assert.doesNotMatch(coderContext, /User approved Approach A/)
+  assert.match(testerContext, /User approved Approach A/)
+})
+
+test("readTaskContext prefers CLI rendered context when available", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nLegacy context")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nLegacy implement")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Packet-backed task",
+    type: "design",
+    status: "planning",
+    clarification: {
+      scope: "Packet scope only.",
+      final_expected_effect: "User gets packet-backed context.",
+      chosen_approach: "Use CLI rendering.",
+      final_implementation_plan: "1. Render context\n2. Inject prompt",
+      minimum_viable_knowledge: "packet = compact task context",
+      approval: "Approved.",
+    },
+  }))
+
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
+  assert.match(context, /# Execution Packet/)
+  assert.match(context, /## Implementation Targets/)
+  assert.match(context, /User gets packet-backed context/)
+  assert.doesNotMatch(context, /Legacy implement/)
+})
+
+test("readTaskContext appends packet warnings when lint emits warnings", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nLegacy context")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nLegacy implement")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Packet warning task",
+    type: "design",
+    status: "planning",
+    clarification: {
+      scope: "Packet scope only.",
+      final_expected_effect: "User gets packet-backed context.",
+      chosen_approach: "Use CLI rendering.",
+      final_implementation_plan: "1. Render context\n2. Inject prompt",
+      minimum_viable_knowledge: "packet = compact task context",
+      approval: "Approved.",
+    },
+    subtasks: [
+      { id: "sub-1", title: "Done subtask", status: "done" },
+    ],
+  }))
+
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
+  assert.match(context, /# Execution Packet/)
+  assert.match(context, /## Packet Warnings/)
+  assert.match(context, /selected subtask is already complete/i)
+})
+
+test("readTaskContext passes current_step as subtask focus into packet rendering", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nLegacy context")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nLegacy implement")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Subtask focus task",
+    type: "design",
+    status: "planning",
+    current_step: "sub-2",
+    clarification: {
+      scope: "Focused subtask scope.",
+      final_expected_effect: "User gets focused packet context.",
+      chosen_approach: "Use focused packet rendering.",
+      final_implementation_plan: "1. Select subtask\n2. Render context",
+      approval: "Approved.",
+    },
+    subtasks: [
+      { id: "sub-1", title: "Legacy task", status: "done", scope: "Old scope" },
+      { id: "sub-2", title: "Current task", status: "open", scope: "Current scope" },
+    ],
+  }))
+
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
+  assert.match(context, /## Selected Subtask/)
+  assert.match(context, /ID: sub-2/)
+  assert.match(context, /Current scope/)
+})
+
+test("readTaskContext passes impact and current_step as packet hints", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nLegacy context")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nLegacy implement")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Hint task",
+    type: "design",
+    status: "planning",
+    current_step: "Focus this work",
+    impact: ["src/feature.ts", "tests/feature.test.ts"],
+    clarification: {
+      scope: "Hint scope.",
+      final_expected_effect: "User gets hint-rich packet context.",
+      chosen_approach: "Use packet hints.",
+      final_implementation_plan: "1. Pass hints\n2. Render context",
+      approval: "Approved.",
+    },
+  }))
+
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
+  assert.match(context, /Supplemental hint: Focus this work/)
+  assert.match(context, /## Recent Diff/)
+  assert.match(context, /src\/feature\.ts/)
+  assert.match(context, /tests\/feature\.test\.ts/)
 })
 
 test("readTaskContext falls back to task clarification questions when open_questions is just a header", () => {
@@ -1847,7 +1962,7 @@ test("subagent-context injects context for supported subagent type", async () =>
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Should the old shortcut still work?\n")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { expected_behavior: "Shortcut triggers the action.", actual_behavior: "Shortcut is ignored.", reproduction: "Press the shortcut once.", scope: "Keyboard shortcut handling.", non_blocking_questions: ["Should the old shortcut still work?"] } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", type: "design", clarification: { expected_behavior: "Shortcut triggers the action.", actual_behavior: "Shortcut is ignored.", reproduction: "Press the shortcut once.", scope: "Keyboard shortcut handling.", final_expected_effect: "Shortcut triggers the action.", chosen_approach: "Patch shortcut handler.", final_implementation_plan: "1. Patch handler\n2. Verify shortcut", approval: "Approved.", non_blocking_questions: ["Should the old shortcut still work?"] } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
@@ -1856,12 +1971,10 @@ test("subagent-context injects context for supported subagent type", async () =>
   assert.match(output.args.prompt, /# Just Demand Workflow/)
   assert.match(output.args.prompt, /# Execution Rules/)
   assert.match(output.args.prompt, /Do not call the Task tool\./)
-  assert.match(output.args.prompt, /# Context/)
-  assert.match(output.args.prompt, /# Execution Context/)
-  assert.match(output.args.prompt, /## Goal/)
+  assert.match(output.args.prompt, /# Execution Packet/)
+  assert.match(output.args.prompt, /## Scope/)
   assert.match(output.args.prompt, /Shortcut triggers the action/)
-  assert.match(output.args.prompt, /# Implement/)
-  assert.match(output.args.prompt, /Remaining Open Questions/)
+  assert.match(output.args.prompt, /## Implementation Targets/)
   assert.match(output.args.prompt, /# Requested Work/)
   assert.match(output.args.prompt, /Do the work/)
 })

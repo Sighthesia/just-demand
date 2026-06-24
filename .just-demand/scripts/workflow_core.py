@@ -872,6 +872,356 @@ def get_missing_execution_fields(task: dict[str, Any]) -> list[str]:
     return missing
 
 
+def _coerce_text_items(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [line.strip() for line in value.splitlines() if line.strip()]
+    if isinstance(value, (list, tuple, set)):
+        items = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                items.append(text)
+        return items
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _normalize_packet_hints(hints: dict[str, Any] | None) -> dict[str, list[str] | str]:
+    hints = hints or {}
+    normalized: dict[str, list[str] | str] = {
+        "recent_diff": _coerce_text_items(hints.get("recent_diff")),
+        "recent_commands": _coerce_text_items(hints.get("recent_commands")),
+        "recent_tests": _coerce_text_items(hints.get("recent_tests")),
+        "background_notes": _coerce_text_items(hints.get("background_notes")),
+        "focus": str(hints.get("focus", "") or "").strip(),
+    }
+    return normalized
+
+
+def _normalize_subtasks(raw_subtasks: Any) -> list[dict[str, Any]]:
+    subtasks: list[dict[str, Any]] = []
+    if not isinstance(raw_subtasks, list):
+        return subtasks
+
+    for index, item in enumerate(raw_subtasks):
+        if isinstance(item, dict):
+            title = str(
+                item.get("title")
+                or item.get("name")
+                or item.get("goal")
+                or item.get("summary")
+                or ""
+            ).strip()
+            subtasks.append(
+                {
+                    "id": str(item.get("id") or item.get("subtask_id") or f"subtask-{index + 1}"),
+                    "title": title,
+                    "status": str(item.get("status") or "unknown"),
+                    "role": str(item.get("role") or item.get("owner_role") or "").strip(),
+                    "scope": str(item.get("scope") or item.get("context") or item.get("description") or "").strip(),
+                    "notes": str(item.get("notes") or item.get("details") or "").strip(),
+                }
+            )
+        else:
+            title = str(item).strip()
+            subtasks.append(
+                {
+                    "id": f"subtask-{index + 1}",
+                    "title": title,
+                    "status": "unknown",
+                    "role": "",
+                    "scope": "",
+                    "notes": "",
+                }
+            )
+    return subtasks
+
+
+def _select_packet_subtask(subtasks: list[dict[str, Any]], subtask_id: str | None) -> dict[str, Any] | None:
+    if subtask_id:
+        for subtask in subtasks:
+            if subtask.get("id") == subtask_id:
+                return subtask
+        return None
+
+    for subtask in subtasks:
+        if str(subtask.get("status") or "").lower() not in {"done", "complete", "completed"}:
+            return subtask
+    return subtasks[0] if subtasks else None
+
+
+def lint_execution_packet(task: dict[str, Any], packet: dict[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    if not task_is_ready_for_execution(task):
+        for field in get_missing_execution_fields(task):
+            findings.append(
+                {
+                    "code": "missing_execution_field",
+                    "severity": "error",
+                    "message": f"Task is missing required execution field: {field}",
+                    "field": field,
+                }
+            )
+
+    requested_subtask_id = packet.get("requested_subtask_id")
+    selected_subtask = packet.get("selected_subtask")
+    subtasks = packet.get("subtasks", []) or []
+    if requested_subtask_id and not selected_subtask:
+        findings.append(
+            {
+                "code": "subtask_not_found",
+                "severity": "error",
+                "message": f"Requested subtask '{requested_subtask_id}' was not found on the task.",
+                "subtask_id": requested_subtask_id,
+            }
+        )
+    if selected_subtask and str(selected_subtask.get("status") or "").lower() in {"done", "complete", "completed"}:
+        findings.append(
+            {
+                "code": "completed_subtask_selected",
+                "severity": "warning",
+                "message": "The selected subtask is already complete.",
+                "subtask_id": selected_subtask.get("id"),
+            }
+        )
+
+    dynamic_hints = packet.get("dynamic_hints", {}) or {}
+    background_notes = dynamic_hints.get("background_notes", []) or []
+    recent_diff = dynamic_hints.get("recent_diff", []) or []
+    recent_commands = dynamic_hints.get("recent_commands", []) or []
+    recent_tests = dynamic_hints.get("recent_tests", []) or []
+
+    background_chars = sum(len(item) for item in background_notes)
+    if len(background_notes) > 4 or background_chars > 900:
+        findings.append(
+            {
+                "code": "background_overweight",
+                "severity": "warning",
+                "message": "Background notes are too large for a compact execution packet.",
+                "background_count": len(background_notes),
+                "background_chars": background_chars,
+            }
+        )
+
+    if len(recent_diff) > 8:
+        findings.append(
+            {
+                "code": "diff_overweight",
+                "severity": "warning",
+                "message": "Recent diff context is too large for a compact execution packet.",
+                "count": len(recent_diff),
+            }
+        )
+
+    if len(recent_commands) > 6:
+        findings.append(
+            {
+                "code": "command_overweight",
+                "severity": "warning",
+                "message": "Recent command context is too large for a compact execution packet.",
+                "count": len(recent_commands),
+            }
+        )
+
+    if len(recent_tests) > 6:
+        findings.append(
+            {
+                "code": "test_overweight",
+                "severity": "warning",
+                "message": "Recent test context is too large for a compact execution packet.",
+                "count": len(recent_tests),
+            }
+        )
+
+    if len(subtasks) > 1 and selected_subtask is None:
+        findings.append(
+            {
+                "code": "subtask_missing_focus",
+                "severity": "warning",
+                "message": "Task defines subtasks, but no focused subtask was selected for the packet.",
+                "count": len(subtasks),
+            }
+        )
+
+    return findings
+
+
+def _task_packet_focus(task: dict[str, Any], role: str, selected_subtask: dict[str, Any] | None, hints: dict[str, Any]) -> str:
+    clarification = task.get("clarification", {}) or {}
+    focus_parts = [
+        str(clarification.get("final_expected_effect", "") or "").strip(),
+        str(clarification.get("chosen_approach", "") or "").strip(),
+        str(clarification.get("final_implementation_plan", "") or "").strip(),
+    ]
+    if selected_subtask:
+        focus_parts.append(str(selected_subtask.get("title") or selected_subtask.get("id") or "").strip())
+        focus_parts.append(str(selected_subtask.get("scope") or "").strip())
+
+    if role == "tester":
+        focus_parts.append(str(clarification.get("validation", "") or "").strip())
+        focus_parts.append(str(clarification.get("validation_card", "") or "").strip())
+    elif role == "advisor":
+        focus_parts.append(str(clarification.get("decision_card", "") or "").strip())
+        focus_parts.append(str(clarification.get("minimum_viable_knowledge", "") or "").strip())
+    elif role == "researcher":
+        focus_parts.append(str(clarification.get("current_understanding", "") or "").strip())
+        focus_parts.append(str(clarification.get("approach_options", "") or "").strip())
+
+    ordered = [candidate for candidate in focus_parts if candidate]
+    explicit = ordered or [str(task.get("goal", "") or "").strip()]
+    supplemental = str(hints.get("focus", "") or "").strip()
+    if supplemental:
+        explicit.append(f"Supplemental hint: {supplemental}")
+    return " | ".join([candidate for candidate in explicit if candidate])
+
+
+def _packet_role_sections(role: str, task: dict[str, Any], packet: dict[str, Any]) -> list[tuple[str, list[str]]]:
+    clarification = task.get("clarification", {}) or {}
+    sections: list[tuple[str, list[str]]] = [
+        ("Task", [
+            f"ID: {packet['task_id']}",
+            f"Title: {packet['task_title']}",
+            f"Type: {packet['task_type']}",
+            f"Status: {packet['task_status']}",
+            f"Current Step: {packet['current_step']}",
+        ]),
+        ("Focus", [packet["focus"]] if packet.get("focus") else []),
+        ("Scope", [packet["task_scope"]] if packet.get("task_scope") else []),
+    ]
+
+    selected_subtask = packet.get("selected_subtask")
+    if selected_subtask:
+        subtask_lines = [
+            f"ID: {selected_subtask.get('id', '')}",
+            f"Title: {selected_subtask.get('title', '')}",
+            f"Status: {selected_subtask.get('status', '')}",
+        ]
+        if selected_subtask.get("role"):
+            subtask_lines.append(f"Role: {selected_subtask['role']}")
+        if selected_subtask.get("scope"):
+            subtask_lines.append(f"Scope: {selected_subtask['scope']}")
+        if selected_subtask.get("notes"):
+            subtask_lines.append(f"Notes: {selected_subtask['notes']}")
+        sections.append(("Selected Subtask", subtask_lines))
+
+    if role == "tester":
+        sections.append(("Testing Targets", [
+            clarification.get("validation", "") or "",
+            clarification.get("validation_card", "") or "",
+            clarification.get("expected_behavior", "") or "",
+            clarification.get("approval", "") or "",
+        ]))
+    elif role == "advisor":
+        sections.append(("Decision Targets", [
+            clarification.get("decision_card", "") or "",
+            clarification.get("recommended_default", "") or "",
+            clarification.get("option_matrix", "") or "",
+            clarification.get("escalation_reason", "") or "",
+        ]))
+    elif role == "researcher":
+        sections.append(("Research Targets", [
+            clarification.get("current_understanding", "") or "",
+            clarification.get("approach_options", "") or "",
+            clarification.get("minimum_viable_knowledge", "") or "",
+        ]))
+    else:
+        sections.append(("Implementation Targets", [
+            clarification.get("chosen_approach", "") or "",
+            clarification.get("final_implementation_plan", "") or "",
+            clarification.get("minimum_viable_knowledge", "") or "",
+        ]))
+
+    return sections
+
+
+def build_execution_packet(
+    root: Path,
+    task_id: str,
+    *,
+    role: str = "coder",
+    subtask_id: str | None = None,
+    hints: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ensure_workspace(root)
+    tpath = task_path(root, task_id) / "task.json"
+    if not tpath.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(tpath)
+    normalized_hints = _normalize_packet_hints(hints)
+    subtasks = _normalize_subtasks(task.get("subtasks", []))
+    selected_subtask = _select_packet_subtask(subtasks, subtask_id)
+    packet = {
+        "schema_version": SCHEMA_VERSION,
+        "task_id": task_id,
+        "task_title": str(task.get("title", "") or ""),
+        "task_type": str(task.get("type", "") or ""),
+        "task_status": str(task.get("status", "") or ""),
+        "current_step": str(task.get("current_step", "") or ""),
+        "role": role,
+        "task": task,
+        "task_scope": str((task.get("clarification", {}) or {}).get("scope", "") or "").strip(),
+        "task_goal": str(task.get("goal", "") or "").strip(),
+        "focus": _task_packet_focus(task, role, selected_subtask, normalized_hints),
+        "subtasks": subtasks,
+        "requested_subtask_id": subtask_id,
+        "selected_subtask": selected_subtask,
+        "dynamic_hints": normalized_hints,
+    }
+    packet["role_sections"] = _packet_role_sections(role, task, packet)
+    packet["lint"] = lint_execution_packet(task, packet)
+    packet["ready"] = len([item for item in packet["lint"] if item.get("severity") == "error"]) == 0
+    return packet
+
+
+def render_execution_packet_markdown(packet: dict[str, Any]) -> str:
+    lines = [
+        "# Execution Packet",
+        "",
+        f"Role: {packet.get('role', '')}",
+        f"Task: {packet.get('task_id', '')}",
+        f"Status: {packet.get('task_status', '')}",
+        f"Current Step: {packet.get('current_step', '')}",
+        "",
+    ]
+
+    for heading, body_lines in packet.get("role_sections", []):
+        lines.append(f"## {heading}")
+        if body_lines:
+            for body_line in body_lines:
+                if body_line:
+                    lines.append(body_line)
+        lines.append("")
+
+    hints = packet.get("dynamic_hints", {}) or {}
+    for label, key in [
+        ("Recent Diff", "recent_diff"),
+        ("Recent Commands", "recent_commands"),
+        ("Recent Tests", "recent_tests"),
+        ("Background Notes", "background_notes"),
+    ]:
+        items = hints.get(key, []) or []
+        if not items:
+            continue
+        lines.append(f"## {label}")
+        for item in items:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    lint = packet.get("lint", []) or []
+    if lint:
+        lines.append("## Lint")
+        for finding in lint:
+            severity = str(finding.get("severity", "warning")).upper()
+            message = str(finding.get("message", "")).strip()
+            lines.append(f"- [{severity}] {message}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 # ---------------------------------------------------------------------------
 # Readiness diagnostics
 # ---------------------------------------------------------------------------
