@@ -205,6 +205,19 @@ Validation card:
 - User action: <none / review / choose / approve>
 ```
 
+For UI, animation, layout, reveal, overflow, clipping, masking, or visual quality work, the final report must include a storyboard final card before routine engineering detail. The card explains the approved visible lifecycle, not the implementation mechanics:
+
+```text
+Storyboard card:
+- Opening: <what the user sees in the first frame>
+- During Transition: <direction, fade/slide relationship, order, cadence, curve/feel>
+- After Open: <steady state and whether it matches the prior UI>
+- Interrupt Behavior: <typing, navigation, close, and page-switch behavior>
+- Anti-Outcomes: <flash, jank, clipping, reflow, text jump, repeated replay, or other rejected effects>
+```
+
+If any storyboard field is unknown for UI/animation work, do not claim the result is fully verified. Route back to clarification or report the missing field as residual risk.
+
 When the verification work is coming from `just-demand-tester`, preserve the tester's short report shape and use it as the evidence record for main-agent closeout. The tester report should still start with the user-visible effect/result, not with command transcripts:
 
 - **Findings**: what passed or failed.

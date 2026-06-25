@@ -1925,6 +1925,42 @@ class WorkflowCoreTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Final Expected Effect"):
                 promote_to_task(root, intake["intake_id"], "Impl work", "Implement feature", "implementation", ["It works"])
 
+    def test_real_launcher_stagger_request_requires_visible_lifecycle_golden_case(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_request = "试实现打开启动器（包括剪切板）时，列表项使用stagger效果排列淡入展现"
+            intake = create_intake(root, "Launcher stagger", raw_request, "session-main")
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            set_intake_scope(root, intake["intake_id"], "Launcher and clipboard list reveal behavior only.")
+            set_intake_design_artifact(
+                root,
+                intake["intake_id"],
+                final_expected_effect="Launcher and clipboard rows reveal with staggered fade-in.",
+                chosen_approach="Use visible lifecycle clarification before implementation.",
+                final_implementation_plan="1. Confirm lifecycle\n2. Implement reveal\n3. Verify interaction",
+                validation="Verify opening, transition, steady state, and interrupts.",
+                approval="Approved by user.",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "Opening.*During Transition.*After Open.*Interrupt Behavior.*Anti-Outcomes"):
+                promote_to_task(root, intake["intake_id"], "Launcher stagger", raw_request, "implementation", ["Rows reveal correctly"])
+
+            replace_intake_section(intake_path, "Opening", "First frame shows the launcher shell with stable row positions.")
+            replace_intake_section(intake_path, "During Transition", "Visible rows fade in with staggered timing from below.")
+            replace_intake_section(intake_path, "After Open", "The steady list matches the existing launcher and clipboard UI.")
+            replace_intake_section(intake_path, "Interrupt Behavior", "Typing, keyboard navigation, closing, or switching pages cancels or completes the reveal without replay.")
+            replace_intake_section(intake_path, "Anti-Outcomes", "No direct implementation without clarification, flash, text jump, clipping, layout reflow, or repeated replay.")
+
+            promoted = promote_to_task(root, intake["intake_id"], "Launcher stagger", raw_request, "implementation", ["Rows reveal correctly"])
+            task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
+            clarification = task["clarification"]
+            self.assertTrue(clarification["needs_ui_visible_lifecycle_clarification"])
+            self.assertIn("stable row positions", clarification["opening"])
+            self.assertIn("staggered timing", clarification["during_transition"])
+            self.assertIn("existing launcher", clarification["after_open"])
+            self.assertIn("keyboard navigation", clarification["interrupt_behavior"])
+            self.assertIn("No direct implementation", clarification["anti_outcomes"])
+
     def test_promote_allows_bugfix_without_design_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
