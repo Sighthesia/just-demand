@@ -7,6 +7,8 @@ description: Use after implementation, after just-demand-tester output, when ver
 
 Verify outcomes against the task brief and active validation revision.
 
+Canonical workflow spec: `docs/workflow-spec.md`. Keep this skill focused on verification closeout, checkpoint semantics, and archive behavior.
+
 ## Core Rules
 
 - No completion claim without fresh verification evidence.

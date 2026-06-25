@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import shlex
 import sys
 from pathlib import Path
@@ -55,6 +56,7 @@ COMMANDS = {
     "resume",
     "select-task",
     "show-readiness",
+    "smoke",
     "start-verification",
     "uninstall",
     "update",
@@ -81,6 +83,7 @@ SUMMARY_COMMANDS = {
     "resume",
     "select-task",
     "show-readiness",
+    "smoke",
     "start-verification",
     "update-intake-section",
     "complete-verification",
@@ -230,6 +233,13 @@ def print_structured_summary(command: str, result: dict[str, Any], stream=None) 
         ])
         if command == "archive-task":
             lines.append(f"Archive path: {result.get('archive_path', '')}")
+    elif command == "smoke":
+        checks = result.get("checks", []) or []
+        lines.append("Result: smoke validation passed")
+        if checks:
+            lines.append("Checks:")
+            for check in checks:
+                lines.append(f"  - {check.get('name', '')}")
     else:
         lines.append(f"Result: {result.get('status', 'success')}")
         for key, value in result.items():
@@ -264,6 +274,42 @@ def print_project_invocation(project_root: Path | None, stream=None) -> None:
     out.write("\nProject invocation:\n")
     out.write(format_project_invocation(project_root) + "\n")
     out.write("  (omit [project-dir] to use the current directory)\n")
+
+
+def smoke_checks() -> list[tuple[str, list[str]]]:
+    repo = repo_root()
+    task_cli = str(repo / "just-demand")
+    return [
+        ("workflow core tests", [sys.executable, "-m", "unittest", "tests.just_demand.test_workflow_core", "-v"]),
+        ("install tests", [sys.executable, "-m", "unittest", "tests.just_demand.test_install", "-v"]),
+        ("OpenCode plugin tests", ["node", "--test", "tests/just_demand/test_opencode_plugins.mjs"]),
+        ("package JSON", [sys.executable, "-m", "json.tool", ".opencode/package.json"]),
+        ("CLI help", [sys.executable, task_cli, "--help"]),
+        ("project CLI help", [sys.executable, task_cli, ".", "--help"]),
+    ]
+
+
+def run_smoke_checks() -> dict[str, Any]:
+    repo = repo_root()
+    checks: list[dict[str, Any]] = []
+    for name, command in smoke_checks():
+        completed = subprocess.run(command, cwd=repo, text=True, capture_output=True)
+        check_result = {
+            "name": name,
+            "command": command,
+            "cwd": str(repo),
+            "returncode": completed.returncode,
+        }
+        checks.append(check_result)
+        if completed.returncode != 0:
+            raise RuntimeError(
+                "Smoke check failed: "
+                f"{name} (rc={completed.returncode})\n"
+                f"Command: {' '.join(command)}\n"
+                f"stdout:\n{completed.stdout or ''}\n"
+                f"stderr:\n{completed.stderr or ''}"
+            )
+    return {"status": "success", "checks": checks}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -375,6 +421,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     show_readiness = sub.add_parser("show-readiness", help="Show readiness diagnostics for a task")
     show_readiness.add_argument("task_id", help="Task ID to check readiness for")
+
+    sub.add_parser("smoke", help="Run the repo smoke validation checks")
 
     sub.add_parser("where", help="Print the global CLI path and invocation example")
 
@@ -591,6 +639,8 @@ def execute_command(root: Path, args: list[str]) -> int:
                 result = uninstall_opencode_global(config_root)
         elif parsed.command == "show-readiness":
             result = show_task_readiness(root, parsed.task_id)
+        elif parsed.command == "smoke":
+            result = run_smoke_checks()
         else:
             raise RuntimeError(f"Unsupported command: {parsed.command}")
     except Exception as exc:
@@ -626,6 +676,7 @@ def show_help():
     print("  cleanup-task <id>                 Clean up completed task")
     print("  update-clarification <id>          Update task clarification fields (JSON or ## markdown file via --from-file)")
     print("  show-readiness <id>                Show task readiness diagnostics and recovery guidance")
+    print("  smoke                             Run repo smoke validation checks")
     print("  init                              Initialize project")
     print("  doctor                            Check installation status")
     print("  where                             Print global CLI invocation example")

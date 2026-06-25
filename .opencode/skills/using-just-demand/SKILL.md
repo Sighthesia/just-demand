@@ -38,6 +38,8 @@ Skills are best-effort; plugins are the real hard gate. When plugins are unavail
 
 Use this repository as an OpenCode-first local agent workflow runtime.
 
+Canonical workflow spec: `docs/workflow-spec.md`. Keep this skill focused on routing, fallback behavior, and main-agent identity.
+
 ## First Move
 
 Treat every turn as a routing reset. If the turn proposes concrete work, bug fixing, mismatch analysis, or correction feedback, load `socratic-clarification` first, then continue with the workflow route below.

@@ -7,6 +7,8 @@ description: Use when the user proposes a new goal, feature, bugfix, design, ref
 
 Clarify the user's need before exposing workflow mechanics.
 
+Canonical workflow spec: `docs/workflow-spec.md`. Keep intake focused on shaping clarified work into a promotable task.
+
 ## Core Rules
 
 - Focus on the user's described outcome, expected behavior, anti-outcomes, constraints, and tradeoffs.

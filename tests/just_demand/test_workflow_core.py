@@ -875,6 +875,53 @@ class WorkflowCoreTests(unittest.TestCase):
         self.assertIn("just-demand [project-dir] --help", result.stdout)
         self.assertEqual(result.stderr, "")
 
+    def test_cli_help_lists_smoke_command(self):
+        import task as task_cli
+
+        help_text = task_cli.build_parser().format_help()
+        self.assertIn("smoke", help_text)
+        self.assertIn("Run the repo smoke validation checks", help_text)
+
+    def test_smoke_command_runs_expected_checks(self):
+        import task as task_cli
+
+        calls = []
+
+        class FakeCompletedProcess:
+            def __init__(self, returncode: int = 0):
+                self.returncode = returncode
+                self.stdout = ""
+                self.stderr = ""
+
+        def fake_run(command, cwd=None, text=None, capture_output=None):
+            calls.append({
+                "command": tuple(command),
+                "cwd": Path(cwd) if cwd is not None else None,
+                "text": text,
+                "capture_output": capture_output,
+            })
+            return FakeCompletedProcess()
+
+        original_run = task_cli.subprocess.run
+        task_cli.subprocess.run = fake_run
+        try:
+            result = task_cli.execute_command(REPO_ROOT, ["smoke"])
+        finally:
+            task_cli.subprocess.run = original_run
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(calls[0]["command"], (sys.executable, "-m", "unittest", "tests.just_demand.test_workflow_core", "-v"))
+        self.assertEqual(calls[1]["command"], (sys.executable, "-m", "unittest", "tests.just_demand.test_install", "-v"))
+        self.assertEqual(calls[2]["command"], ("node", "--test", "tests/just_demand/test_opencode_plugins.mjs"))
+        self.assertEqual(calls[3]["command"], (sys.executable, "-m", "json.tool", ".opencode/package.json"))
+        self.assertEqual(calls[4]["command"], (sys.executable, str(REPO_ROOT / "just-demand"), "--help"))
+        self.assertEqual(calls[5]["command"], (sys.executable, str(REPO_ROOT / "just-demand"), ".", "--help"))
+        for call in calls:
+            self.assertEqual(call["cwd"], REPO_ROOT.resolve())
+            self.assertTrue(call["text"])
+            self.assertTrue(call["capture_output"])
+
     def test_cli_promote_reports_readiness_errors(self):
         import subprocess
 
