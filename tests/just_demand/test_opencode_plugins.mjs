@@ -26,6 +26,8 @@ import {
   looksLikeBashWriteCommand,
   readJson,
   readTaskContext,
+  getMissingExecutionGateFields,
+  taskIsReadyForExecution,
 } from "../../.opencode/plugins/just-demand-lib.js"
 import sessionStartFactory from "../../.opencode/plugins/just-demand-session-start.js"
 import stateFactory, {
@@ -467,7 +469,7 @@ test("write tool rule table identifies write-like tools and ignores read-only ba
   )
   assert.equal(
     buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-a", missing: ["Scope", "Approval"] }),
-    'Blocked apply_patch: active task task-a is not ready for execution yet. Missing or incomplete fields: Scope, Approval. Use `just-demand . update-clarification task-a --field <name>="<value>"` or `--from-file <path>` to fill pending fields.',
+    'Blocked apply_patch: active task task-a is not ready for execution yet. Missing or incomplete fields: Scope, Approval. If this is UI, animation, or reveal work, fill Opening, During Transition, After Open, Interrupt Behavior, and Anti-Outcomes first. Use `just-demand . update-clarification task-a --field <name>="<value>"` or `--from-file <path>` to fill pending fields.',
   )
 })
 
@@ -1545,6 +1547,43 @@ test("state appends premise-check reminder for narrow frame-check turns and dedu
   assert.match(second.parts[0].text, /\[workflow-state\]/)
 })
 
+test("execution gate requires visible lifecycle fields for UI animation tasks", () => {
+  const task = {
+    id: "task-ui",
+    title: "Animate launcher rows",
+    goal: "Make the list reveal feel smooth.",
+    type: "implementation",
+    clarification: {
+      scope: "Launcher rows only.",
+      blocking_questions: [],
+      final_expected_effect: "Rows reveal with the launcher.",
+      chosen_approach: "Staggered fade and slide.",
+      final_implementation_plan: "1. Clarify lifecycle\n2. Implement animation",
+      approval: "Approved.",
+      opening: "First frame shows the launcher shell with the first row barely visible.",
+      during_transition: "Rows fade up in staggered order from the launcher anchor.",
+      after_open: "The steady list matches the existing layout.",
+      interrupt_behavior: "Typing or closing cancels the animation cleanly.",
+      anti_outcomes: "No flash, clipping, or repeated replay.",
+      needs_ui_visible_lifecycle_clarification: true,
+    },
+  }
+
+  assert.equal(taskIsReadyForExecution(task), true)
+  assert.deepEqual(getMissingExecutionGateFields(task), [])
+
+  task.clarification.opening = ""
+  const missing = getMissingExecutionGateFields(task)
+  assert.ok(missing.includes("Opening"))
+  assert.equal(taskIsReadyForExecution(task), false)
+})
+
+test("execution gate error points UI tasks to visible lifecycle fields", () => {
+  const error = buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-ui", missing: ["Opening", "Anti-Outcomes"] })
+  assert.match(error, /UI, animation, or reveal work/i)
+  assert.match(error, /Opening, During Transition, After Open, Interrupt Behavior, and Anti-Outcomes/i)
+})
+
 test("state blocks obvious execution-needed replies on unrouted active tasks", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -1920,6 +1959,24 @@ test("state resets after three same-topic turns", async () => {
   assert.match(third.parts[0].text, /Reset the problem model/i)
   assert.ok(fourth.parts[0].text.includes("Same topic alpha beta gamma"))
   assert.match(fourth.parts[0].text, /\[workflow-state\]/)
+})
+
+test("state reset reminder includes UI animation visible lifecycle recovery", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  mkdirSync(join(root, ".just-demand", "state", "active", "task-a"), { recursive: true })
+  const plugin = await stateFactory({ directory: root })
+  const first = { parts: [{ type: "text", text: "Animation reveal stagger rows subtle" }] }
+  const second = { parts: [{ type: "text", text: "Animation reveal stagger rows subtle" }] }
+  const third = { parts: [{ type: "text", text: "Animation reveal stagger rows subtle" }] }
+
+  await plugin["chat.message"]({ sessionID: "same-topic-ui" }, first)
+  await plugin["chat.message"]({ sessionID: "same-topic-ui" }, second)
+  await plugin["chat.message"]({ sessionID: "same-topic-ui" }, third)
+
+  assert.match(third.parts[0].text, /visible lifecycle/i)
+  assert.match(third.parts[0].text, /opening, during transition, after open/i)
+  assert.match(third.parts[0].text, /interruption behavior/i)
 })
 
 test("state asks retry or skip after subagent becomes unavailable", async () => {

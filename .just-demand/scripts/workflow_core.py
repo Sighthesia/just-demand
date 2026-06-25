@@ -232,6 +232,11 @@ def default_task_json(
             "actual_behavior": "",
             "reproduction": "",
             "scope": "",
+            "opening": "",
+            "during_transition": "",
+            "after_open": "",
+            "interrupt_behavior": "",
+            "anti_outcomes": "",
             "decision_card": "",
             "user_action": "",
             "recommended_default": "",
@@ -275,6 +280,11 @@ INTAKE_SECTION_ORDER = [
     "Actual Behavior",
     "Reproduction",
     "Scope",
+    "Opening",
+    "During Transition",
+    "After Open",
+    "Interrupt Behavior",
+    "Anti-Outcomes",
     "Anti-Outcome",
     "Decision Card",
     "User Action",
@@ -320,6 +330,39 @@ def parse_question_block(text: str) -> list[str]:
         if item:
             questions.append(item)
     return questions
+
+
+UI_VISIBLE_LIFECYCLE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\b(ui|ux|animation|animated|animate|motion|reveal|stagger|fade|slide)\b",
+        r"\b(动效|动画|淡入|淡出|展开|收起|错峰|闪烁|抖动|过渡|首帧|打断|结束状态)\b",
+    ]
+]
+
+
+def _looks_like_ui_visible_lifecycle_work(text: str) -> bool:
+    value = str(text or "")
+    if not value.strip():
+        return False
+    return any(pattern.search(value) for pattern in UI_VISIBLE_LIFECYCLE_PATTERNS)
+
+
+def intake_needs_ui_visible_lifecycle_clarification(task_type: str, raw_request: str, sections: dict[str, str]) -> bool:
+    task_type = task_type.strip().lower()
+    if task_type in {"ui", "ux"}:
+        return True
+
+    signal_text = "\n".join(
+        [
+            raw_request,
+            sections.get("Current Understanding", ""),
+            sections.get("Expected Outcome", ""),
+            sections.get("Scope", ""),
+            sections.get("Final Expected Effect", ""),
+        ]
+    )
+    return _looks_like_ui_visible_lifecycle_work(signal_text)
 
 
 def read_intake_sections(root: Path, intake_id: str) -> dict[str, str]:
@@ -368,6 +411,11 @@ def build_clarification_payload(root: Path, intake_id: str, task_type: str) -> d
         "actual_behavior": sections.get("Actual Behavior", ""),
         "reproduction": sections.get("Reproduction", ""),
         "scope": sections.get("Scope", ""),
+        "opening": sections.get("Opening", ""),
+        "during_transition": sections.get("During Transition", ""),
+        "after_open": sections.get("After Open", ""),
+        "interrupt_behavior": sections.get("Interrupt Behavior", ""),
+        "anti_outcomes": sections.get("Anti-Outcomes", sections.get("Anti-Outcome", "")),
         "decision_card": sections.get("Decision Card", ""),
         "user_action": sections.get("User Action", ""),
         "recommended_default": sections.get("Recommended Default", ""),
@@ -386,6 +434,7 @@ def build_clarification_payload(root: Path, intake_id: str, task_type: str) -> d
         "blocking_questions": blocking_questions,
         "non_blocking_questions": non_blocking_questions,
         "needs_bug_clarification": intake_needs_bug_clarification(task_type, raw_request, sections),
+        "needs_ui_visible_lifecycle_clarification": intake_needs_ui_visible_lifecycle_clarification(task_type, raw_request, sections),
     }
 
 
@@ -398,6 +447,12 @@ MARKDOWN_TO_CLARIFICATION_FIELD: dict[str, str] = {
     "Actual Behavior": "actual_behavior",
     "Reproduction": "reproduction",
     "Scope": "scope",
+    "Opening": "opening",
+    "During Transition": "during_transition",
+    "After Open": "after_open",
+    "Interrupt Behavior": "interrupt_behavior",
+    "Anti-Outcomes": "anti_outcomes",
+    "Anti-Outcome": "anti_outcomes",
     "Decision Card": "decision_card",
     "User Action": "user_action",
     "Recommended Default": "recommended_default",
@@ -469,6 +524,19 @@ def intake_readiness_errors(root: Path, intake_id: str, task_type: str) -> list[
             "Scope is required before promotion. "
             "Prefer `just-demand . update-intake-section <intake-id> \"Scope\" \"<value>\"` to fill it."
         )
+    if clarification.get("needs_ui_visible_lifecycle_clarification"):
+        for field_name, heading in [
+            ("opening", "Opening"),
+            ("during_transition", "During Transition"),
+            ("after_open", "After Open"),
+            ("interrupt_behavior", "Interrupt Behavior"),
+            ("anti_outcomes", "Anti-Outcomes"),
+        ]:
+            if not str(clarification.get(field_name, "") or "").strip():
+                errors.append(
+                    f"{heading} is required for UI, animation, or reveal work before promotion. "
+                    f"Prefer `just-demand . update-intake-section <intake-id> \"{heading}\" \"<value>\"` to fill it."
+                )
     if clarification["needs_bug_clarification"]:
         if not clarification["expected_behavior"].strip():
             errors.append(
@@ -713,6 +781,16 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
                 "",
                 "## Scope",
                 "",
+                "## Opening",
+                "",
+                "## During Transition",
+                "",
+                "## After Open",
+                "",
+                "## Interrupt Behavior",
+                "",
+                "## Anti-Outcomes",
+                "",
                 "## Anti-Outcome",
                 "",
                 "## Decision Card",
@@ -827,6 +905,31 @@ def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
         if not str(clarification.get("approval", "") or "").strip():
             missing.append("Approval")
 
+    needs_ui = bool(clarification.get("needs_ui_visible_lifecycle_clarification", False))
+    if not needs_ui:
+        task_text = "\n".join(
+            [
+                str(task.get("title", "") or ""),
+                str(task.get("goal", "") or ""),
+                str(clarification.get("current_understanding", "") or ""),
+                str(clarification.get("scope", "") or ""),
+                str(clarification.get("final_expected_effect", "") or ""),
+            ]
+        )
+        needs_ui = _looks_like_ui_visible_lifecycle_work(task_text)
+
+    if needs_ui:
+        if not str(clarification.get("opening", "") or "").strip():
+            missing.append("Opening")
+        if not str(clarification.get("during_transition", "") or "").strip():
+            missing.append("During Transition")
+        if not str(clarification.get("after_open", "") or "").strip():
+            missing.append("After Open")
+        if not str(clarification.get("interrupt_behavior", "") or "").strip():
+            missing.append("Interrupt Behavior")
+        if not str(clarification.get("anti_outcomes", "") or "").strip():
+            missing.append("Anti-Outcomes")
+
     return len(missing) == 0
 
 
@@ -868,6 +971,31 @@ def get_missing_execution_fields(task: dict[str, Any]) -> list[str]:
             missing.append("Final Implementation Plan")
         if not str(clarification.get("approval", "") or "").strip():
             missing.append("Approval")
+
+    needs_ui = bool(clarification.get("needs_ui_visible_lifecycle_clarification", False))
+    if not needs_ui:
+        task_text = "\n".join(
+            [
+                str(task.get("title", "") or ""),
+                str(task.get("goal", "") or ""),
+                str(clarification.get("current_understanding", "") or ""),
+                str(clarification.get("scope", "") or ""),
+                str(clarification.get("final_expected_effect", "") or ""),
+            ]
+        )
+        needs_ui = _looks_like_ui_visible_lifecycle_work(task_text)
+
+    if needs_ui:
+        if not str(clarification.get("opening", "") or "").strip():
+            missing.append("Opening")
+        if not str(clarification.get("during_transition", "") or "").strip():
+            missing.append("During Transition")
+        if not str(clarification.get("after_open", "") or "").strip():
+            missing.append("After Open")
+        if not str(clarification.get("interrupt_behavior", "") or "").strip():
+            missing.append("Interrupt Behavior")
+        if not str(clarification.get("anti_outcomes", "") or "").strip():
+            missing.append("Anti-Outcomes")
 
     return missing
 
@@ -1340,6 +1468,11 @@ CLARIFICATION_UPDATE_FIELDS = frozenset({
     "actual_behavior",
     "reproduction",
     "scope",
+    "opening",
+    "during_transition",
+    "after_open",
+    "interrupt_behavior",
+    "anti_outcomes",
     "decision_card",
     "user_action",
     "recommended_default",

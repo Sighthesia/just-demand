@@ -93,6 +93,18 @@ Next best move: whether to continue comparing options or change the frame.
 
 Use this reset when the user keeps providing new samples, when the conversation is converging on finer detail without stronger evidence, or when a user-provided explanation is becoming the default without being re-tested.
 
+If the topic is UI, layout, animation, reveal, overflow, clipping, masking, or visual quality, the reset must also recover the visible-effect contract because context compression often drops the earlier approved feel. Add these fields before another fix:
+
+```text
+Visible lifecycle: opening -> during transition -> after open.
+Motion decisions still approved: direction, cadence, curve/feel, affected items.
+Interruption behavior: typing, navigation, close, page switch.
+Anti-outcomes: flash, jank, clipping, reflow, text jump, repeated replay.
+Next decision: keep the approved feel, or re-open the approach choice.
+```
+
+Do not continue patching a UI/animation issue after 3+ turns unless this reset has been stated. This catches long conversations and compressed context where the workflow banner survives but the detailed clarification contract has faded.
+
 ## Operating Model
 
 - User owns goals, preferences, constraints, and final approval.

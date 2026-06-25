@@ -22,6 +22,17 @@ const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
   "architecture",
 ])
 const BUG_OR_MISMATCH_TASK_TYPES = new Set(["bug", "bugfix", "fix", "incident"])
+const UI_VISIBLE_LIFECYCLE_FIELDS = [
+  ["opening", "Opening"],
+  ["during_transition", "During Transition"],
+  ["after_open", "After Open"],
+  ["interrupt_behavior", "Interrupt Behavior"],
+  ["anti_outcomes", "Anti-Outcomes"],
+]
+const UI_VISIBLE_LIFECYCLE_PATTERNS = [
+  /\b(ui|ux|animation|animated|animate|motion|reveal|stagger|fade|slide)\b/i,
+  /\b(动效|动画|淡入|淡出|展开|收起|错峰|闪烁|抖动|过渡|首帧|打断|结束状态)\b/i,
+]
 const WRITE_TOOL_RULES = Object.freeze([
   {
     name: "apply_patch",
@@ -318,6 +329,25 @@ export const hasAssignedWorkflowSubagents = (task) => {
   return Array.isArray(subagents) && subagents.some((subagent) => typeof subagent === "string" && subagent.startsWith(WORKFLOW_SUBAGENT_PREFIX))
 }
 
+export const taskLooksLikeUIVisibleLifecycleWork = (task) => {
+  if (!task) return false
+  const clarification = task?.clarification || {}
+  if (clarification.needs_ui_visible_lifecycle_clarification) return true
+
+  const text = [
+    task.title,
+    task.goal,
+    clarification.current_understanding,
+    clarification.scope,
+    clarification.final_expected_effect,
+  ]
+    .filter((value) => typeof value === "string" && value.trim())
+    .join("\n")
+
+  if (!text.trim()) return false
+  return UI_VISIBLE_LIFECYCLE_PATTERNS.some((pattern) => pattern.test(text))
+}
+
 export const textLooksLikeCompletionClaim = (text) => {
   const value = String(text || "").trim()
   if (!value) return false
@@ -566,7 +596,7 @@ export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
       : { reason: "no_formal_task" }
 
   const suffix = normalized.reason === "task_not_ready"
-    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}. Use \`just-demand . update-clarification ${normalized.taskId} --field <name>="<value>"\` or \`--from-file <path>\` to fill pending fields.`
+    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}. If this is UI, animation, or reveal work, fill Opening, During Transition, After Open, Interrupt Behavior, and Anti-Outcomes first. Use \`just-demand . update-clarification ${normalized.taskId} --field <name>="<value>"\` or \`--from-file <path>\` to fill pending fields.`
     : normalized.reason === "status_not_allowed"
       ? `active task ${normalized.taskId} is in status '${normalized.status}', which does not allow writes. Allowed statuses: planning, executing, verifying, changes_requested, tweaking, debugging.`
       : normalized.reason === "no_current_task_selected"
@@ -604,6 +634,12 @@ export const getMissingExecutionGateFields = (task) => {
     if (!String(clarification.approval || "").trim()) missing.push("Approval")
   }
 
+  if (taskLooksLikeUIVisibleLifecycleWork(task)) {
+    for (const [fieldName, heading] of UI_VISIBLE_LIFECYCLE_FIELDS) {
+      if (!String(clarification[fieldName] || "").trim()) missing.push(heading)
+    }
+  }
+
   return [...new Set(missing)]
 }
 
@@ -615,6 +651,11 @@ const renderClarificationContext = (task) => {
     ["Goal", clarification.final_expected_effect || clarification.expected_behavior || clarification.current_understanding],
     ["Current Reality", [clarification.actual_behavior, clarification.reproduction].filter((value) => typeof value === "string" && value.trim()).join("\n\n")],
     ["Scope", clarification.scope],
+    ["Opening", clarification.opening],
+    ["During Transition", clarification.during_transition],
+    ["After Open", clarification.after_open],
+    ["Interrupt Behavior", clarification.interrupt_behavior],
+    ["Anti-Outcomes", clarification.anti_outcomes || clarification.anti_outcome],
     ["Chosen Approach", clarification.chosen_approach],
     ["Implementation Plan", clarification.final_implementation_plan],
     ["Validation", clarification.validation],

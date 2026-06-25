@@ -317,6 +317,16 @@ Before implementation, provide a low-reading-cost validation summary:
 
 For visual or interaction work, the validation card should include the intended motion/layout feel, the rejected anti-outcome, and whether any clipping/masking is a primary effect or only a safety guardrail.
 
+For animation/reveal work, the validation card must read like a short storyboard, not an engineering plan. Include:
+
+- Opening: what is visible in the first frame.
+- During transition: direction, fade/slide relationship, row order, per-row delay, total perceived duration, and curve/feel when known.
+- After open: confirm the steady list looks and behaves the same as before unless intentionally changed.
+- Interruption: what typing, keyboard navigation, page switching, and closing do while the animation is running.
+- Reuse: whether the effect reuses existing transitions/curves or intentionally introduces a new motion language.
+
+If any of these are unknown and guessing could change visible behavior, keep them in `Gaps` and ask before promotion. Do not bury these details in implementation notes; they are part of the user-approved expected effect.
+
 For approval surfaces, prefer `Visible acceptance` and `Visible side effect` labels over broad `Validation` and `Risk` labels. Keep engineering verification in the task record or final report unless it failed or needs user action.
 
 For diagram approval surfaces, prefer `Diagram acceptance` and `Expression side effect` labels over broad `Validation` and `Risk` labels. Keep engineering verification in the task record or final report unless it failed or needs user action.

@@ -382,11 +382,13 @@ const buildReminderLines = (type) => {
       return [
         "- We have stayed on the same topic for 3+ turns.",
         "- Reset the problem model before adding another narrow fix.",
+        "- For UI/animation work, restate the visible lifecycle: opening, during transition, after open, interruption behavior, and anti-outcomes.",
       ]
     case "clarify":
       return [
         "- Load using-just-demand first for repo workflow turns.",
         "- Use socratic-clarification second for any request, bug, correction, or mismatch before intake.",
+        "- For UI/animation work, ask progressive visible-effect questions and get approval on a storyboard-style final effect before implementation.",
         "- Use just-demand subagents proactively for long-context work.",
       ]
     case "premise_check":
@@ -413,6 +415,7 @@ const buildReminderLines = (type) => {
       return [
         "- This is concrete workflow work, but there is no formal task yet.",
         "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then `just-demand-intake` before continuing.",
+        "- If this is UI/animation work, capture the visible lifecycle and interruption behavior before implementation.",
       ]
     case "select_task_hint":
       return [
@@ -524,6 +527,7 @@ const blockWorkflowEntryRequired = (text, reminderState) => {
     "- This is concrete workflow work, but there is no formal task yet.",
     "- Three routes:",
     "  · Enter workflow (recommended): `using-just-demand` → `socratic-clarification` → `just-demand-intake`",
+    "  · UI/animation intake: clarify opening, transition, after-open, interruption behavior, and anti-outcomes before code.",
     "  · Direct answer: if this is a simple question or non-work inquiry, restate it without work intent.",
     "  · Skip workflow: include \"skip workflow\" or \"workflow override\" to proceed inline.",
     "",

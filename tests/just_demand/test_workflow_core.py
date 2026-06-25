@@ -192,7 +192,7 @@ class WorkflowCoreTests(unittest.TestCase):
             result = create_intake(root, "Feature request", "Add a keyboard shortcut", "session-main")
             intake_path = root / ".just-demand" / "state" / "intake" / f"{result['intake_id']}.md"
             intake_text = intake_path.read_text(encoding="utf-8")
-            self.assertRegex(intake_text, r"## Scope\n\n## Anti-Outcome")
+            self.assertRegex(intake_text, r"## Scope\n\n## Opening")
 
     # -----------------------------------------------------------------------
     # update_intake_section
@@ -209,7 +209,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             # Initially Scope is empty
             initial_text = intake_path.read_text(encoding="utf-8")
-            self.assertIn("## Scope\n\n## Anti-Outcome", initial_text)
+            self.assertIn("## Scope\n\n## Opening", initial_text)
 
             # Update the Scope section
             up_result = update_intake_section(root, intake_id, "Scope", "Confirmed scope.")
@@ -2280,6 +2280,33 @@ class WorkflowCoreTests(unittest.TestCase):
         task["clarification"]["expected_behavior"] = ""
         self.assertFalse(task_is_ready_for_execution(task))
 
+    def test_task_is_ready_for_execution_ui_visible_lifecycle_fields(self):
+        from workflow_core import task_is_ready_for_execution
+
+        task = {
+            "title": "Animate launcher rows",
+            "goal": "Make the list reveal feel smooth.",
+            "type": "design",
+            "clarification": {
+                "scope": "Launcher rows only.",
+                "blocking_questions": [],
+                "final_expected_effect": "Rows reveal with the launcher.",
+                "chosen_approach": "Staggered fade and slide.",
+                "final_implementation_plan": "1. Clarify lifecycle\n2. Implement animation",
+                "approval": "Approved.",
+                "opening": "First frame shows the launcher shell with the first row barely visible.",
+                "during_transition": "Rows fade up in staggered order from the launcher anchor.",
+                "after_open": "The steady list matches the existing layout.",
+                "interrupt_behavior": "Typing or closing cancels the animation cleanly.",
+                "anti_outcomes": "No flash, clipping, or repeated replay.",
+                "needs_ui_visible_lifecycle_clarification": True,
+            },
+        }
+        self.assertTrue(task_is_ready_for_execution(task))
+
+        task["clarification"]["anti_outcomes"] = ""
+        self.assertFalse(task_is_ready_for_execution(task))
+
     # -----------------------------------------------------------------------
     # get_missing_execution_fields
     # -----------------------------------------------------------------------
@@ -2367,6 +2394,33 @@ class WorkflowCoreTests(unittest.TestCase):
         }
         self.assertEqual(get_missing_execution_fields(task), [])
 
+    def test_get_missing_execution_fields_ui_visible_lifecycle_fields(self):
+        from workflow_core import get_missing_execution_fields
+
+        task = {
+            "title": "Reveal launcher rows",
+            "goal": "Make the rows animate in.",
+            "type": "implementation",
+            "clarification": {
+                "scope": "Launcher rows only.",
+                "blocking_questions": [],
+                "final_expected_effect": "Rows reveal with the tray.",
+                "chosen_approach": "Fade and slide.",
+                "final_implementation_plan": "1. Add animation\n2. Verify.",
+                "approval": "Approved.",
+                "opening": "First frame shows the tray with hidden rows.",
+                "during_transition": "Rows fade and slide in from below.",
+                "after_open": "Stable state matches the current list.",
+                "interrupt_behavior": "Typing cancels the reveal.",
+                "anti_outcomes": "No flash or clipping.",
+                "needs_ui_visible_lifecycle_clarification": True,
+            },
+        }
+        self.assertEqual(get_missing_execution_fields(task), [])
+
+        task["clarification"]["opening"] = ""
+        self.assertIn("Opening", get_missing_execution_fields(task))
+
     # -----------------------------------------------------------------------
     # show_task_readiness
     # -----------------------------------------------------------------------
@@ -2421,6 +2475,32 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertFalse(result["safe_to_continue"])
             self.assertIn("Missing required clarification fields", result["blocked_reason"])
             self.assertEqual(result["recommended_next"], result["recommended_recovery"])
+
+    def test_show_task_readiness_ui_visible_lifecycle_missing_fields(self):
+        from workflow_core import show_task_readiness, write_json_atomic
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "UI readiness", "Animate launcher rows with stagger fade", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "Opening", "First frame shows the launcher shell.")
+            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "During Transition", "Rows fade and slide in.")
+            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "After Open", "Stable list matches current UI.")
+            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "Interrupt Behavior", "Typing cancels the reveal.")
+            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "Anti-Outcomes", "No flash or clipping.")
+            promoted = promote_to_task(root, intake["intake_id"], "UI readiness", "Animate launcher rows with stagger fade", "implementation", ["UI works"])
+            task_id = promoted["task_id"]
+
+            task_path = tasks_dir(root) / "active" / task_id / "task.json"
+            task = read_json(task_path)
+            task["clarification"]["opening"] = ""
+            write_json_atomic(task_path, task)
+
+            result = show_task_readiness(root, task_id)
+            self.assertFalse(result["ready"])
+            self.assertIn("Opening", result["missing"])
+            self.assertIn("update-clarification", result["recommended_recovery"])
 
     def test_show_task_readiness_writes_not_allowed_in_paused(self):
         from workflow_core import mark_task, show_task_readiness
