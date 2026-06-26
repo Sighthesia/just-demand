@@ -157,6 +157,8 @@ For workflow turns, the first screen should help the user recognize and steer th
 5. **Visible acceptance**: what the user can see, feel, or operate to confirm the result. Routine tests, builds, lint, JSON validation, and diff checks are mandatory agent work; omit them from the first screen unless they failed or need user action.
 6. **Optional expansion**: implementation details, files, logs, and deeper rationale only after the decision surface.
 
+For analysis, diagnosis, tuning, experiment review, or root-cause replies, keep the first screen result-first: lead with the conclusion, then a concise status line about what changed or was concluded, then remaining risk or alternative explanations. Put routine verification details below the fold unless something failed.
+
 For UI, layout, animation, reveal, overflow, clipping, masking, or quality/feel work, use a visible-effect card by default:
 
 - **Expected phenomenon first**: make the target screen behavior the first readable item.

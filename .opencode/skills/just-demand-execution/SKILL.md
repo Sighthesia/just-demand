@@ -78,6 +78,7 @@ When reporting execution progress or subagent results to the user, follow the Us
 - **First-screen answer**: what changed or what is happening now, in user-visible terms.
 - **User action**: usually "none" during execution unless a real product/architecture/risk decision is needed.
 - **Recommended default**: if blocked, state the recommended next move before alternatives.
+- **Analysis summary shape**: for analysis or diagnosis updates, lead with the result and concise status before any verification details; keep checks and transcripts below the fold unless something failed.
 - **Visible or diagram acceptance first**: for UI work, state the expected on-screen behavior, rejected anti-outcome, and visible side effects before routine checks; for diagram work, state the intended diagram meaning, diagram acceptance, and expression side effects before routine checks.
 - **Validation card**: when work is ready for review, state expected effect, anti-outcome, checks run, and remaining risk. Routine tests/build/lint are mandatory agent work; summarize them after the visible result unless they failed or require user action.
 - **Optional expansion**: changed files, structure summary, logs, and detailed rationale after the user-facing result.

@@ -355,13 +355,17 @@ class InstallIntegrationTests(unittest.TestCase):
             socratic_skill = (config_root / "skills" / "socratic-clarification" / "SKILL.md").read_text(encoding="utf-8")
             execution_skill = (config_root / "skills" / "just-demand-execution" / "SKILL.md").read_text(encoding="utf-8")
             intake_skill = (config_root / "skills" / "just-demand-intake" / "SKILL.md").read_text(encoding="utf-8")
+            verification_skill = (config_root / "skills" / "just-demand-verification" / "SKILL.md").read_text(encoding="utf-8")
 
             self.assertIn("`socratic-clarification` - always loaded second", using_skill)
             self.assertIn("follow-up turns that pivot from ordinary Q&A into concrete work", using_skill)
+            self.assertIn("analysis, diagnosis, tuning, experiment review, or root-cause replies", using_skill)
             self.assertIn("reset the problem model", socratic_skill)
             self.assertIn("retry now", using_skill)
             self.assertIn("skip one turn", using_skill)
             self.assertIn("retry now or skip one turn", execution_skill)
+            self.assertIn("analysis or diagnosis updates, lead with the result and concise status", execution_skill)
+            self.assertIn("analysis, diagnosis, tuning, experiment-review, or root-cause conclusions", verification_skill)
             self.assertIn("socratic-clarification", intake_skill)
             self.assertIn("Do not outrank `socratic-clarification`", intake_skill)
 
