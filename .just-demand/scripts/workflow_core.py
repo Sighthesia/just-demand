@@ -332,28 +332,116 @@ def parse_question_block(text: str) -> list[str]:
     return questions
 
 
-UI_VISIBLE_LIFECYCLE_PATTERNS = [
-    re.compile(pattern, re.IGNORECASE)
-    for pattern in [
-        r"\b(ui|ux|animation|animated|animate|motion|reveal|stagger|fade|slide)\b",
-        r"\b(动效|动画|淡入|淡出|展开|收起|错峰|闪烁|抖动|过渡|首帧|打断|结束状态)\b",
-    ]
+# ---------------------------------------------------------------------------
+# Risk-shaped contract registry
+# ---------------------------------------------------------------------------
+# Each contract defines a risk logic shape with a gate level:
+#   hard   = blocks promotion and execution if required fields are missing
+#   soft   = blocks execution only (promotion warnings)
+#   reminder = non-blocking hint/reminder
+#   none   = inactive (reserved)
+#
+# 'legacy_flag' maps to old-style boolean field names for backwards compat.
+# ---------------------------------------------------------------------------
+
+CONTRACT_SIGNAL_PATTERNS: dict[str, list[re.Pattern]] = {
+    "visible_effect": [
+        # English keywords: \b word boundaries work fine
+        re.compile(r"\b(ui|ux|animation|animated|animate|motion|reveal|stagger|fade|slide)\b", re.IGNORECASE),
+        # CJK keywords: \b is unreliable between CJK chars, so omit it
+        re.compile(r"(动效|动画|淡入|淡出|展开|收起|错峰|闪烁|抖动|过渡|首帧|打断|结束状态)"),
+    ],
+    "ordered_flow": [
+        re.compile(r"\b(sequential|strict\s+order|ordered\s+sequence|ordered\s+flow|step\s+by\s+step|ordered|must\s+complete|before\s+proceeding|dependency\s+chain)\b", re.IGNORECASE),
+        re.compile(r"(顺序|串行|依赖|先后|步骤|前置|条件|串行执行|按顺序)"),
+    ],
+    "safety_boundary": [
+        re.compile(r"\b(safety|destructive|irreversible|irreversibl|data\s+loss|rollback|revert|permission|authorization|auth[sz]|权限)\b", re.IGNORECASE),
+        re.compile(r"(安全|破坏性|不可逆|数据丢失|回滚|恢复|授权)"),
+    ],
+    "observability": [
+        re.compile(r"\b(logging|monitoring|observability|telemetry|tracing|trace|metric|metrics|instrumentation|dashboard|alert|告警)\b", re.IGNORECASE),
+        re.compile(r"(日志|监控|可观测|指标|链路|遥测|看板)"),
+    ],
+}
+
+CONTRACT_REGISTRY: list[dict[str, Any]] = [
+    {
+        "name": "visible_effect",
+        "label": "Visible Effect",
+        "gate_level": "hard",
+        "legacy_flag": "needs_ui_visible_lifecycle_clarification",
+        "signal_keys": ["visible_effect"],
+        "promotion_fields": [
+            ("opening", "Opening"),
+            ("during_transition", "During Transition"),
+            ("after_open", "After Open"),
+            ("interrupt_behavior", "Interrupt Behavior"),
+            ("anti_outcomes", "Anti-Outcomes"),
+        ],
+        "execution_fields": [
+            ("opening", "Opening"),
+            ("during_transition", "During Transition"),
+            ("after_open", "After Open"),
+            ("interrupt_behavior", "Interrupt Behavior"),
+            ("anti_outcomes", "Anti-Outcomes"),
+        ],
+        "hint": "Describe the visible lifecycle: opening first frame → during transition → after-open steady state → interrupt/cancel behavior → anti-outcomes to avoid.",
+    },
+    {
+        "name": "ordered_flow",
+        "label": "Ordered Flow",
+        "gate_level": "reminder",
+        "legacy_flag": None,
+        "signal_keys": ["ordered_flow"],
+        "promotion_fields": [],
+        "execution_fields": [],
+        "hint": "Ordered-flow work may benefit from describing the step sequence, dependency chain, and ordering constraints.",
+    },
+    {
+        "name": "safety_boundary",
+        "label": "Safety Boundary",
+        "gate_level": "soft",
+        "legacy_flag": None,
+        "signal_keys": ["safety_boundary"],
+        "promotion_fields": [],
+        "execution_fields": [
+            ("anti_outcomes", "Anti-Outcomes"),
+        ],
+        "hint": "Safety-boundary work should describe anti-outcomes, rollback/revert strategy, or data-loss prevention.",
+    },
+    {
+        "name": "observability",
+        "label": "Observability",
+        "gate_level": "reminder",
+        "legacy_flag": None,
+        "signal_keys": ["observability"],
+        "promotion_fields": [],
+        "execution_fields": [],
+        "hint": "Observability work should describe what is logged, monitored, or traced and how it can be verified.",
+    },
 ]
 
 
-def _looks_like_ui_visible_lifecycle_work(text: str) -> bool:
+def _detect_active_contracts(text: str) -> set[str]:
+    """Return set of contract names that match the given text."""
     value = str(text or "")
     if not value.strip():
-        return False
-    return any(pattern.search(value) for pattern in UI_VISIBLE_LIFECYCLE_PATTERNS)
+        return set()
+    active: set[str] = set()
+    for contract_name, patterns in CONTRACT_SIGNAL_PATTERNS.items():
+        if any(pattern.search(value) for pattern in patterns):
+            active.add(contract_name)
+    return active
 
 
-def intake_needs_ui_visible_lifecycle_clarification(task_type: str, raw_request: str, sections: dict[str, str]) -> bool:
-    task_type = task_type.strip().lower()
-    if task_type in {"ui", "ux"}:
-        return True
+def _looks_like_ui_visible_lifecycle_work(text: str) -> bool:
+    """Backward-compat: check if text looks like UI visible lifecycle work."""
+    return "visible_effect" in _detect_active_contracts(text)
 
-    signal_text = "\n".join(
+
+def _signal_text_for_contract_detection(raw_request: str, sections: dict[str, str]) -> str:
+    return "\n".join(
         [
             raw_request,
             sections.get("Current Understanding", ""),
@@ -362,7 +450,28 @@ def intake_needs_ui_visible_lifecycle_clarification(task_type: str, raw_request:
             sections.get("Final Expected Effect", ""),
         ]
     )
-    return _looks_like_ui_visible_lifecycle_work(signal_text)
+
+
+def _detect_active_contracts_for_intake(task_type: str, raw_request: str, sections: dict[str, str]) -> set[str]:
+    """Detect contracts that should be active for an intake."""
+    task_type_lower = task_type.strip().lower()
+    active: set[str] = set()
+
+    # Type-based triggers
+    if task_type_lower in {"ui", "ux"}:
+        active.add("visible_effect")
+
+    # Text-based triggers
+    signal_text = _signal_text_for_contract_detection(raw_request, sections)
+    active.update(_detect_active_contracts(signal_text))
+
+    return active
+
+
+def intake_needs_ui_visible_lifecycle_clarification(task_type: str, raw_request: str, sections: dict[str, str]) -> bool:
+    """Backward-compat: check if intake needs UI visible lifecycle clarification."""
+    contracts = _detect_active_contracts_for_intake(task_type, raw_request, sections)
+    return "visible_effect" in contracts
 
 
 def read_intake_sections(root: Path, intake_id: str) -> dict[str, str]:
@@ -405,7 +514,22 @@ def build_clarification_payload(root: Path, intake_id: str, task_type: str) -> d
     non_blocking_questions = parse_question_block(
         sections.get("Non-Blocking Questions", sections.get("Open Questions", ""))
     )
-    return {
+
+    # Detect active contracts
+    active_contracts = _detect_active_contracts_for_intake(task_type, raw_request, sections)
+    active_contract_names = sorted(active_contracts)
+    contract_gate_levels: dict[str, str] = {
+        c["name"]: c.get("gate_level", "none")
+        for c in CONTRACT_REGISTRY
+        if c["name"] in active_contracts
+    }
+    contract_hints: list[str] = [
+        c["hint"]
+        for c in CONTRACT_REGISTRY
+        if c["name"] in active_contracts and c.get("hint")
+    ]
+
+    payload: dict[str, Any] = {
         "current_understanding": sections.get("Current Understanding", ""),
         "expected_behavior": sections.get("Expected Behavior", sections.get("Expected Outcome", "")),
         "actual_behavior": sections.get("Actual Behavior", ""),
@@ -435,7 +559,19 @@ def build_clarification_payload(root: Path, intake_id: str, task_type: str) -> d
         "non_blocking_questions": non_blocking_questions,
         "needs_bug_clarification": intake_needs_bug_clarification(task_type, raw_request, sections),
         "needs_ui_visible_lifecycle_clarification": intake_needs_ui_visible_lifecycle_clarification(task_type, raw_request, sections),
+        # Contract registry fields
+        "active_contracts": active_contract_names,
+        "contract_gate_levels": contract_gate_levels,
+        "contract_hints": contract_hints,
     }
+
+    # Set legacy flags for each active contract
+    for contract in CONTRACT_REGISTRY:
+        legacy_flag = contract.get("legacy_flag")
+        if legacy_flag and contract["name"] in active_contracts:
+            payload[legacy_flag] = True
+
+    return payload
 
 
 # Heading-to-field mapping for markdown import into clarification.
@@ -519,24 +655,34 @@ def parse_markdown_clarification_fields(text: str) -> dict[str, Any]:
 def intake_readiness_errors(root: Path, intake_id: str, task_type: str) -> list[str]:
     clarification = build_clarification_payload(root, intake_id, task_type)
     errors: list[str] = []
+    warnings: list[str] = []
+
     if not clarification["scope"].strip():
         errors.append(
             "Scope is required before promotion. "
             "Prefer `just-demand . update-intake-section <intake-id> \"Scope\" \"<value>\"` to fill it."
         )
-    if clarification.get("needs_ui_visible_lifecycle_clarification"):
-        for field_name, heading in [
-            ("opening", "Opening"),
-            ("during_transition", "During Transition"),
-            ("after_open", "After Open"),
-            ("interrupt_behavior", "Interrupt Behavior"),
-            ("anti_outcomes", "Anti-Outcomes"),
-        ]:
+
+    # Contract-based promotion checks (hard gate contracts)
+    active_contract_names = set(clarification.get("active_contracts", []))
+    for contract in CONTRACT_REGISTRY:
+        cname = contract["name"]
+        gate = contract.get("gate_level", "none")
+        if cname not in active_contract_names:
+            continue
+        if gate == "none":
+            continue
+        for field_name, heading in contract.get("promotion_fields", []):
             if not str(clarification.get(field_name, "") or "").strip():
-                errors.append(
-                    f"{heading} is required for UI, animation, or reveal work before promotion. "
+                msg = (
+                    f"{heading} is required for {contract['label']} work before promotion. "
                     f"Prefer `just-demand . update-intake-section <intake-id> \"{heading}\" \"<value>\"` to fill it."
                 )
+                if gate == "hard":
+                    errors.append(msg)
+                elif gate == "soft":
+                    warnings.append(f"[{contract['label']}] {msg}")
+
     if clarification["needs_bug_clarification"]:
         if not clarification["expected_behavior"].strip():
             errors.append(
@@ -866,47 +1012,33 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
 # ---------------------------------------------------------------------------
 
 
-def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
-    """Check if a task has all required clarification fields for execution.
+def _check_contract_execution_fields(clarification: dict[str, Any], gate_level: str, execution_fields: list[tuple[str, str]], contract_label: str) -> list[str]:
+    """Check execution fields for a contract. Returns list of missing field labels."""
+    missing: list[str] = []
+    if gate_level == "none":
+        return missing
+    for field_name, heading in execution_fields:
+        if not str(clarification.get(field_name, "") or "").strip():
+            missing.append(heading)
+    return missing
 
-    Mirrors the JS taskIsReadyForExecution logic so both runtimes agree
-    on what execution readiness means.
-    """
+
+def _detect_active_contracts_for_task(task: dict[str, Any]) -> set[str]:
+    """Detect which contracts are active for a task, using both stored flags and text signals."""
     clarification = task.get("clarification", {}) or {}
-    missing = []
+    active: set[str] = set()
 
-    if not str(clarification.get("scope", "") or "").strip():
-        missing.append("Scope")
+    # Read stored contract info
+    stored = clarification.get("active_contracts", [])
+    if isinstance(stored, list):
+        active.update(stored)
 
-    blocking_questions = clarification.get("blocking_questions", []) or []
-    if isinstance(blocking_questions, list) and len(blocking_questions) > 0:
-        missing.append("Blocking Questions")
+    # Also check legacy boolean flag for backward compat
+    if clarification.get("needs_ui_visible_lifecycle_clarification"):
+        active.add("visible_effect")
 
-    task_type = str(task.get("type", "") or "").strip().lower()
-    bug_types = {"bug", "bugfix", "fix", "incident"}
-    design_types = {"design", "implementation", "feature", "feat", "refactor", "architecture"}
-
-    needs_bug = task_type in bug_types or bool(clarification.get("needs_bug_clarification", False))
-    if needs_bug:
-        if not str(clarification.get("expected_behavior", "") or "").strip():
-            missing.append("Expected Behavior")
-        if not str(clarification.get("actual_behavior", "") or "").strip():
-            missing.append("Actual Behavior")
-        if not str(clarification.get("reproduction", "") or "").strip():
-            missing.append("Reproduction")
-
-    if task_type in design_types:
-        if not str(clarification.get("final_expected_effect", "") or "").strip():
-            missing.append("Final Expected Effect")
-        if not str(clarification.get("chosen_approach", "") or "").strip():
-            missing.append("Chosen Approach")
-        if not str(clarification.get("final_implementation_plan", "") or "").strip():
-            missing.append("Final Implementation Plan")
-        if not str(clarification.get("approval", "") or "").strip():
-            missing.append("Approval")
-
-    needs_ui = bool(clarification.get("needs_ui_visible_lifecycle_clarification", False))
-    if not needs_ui:
+    # If visible_effect is not detected yet, try text-based detection
+    if "visible_effect" not in active:
         task_text = "\n".join(
             [
                 str(task.get("title", "") or ""),
@@ -916,21 +1048,19 @@ def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
                 str(clarification.get("final_expected_effect", "") or ""),
             ]
         )
-        needs_ui = _looks_like_ui_visible_lifecycle_work(task_text)
+        contracts_from_text = _detect_active_contracts(task_text)
+        active.update(contracts_from_text)
 
-    if needs_ui:
-        if not str(clarification.get("opening", "") or "").strip():
-            missing.append("Opening")
-        if not str(clarification.get("during_transition", "") or "").strip():
-            missing.append("During Transition")
-        if not str(clarification.get("after_open", "") or "").strip():
-            missing.append("After Open")
-        if not str(clarification.get("interrupt_behavior", "") or "").strip():
-            missing.append("Interrupt Behavior")
-        if not str(clarification.get("anti_outcomes", "") or "").strip():
-            missing.append("Anti-Outcomes")
+    return active
 
-    return len(missing) == 0
+
+def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
+    """Check if a task has all required clarification fields for execution.
+
+    Mirrors the JS taskIsReadyForExecution logic so both runtimes agree
+    on what execution readiness means.
+    """
+    return len(get_missing_execution_fields(task)) == 0
 
 
 def get_missing_execution_fields(task: dict[str, Any]) -> list[str]:
@@ -972,30 +1102,20 @@ def get_missing_execution_fields(task: dict[str, Any]) -> list[str]:
         if not str(clarification.get("approval", "") or "").strip():
             missing.append("Approval")
 
-    needs_ui = bool(clarification.get("needs_ui_visible_lifecycle_clarification", False))
-    if not needs_ui:
-        task_text = "\n".join(
-            [
-                str(task.get("title", "") or ""),
-                str(task.get("goal", "") or ""),
-                str(clarification.get("current_understanding", "") or ""),
-                str(clarification.get("scope", "") or ""),
-                str(clarification.get("final_expected_effect", "") or ""),
-            ]
+    # Contract-based execution checks
+    active_contracts = _detect_active_contracts_for_task(task)
+    for contract in CONTRACT_REGISTRY:
+        cname = contract["name"]
+        gate = contract.get("gate_level", "none")
+        if cname not in active_contracts:
+            continue
+        if gate not in ("hard", "soft"):
+            continue
+        missing.extend(
+            _check_contract_execution_fields(
+                clarification, gate, contract.get("execution_fields", []), contract["label"]
+            )
         )
-        needs_ui = _looks_like_ui_visible_lifecycle_work(task_text)
-
-    if needs_ui:
-        if not str(clarification.get("opening", "") or "").strip():
-            missing.append("Opening")
-        if not str(clarification.get("during_transition", "") or "").strip():
-            missing.append("During Transition")
-        if not str(clarification.get("after_open", "") or "").strip():
-            missing.append("After Open")
-        if not str(clarification.get("interrupt_behavior", "") or "").strip():
-            missing.append("Interrupt Behavior")
-        if not str(clarification.get("anti_outcomes", "") or "").strip():
-            missing.append("Anti-Outcomes")
 
     return missing
 

@@ -2458,6 +2458,100 @@ class WorkflowCoreTests(unittest.TestCase):
         self.assertIn("Opening", get_missing_execution_fields(task))
 
     # -----------------------------------------------------------------------
+    # Contract registry: active_contracts and gate levels
+    # -----------------------------------------------------------------------
+
+    def test_contract_detection_visible_effect_from_text(self):
+        """Text with UI/animation keywords triggers visible_effect contract."""
+        from workflow_core import _detect_active_contracts
+        self.assertIn("visible_effect", _detect_active_contracts("Animate the launcher rows with stagger"))
+        self.assertIn("visible_effect", _detect_active_contracts("fade in the new UI elements"))
+        self.assertNotIn("visible_effect", _detect_active_contracts("Update the database schema"))
+
+    def test_contract_detection_visible_effect_from_task_type(self):
+        """Task type 'ui' or 'ux' triggers visible_effect."""
+        from workflow_core import _detect_active_contracts_for_intake
+        contracts = _detect_active_contracts_for_intake("ui", "Build a new panel", {})
+        self.assertIn("visible_effect", contracts)
+        contracts = _detect_active_contracts_for_intake("implementation", "Fix database query", {})
+        self.assertNotIn("visible_effect", contracts)
+
+    def test_contract_detection_ordered_flow(self):
+        """Text with sequential/ordered keywords triggers ordered_flow contract."""
+        from workflow_core import _detect_active_contracts
+        self.assertIn("ordered_flow", _detect_active_contracts("This must run in strict sequential order"))
+        self.assertIn("ordered_flow", _detect_active_contracts("Step-by-step dependency chain"))
+        self.assertIn("ordered_flow", _detect_active_contracts("串行执行任务"))
+        self.assertNotIn("ordered_flow", _detect_active_contracts("Update the database schema"))
+
+    def test_contract_detection_safety_boundary(self):
+        """Text with safety/destructive keywords triggers safety_boundary contract."""
+        from workflow_core import _detect_active_contracts
+        self.assertIn("safety_boundary", _detect_active_contracts("This is a destructive irreversible operation"))
+        self.assertIn("safety_boundary", _detect_active_contracts("Implement rollback and revert logic"))
+        self.assertIn("safety_boundary", _detect_active_contracts("破坏性操作需要权限"))
+        self.assertNotIn("safety_boundary", _detect_active_contracts("Update the database schema"))
+
+    def test_contract_detection_observability(self):
+        """Text with logging/monitoring keywords triggers observability contract."""
+        from workflow_core import _detect_active_contracts
+        self.assertIn("observability", _detect_active_contracts("Add logging and monitoring"))
+        self.assertIn("observability", _detect_active_contracts("Implement tracing and metrics"))
+        self.assertIn("observability", _detect_active_contracts("配置监控和告警"))
+        self.assertNotIn("observability", _detect_active_contracts("Update the database schema"))
+
+    def test_contract_false_positive_low_risk_task(self):
+        """Ordinary low-risk task text should not trigger any contract."""
+        from workflow_core import _detect_active_contracts
+        text = "Update the database schema for the new user table"
+        contracts = _detect_active_contracts(text)
+        self.assertEqual(len(contracts), 0)
+
+    def test_contract_registry_in_build_clarification_payload(self):
+        """Promoted task should carry active_contracts and contract_gate_levels."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Stagger animation", "Animate rows with stagger fade-in", "session-main")
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
+            set_intake_scope(root, intake["intake_id"], "Launcher reveal only.")
+            set_intake_design_artifact(
+                root,
+                intake["intake_id"],
+                final_expected_effect="Rows reveal with staggered fade.",
+                chosen_approach="Use lifecycle clarification first.",
+                final_implementation_plan="1. Confirm lifecycle\n2. Implement",
+                validation="Verify lifecycle behavior.",
+                approval="Approved.",
+            )
+            replace_intake_section(intake_path, "Opening", "Shell visible, rows hidden.")
+            replace_intake_section(intake_path, "During Transition", "Rows fade in staggered.")
+            replace_intake_section(intake_path, "After Open", "Stable list matches UI.")
+            replace_intake_section(intake_path, "Interrupt Behavior", "Typing cancels reveal.")
+            replace_intake_section(intake_path, "Anti-Outcomes", "No flash or clipping.")
+
+            promoted = promote_to_task(root, intake["intake_id"], "Stagger animation", "Animate rows", "implementation", ["Works"])
+            task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
+            clarification = task["clarification"]
+            self.assertIn("visible_effect", clarification.get("active_contracts", []))
+            gate_levels = clarification.get("contract_gate_levels", {})
+            self.assertEqual(gate_levels.get("visible_effect"), "hard")
+            self.assertTrue(clarification.get("needs_ui_visible_lifecycle_clarification"))
+
+    def test_contract_registry_ordered_flow_does_not_block_promotion(self):
+        """ordered_flow contract with reminder gate should not block promotion."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Ordered task", "This must run in strict sequential order", "session-main")
+            set_intake_scope(root, intake["intake_id"], "Ordered execution.")
+            set_intake_design_artifact(root, intake["intake_id"])
+            # Should promote fine even though ordered_flow is detected
+            promoted = promote_to_task(root, intake["intake_id"], "Ordered task", "Ordered execution", "implementation", ["Works"])
+            task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
+            clarification = task["clarification"]
+            self.assertIn("ordered_flow", clarification.get("active_contracts", []))
+            self.assertEqual(clarification.get("contract_gate_levels", {}).get("ordered_flow"), "reminder")
+
+    # -----------------------------------------------------------------------
     # show_task_readiness
     # -----------------------------------------------------------------------
 

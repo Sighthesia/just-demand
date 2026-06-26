@@ -22,17 +22,79 @@ const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
   "architecture",
 ])
 const BUG_OR_MISMATCH_TASK_TYPES = new Set(["bug", "bugfix", "fix", "incident"])
-const UI_VISIBLE_LIFECYCLE_FIELDS = [
-  ["opening", "Opening"],
-  ["during_transition", "During Transition"],
-  ["after_open", "After Open"],
-  ["interrupt_behavior", "Interrupt Behavior"],
-  ["anti_outcomes", "Anti-Outcomes"],
-]
-const UI_VISIBLE_LIFECYCLE_PATTERNS = [
-  /\b(ui|ux|animation|animated|animate|motion|reveal|stagger|fade|slide)\b/i,
-  /\b(动效|动画|淡入|淡出|展开|收起|错峰|闪烁|抖动|过渡|首帧|打断|结束状态)\b/i,
-]
+// ---------------------------------------------------------------------------
+// Risk-shaped contract registry (mirrors workflow_core.py CONTRACT_REGISTRY)
+// ---------------------------------------------------------------------------
+const CONTRACT_SIGNAL_PATTERNS = {
+  visible_effect: [
+    // English keywords: \b word boundaries work fine
+    /\b(ui|ux|animation|animated|animate|motion|reveal|stagger|fade|slide)\b/i,
+    // CJK keywords: \b is unreliable between CJK chars, so omit it
+    /(动效|动画|淡入|淡出|展开|收起|错峰|闪烁|抖动|过渡|首帧|打断|结束状态)/,
+  ],
+  ordered_flow: [
+    /\b(sequential|strict\s+order|ordered\s+sequence|ordered\s+flow|step\s+by\s+step|ordered|must\s+complete|before\s+proceeding|dependency\s+chain)\b/i,
+    /(顺序|串行|依赖|先后|步骤|前置|条件|串行执行|按顺序)/,
+  ],
+  safety_boundary: [
+    /\b(safety|destructive|irreversible|irreversibl|data\s+loss|rollback|revert|permission|authorization|auth[sz]|权限)\b/i,
+    /(安全|破坏性|不可逆|数据丢失|回滚|恢复|授权)/,
+  ],
+  observability: [
+    /\b(logging|monitoring|observability|telemetry|tracing|trace|metric|metrics|instrumentation|dashboard|alert|告警)\b/i,
+    /(日志|监控|可观测|指标|链路|遥测|看板)/,
+  ],
+}
+
+const CONTRACT_REGISTRY = Object.freeze([
+  {
+    name: "visible_effect",
+    label: "Visible Effect",
+    gate_level: "hard",
+    signal_keys: ["visible_effect"],
+    legacy_flag: "needs_ui_visible_lifecycle_clarification",
+    promotion_fields: [
+      ["opening", "Opening"],
+      ["during_transition", "During Transition"],
+      ["after_open", "After Open"],
+      ["interrupt_behavior", "Interrupt Behavior"],
+      ["anti_outcomes", "Anti-Outcomes"],
+    ],
+    execution_fields: [
+      ["opening", "Opening"],
+      ["during_transition", "During Transition"],
+      ["after_open", "After Open"],
+      ["interrupt_behavior", "Interrupt Behavior"],
+      ["anti_outcomes", "Anti-Outcomes"],
+    ],
+  },
+  {
+    name: "ordered_flow",
+    label: "Ordered Flow",
+    gate_level: "reminder",
+    signal_keys: ["ordered_flow"],
+    promotion_fields: [],
+    execution_fields: [],
+  },
+  {
+    name: "safety_boundary",
+    label: "Safety Boundary",
+    gate_level: "soft",
+    signal_keys: ["safety_boundary"],
+    promotion_fields: [],
+    execution_fields: [
+      ["anti_outcomes", "Anti-Outcomes"],
+    ],
+  },
+  {
+    name: "observability",
+    label: "Observability",
+    gate_level: "reminder",
+    signal_keys: ["observability"],
+    promotion_fields: [],
+    execution_fields: [],
+  },
+])
 const WRITE_TOOL_RULES = Object.freeze([
   {
     name: "apply_patch",
@@ -329,23 +391,61 @@ export const hasAssignedWorkflowSubagents = (task) => {
   return Array.isArray(subagents) && subagents.some((subagent) => typeof subagent === "string" && subagent.startsWith(WORKFLOW_SUBAGENT_PREFIX))
 }
 
-export const taskLooksLikeUIVisibleLifecycleWork = (task) => {
-  if (!task) return false
+export const detectContractTriggers = (text) => {
+  const value = String(text || "")
+  if (!value.trim()) return new Set()
+  const active = new Set()
+  for (const [contractName, patterns] of Object.entries(CONTRACT_SIGNAL_PATTERNS)) {
+    if (patterns.some((pattern) => pattern.test(value))) {
+      active.add(contractName)
+    }
+  }
+  return active
+}
+
+export const detectActiveContractsForTask = (task) => {
+  if (!task) return new Set()
   const clarification = task?.clarification || {}
-  if (clarification.needs_ui_visible_lifecycle_clarification) return true
+  const active = new Set()
 
-  const text = [
-    task.title,
-    task.goal,
-    clarification.current_understanding,
-    clarification.scope,
-    clarification.final_expected_effect,
-  ]
-    .filter((value) => typeof value === "string" && value.trim())
-    .join("\n")
+  // Read stored active_contracts array
+  const stored = clarification.active_contracts
+  if (Array.isArray(stored)) {
+    for (const name of stored) {
+      active.add(name)
+    }
+  }
 
-  if (!text.trim()) return false
-  return UI_VISIBLE_LIFECYCLE_PATTERNS.some((pattern) => pattern.test(text))
+  // Legacy boolean flag
+  if (clarification.needs_ui_visible_lifecycle_clarification) {
+    active.add("visible_effect")
+  }
+
+  // Text-based detection for visible_effect
+  if (!active.has("visible_effect")) {
+    const text = [
+      task.title,
+      task.goal,
+      clarification.current_understanding,
+      clarification.scope,
+      clarification.final_expected_effect,
+    ]
+      .filter((value) => typeof value === "string" && value.trim())
+      .join("\n")
+    if (text.trim()) {
+      const textTriggers = detectContractTriggers(text)
+      for (const name of textTriggers) {
+        active.add(name)
+      }
+    }
+  }
+
+  return active
+}
+
+export const taskLooksLikeUIVisibleLifecycleWork = (task) => {
+  const active = detectActiveContractsForTask(task)
+  return active.has("visible_effect")
 }
 
 export const textLooksLikeCompletionClaim = (text) => {
@@ -588,6 +688,23 @@ export const getExecutionGateState = (directory) => {
   return { reason: "no_formal_task", taskId: null, activeTaskCount: 0, activeTaskIds: [], overlappingTaskIds: [], nonOverlappingActiveTaskCount: 0 }
 }
 
+const _buildContractHints = (task) => {
+  if (!task) return ""
+  const active = detectActiveContractsForTask(task)
+  const hints = []
+  for (const contract of CONTRACT_REGISTRY) {
+    if (!active.has(contract.name)) continue
+    if (contract.gate_level === "reminder") continue
+    if (contract.name === "visible_effect") {
+      hints.push("For Visible Effect work, fill Opening → During Transition → After Open → Interrupt Behavior → Anti-Outcomes first")
+    } else if (contract.execution_fields.length > 0) {
+      const fieldLabels = contract.execution_fields.map(([, heading]) => heading).join(", ")
+      hints.push(`For ${contract.label} work, fill ${fieldLabels} first`)
+    }
+  }
+  return hints.length > 0 ? ` ${hints.join(". ")}.` : ""
+}
+
 export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
   const normalized = typeof gate === "object" && gate !== null
     ? gate
@@ -596,7 +713,7 @@ export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
       : { reason: "no_formal_task" }
 
   const suffix = normalized.reason === "task_not_ready"
-    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}. If this is UI, animation, or reveal work, fill Opening, During Transition, After Open, Interrupt Behavior, and Anti-Outcomes first. Use \`just-demand . update-clarification ${normalized.taskId} --field <name>="<value>"\` or \`--from-file <path>\` to fill pending fields.`
+    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}.${_buildContractHints(normalized.taskId ? readTaskJson(".", normalized.taskId) : null)} Use \`just-demand . update-clarification ${normalized.taskId} --field <name>="<value>"\` or \`--from-file <path>\` to fill pending fields.`
     : normalized.reason === "status_not_allowed"
       ? `active task ${normalized.taskId} is in status '${normalized.status}', which does not allow writes. Allowed statuses: planning, executing, verifying, changes_requested, tweaking, debugging.`
       : normalized.reason === "no_current_task_selected"
@@ -634,8 +751,14 @@ export const getMissingExecutionGateFields = (task) => {
     if (!String(clarification.approval || "").trim()) missing.push("Approval")
   }
 
-  if (taskLooksLikeUIVisibleLifecycleWork(task)) {
-    for (const [fieldName, heading] of UI_VISIBLE_LIFECYCLE_FIELDS) {
+  // Contract-based execution checks
+  const activeContracts = detectActiveContractsForTask(task)
+  for (const contract of CONTRACT_REGISTRY) {
+    const cname = contract.name
+    const gate = contract.gate_level
+    if (!activeContracts.has(cname)) continue
+    if (gate !== "hard" && gate !== "soft") continue
+    for (const [fieldName, heading] of contract.execution_fields) {
       if (!String(clarification[fieldName] || "").trim()) missing.push(heading)
     }
   }

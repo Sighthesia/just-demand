@@ -8,6 +8,8 @@ import {
   buildExecutionGateError,
   consumeIntakeFallbackPending,
   debugLog,
+  detectActiveContractsForTask,
+  detectContractTriggers,
   getActiveTask,
   getExecutionGateState,
   getMissingRequiredContextFiles,
@@ -467,10 +469,14 @@ test("write tool rule table identifies write-like tools and ignores read-only ba
     buildExecutionGateError("bash", { reason: "no_current_task_selected" }),
     "Blocked bash: unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first.",
   )
-  assert.equal(
-    buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-a", missing: ["Scope", "Approval"] }),
-    'Blocked apply_patch: active task task-a is not ready for execution yet. Missing or incomplete fields: Scope, Approval. If this is UI, animation, or reveal work, fill Opening, During Transition, After Open, Interrupt Behavior, and Anti-Outcomes first. Use `just-demand . update-clarification task-a --field <name>="<value>"` or `--from-file <path>` to fill pending fields.',
-  )
+  // The error message no longer has the hard-coded "UI, animation, or reveal work" hint.
+  // It uses the contract registry to generate hints. Since task-a has no active contracts
+  // (no stored flag, no text signal), only the generic update-clarification hint appears.
+  const errMsg = buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-a", missing: ["Scope", "Approval"] })
+  assert.match(errMsg, /Blocked apply_patch/)
+  assert.match(errMsg, /task-a/)
+  assert.match(errMsg, /Scope, Approval/)
+  assert.match(errMsg, /update-clarification/)
 })
 
 // ---------------------------------------------------------------------------
@@ -1547,6 +1553,67 @@ test("state appends premise-check reminder for narrow frame-check turns and dedu
   assert.match(second.parts[0].text, /\[workflow-state\]/)
 })
 
+// ---------------------------------------------------------------------------
+// lib: contract registry
+// ---------------------------------------------------------------------------
+test("detectContractTriggers detects visible_effect from text", () => {
+  assert.ok(detectContractTriggers("Animate the launcher rows with stagger").has("visible_effect"))
+  assert.ok(detectContractTriggers("fade in the new UI elements").has("visible_effect"))
+  assert.equal(detectContractTriggers("Update the database schema").has("visible_effect"), false)
+})
+
+test("detectContractTriggers detects ordered_flow from text", () => {
+  assert.ok(detectContractTriggers("This must run in strict sequential order").has("ordered_flow"))
+  assert.ok(detectContractTriggers("Step-by-step dependency chain").has("ordered_flow"))
+  assert.ok(detectContractTriggers("串行执行任务").has("ordered_flow"))
+  assert.equal(detectContractTriggers("Update the database schema").has("ordered_flow"), false)
+})
+
+test("detectContractTriggers detects safety_boundary from text", () => {
+  assert.ok(detectContractTriggers("This is a destructive irreversible operation").has("safety_boundary"))
+  assert.ok(detectContractTriggers("Implement rollback and revert logic").has("safety_boundary"))
+  assert.ok(detectContractTriggers("破坏性操作需要权限").has("safety_boundary"))
+  assert.equal(detectContractTriggers("Update the database schema").has("safety_boundary"), false)
+})
+
+test("detectContractTriggers detects observability from text", () => {
+  assert.ok(detectContractTriggers("Add logging and monitoring").has("observability"))
+  assert.ok(detectContractTriggers("Implement tracing and metrics").has("observability"))
+  assert.ok(detectContractTriggers("配置监控和告警").has("observability"))
+  assert.equal(detectContractTriggers("Update the database schema").has("observability"), false)
+})
+
+test("detectContractTriggers returns empty for ordinary low-risk text", () => {
+  const result = detectContractTriggers("Update the database schema for the new user table")
+  assert.equal(result.size, 0)
+})
+
+test("detectActiveContractsForTask uses stored active_contracts array", () => {
+  const task = { id: "task-a", status: "planning", clarification: { active_contracts: ["visible_effect", "ordered_flow"] } }
+  const active = detectActiveContractsForTask(task)
+  assert.ok(active.has("visible_effect"))
+  assert.ok(active.has("ordered_flow"))
+  assert.equal(active.has("safety_boundary"), false)
+})
+
+test("detectActiveContractsForTask falls back to legacy boolean flag", () => {
+  const task = { id: "task-a", status: "planning", clarification: { needs_ui_visible_lifecycle_clarification: true } }
+  const active = detectActiveContractsForTask(task)
+  assert.ok(active.has("visible_effect"))
+})
+
+test("detectActiveContractsForTask detects visible_effect from task title", () => {
+  const task = { id: "task-a", title: "Animate the launcher rows", status: "planning", clarification: {} }
+  const active = detectActiveContractsForTask(task)
+  assert.ok(active.has("visible_effect"))
+})
+
+test("detectActiveContractsForTask returns empty for ordinary task", () => {
+  const task = { id: "task-a", title: "Update schema", status: "planning", clarification: {} }
+  const active = detectActiveContractsForTask(task)
+  assert.equal(active.size, 0)
+})
+
 test("execution gate requires visible lifecycle fields for UI animation tasks", () => {
   const task = {
     id: "task-ui",
@@ -1578,10 +1645,13 @@ test("execution gate requires visible lifecycle fields for UI animation tasks", 
   assert.equal(taskIsReadyForExecution(task), false)
 })
 
-test("execution gate error points UI tasks to visible lifecycle fields", () => {
+test("execution gate error mentions update-clarification as recovery path", () => {
   const error = buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-ui", missing: ["Opening", "Anti-Outcomes"] })
-  assert.match(error, /UI, animation, or reveal work/i)
-  assert.match(error, /Opening, During Transition, After Open, Interrupt Behavior, and Anti-Outcomes/i)
+  // Without a real task on disk, the contract hints are empty, but the generic
+  // update-clarification recovery instruction is always present.
+  assert.match(error, /Blocked apply_patch/)
+  assert.match(error, /task-ui/)
+  assert.match(error, /update-clarification/)
 })
 
 test("state blocks obvious execution-needed replies on unrouted active tasks", async () => {
