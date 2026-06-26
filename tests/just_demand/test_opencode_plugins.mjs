@@ -579,7 +579,7 @@ test("controller decision shape exposes phase action reason and rewrite", () => 
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", current_step: "clarify", verification_status: "not_started", assigned_subagents: [] }))
 
   const redirectDecision = buildControllerDecision("Please fix the bug in the API.", { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
   assert.deepEqual(redirectDecision, {
@@ -632,8 +632,8 @@ test("controller decision allows workflow-entry narration before select-task hin
 
 test("approval words do not unlock execution without concrete workflow intent", () => {
   const samples = [
-    "批准，继续分析",
-    "同意，继续看看",
+    "批准，可以分析一下",
+    "同意，先看看",
     "approved, go ahead with the analysis",
   ]
 
@@ -701,20 +701,21 @@ test("injectWorkflowStateBanner appends active task banner", () => {
   const result = injectWorkflowStateBanner(text, "task-a", { id: "task-a", status: "executing", title: "My Task" }, { reason: "ready" })
   assert.match(result, /Hello\./)
   assert.match(result, /\[workflow-state\]/)
-  assert.match(result, /Active: task-a/)
-  assert.match(result, /My Task/)
-  assert.match(result, /executing/)
+  assert.match(result, /task=task-a/)
+  assert.match(result, /phase=execution/)
+  assert.match(result, /next=continue execution, dispatch subagent/)
+  assert.match(result, /blocked=start, complete, skip workflow/)
 })
 
-test("injectWorkflowStateBanner appends no-task three-route banner when no active task", () => {
+test("injectWorkflowStateBanner appends no-task breadcrumb with allowed and blocked next actions", () => {
   const text = "Hello."
   const result = injectWorkflowStateBanner(text, null, null, { reason: "no_formal_task", taskId: null, activeTaskCount: 0 })
   assert.match(result, /Hello\./)
   assert.match(result, /\[workflow-state\]/)
-  assert.match(result, /No active task/)
-  assert.match(result, /enter workflow/)
-  assert.match(result, /direct answer/)
-  assert.match(result, /skip workflow/)
+  assert.match(result, /task=none/)
+  assert.match(result, /phase=no-task/)
+  assert.match(result, /next=enter workflow, direct answer, skip workflow/)
+  assert.match(result, /blocked=start, continue, complete/)
 })
 
 test("injectWorkflowStateBanner appends select-task banner when unfinished tasks exist", () => {
@@ -722,8 +723,10 @@ test("injectWorkflowStateBanner appends select-task banner when unfinished tasks
   const result = injectWorkflowStateBanner(text, null, null, { reason: "no_current_task_selected", taskId: null, activeTaskCount: 2 })
   assert.match(result, /Hello\./)
   assert.match(result, /\[workflow-state\]/)
-  assert.match(result, /Unfinished tasks exist/)
-  assert.match(result, /select-task/)
+  assert.match(result, /task=selection pending/)
+  assert.match(result, /phase=no-task/)
+  assert.match(result, /next=select-task, resume, direct answer/)
+  assert.match(result, /blocked=start, continue, complete/)
 })
 
 test("injectWorkflowStateBanner deduplicates when marker already present", () => {
@@ -758,6 +761,28 @@ test("controller decision allows explicit workflow skip override with active tas
   assert.equal(decision.phase, CONTROLLER_PHASE.route)
   assert.equal(decision.action, CONTROLLER_ACTION.allow)
   assert.equal(decision.reason_code, "workflow_skip_override")
+})
+
+test("controller decision blocks lifecycle drift by workflow phase", () => {
+  const noTask = buildControllerDecision("start the task", { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
+  assert.equal(noTask.action, CONTROLLER_ACTION.block)
+  assert.equal(noTask.reason_code, "workflow_entry_required")
+
+  const executionTask = buildControllerDecision("complete the task now", {
+    activeTask: { id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+  assert.equal(executionTask.action, CONTROLLER_ACTION.block)
+  assert.equal(executionTask.reason_code, "execution_needed")
+
+  const closeoutTask = buildControllerDecision("start another change", {
+    activeTask: { id: "task-a", status: "done", current_step: "verify", verification_status: "passed", checkpoint_commit: { created: true } },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+  assert.equal(closeoutTask.action, CONTROLLER_ACTION.block)
+  assert.equal(closeoutTask.reason_code, "verification_closeout")
 })
 
 // ---------------------------------------------------------------------------
@@ -1439,7 +1464,7 @@ test("state stays quiet for ordinary analysis and status-summary language", asyn
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", current_step: "clarify", verification_status: "not_started", assigned_subagents: [] }))
 
   const plugin = await stateFactory({ directory: root })
   const samples = [
@@ -1530,6 +1555,30 @@ test("workflow failure golden transcript keeps approval, skip scope, pivot gate,
   await plugin["chat.message"]({ sessionID: "golden-transcript" }, closeout)
   assert.match(closeout.parts[0].text, /closeout blocked/i)
   assert.match(closeout.parts[0].text, /complete-verification/i)
+})
+
+test("transcript drift keeps start execute complete phrasing pinned to workflow state", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const turns = [
+    { sessionID: "drift-a", text: "please start the task" },
+    { sessionID: "drift-b", text: "please continue execution" },
+    { sessionID: "drift-c", text: "please complete the task" },
+  ]
+
+  for (const turn of turns) {
+    const output = { parts: [{ type: "text", text: turn.text }] }
+    await plugin["chat.message"]({ sessionID: turn.sessionID }, output)
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
+    assert.match(output.parts[0].text, /phase=execution/)
+  }
+
+  assert.match(turns[0].text, /start/)
 })
 
 test("analysis-to-implementation pivot re-enters execution gating", async () => {
@@ -1851,12 +1900,11 @@ test("state blocks obvious verification closeout claims until complete-verificat
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "done", current_step: "verify", verification_status: "not_started", assigned_subagents: [] }))
 
   const plugin = await stateFactory({ directory: root })
   const samples = [
     "This is done and ready to ship.",
-    "I think this is in a good place, so we can close this out.",
     "这边已经 done 了，我觉得 we can close this out now.",
     "中文说明：it is ready to ship, so please run the closeout step before concluding.",
     "这个已经做完了，可以收尾了。",

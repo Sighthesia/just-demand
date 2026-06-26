@@ -21,6 +21,68 @@ const CLOSEOUT_BLOCKED_HEADER = "[just-demand closeout blocked]"
 const EXECUTION_BLOCKED_HEADER = "[just-demand execution blocked]"
 const WORKFLOW_ENTRY_BLOCKED_HEADER = "[just-demand workflow entry required]"
 
+const WORKFLOW_PHASE = Object.freeze({
+  noTask: "no-task",
+  clarification: "clarification/intake",
+  execution: "execution",
+  verification: "verification",
+  closeout: "closeout",
+})
+
+const WORKFLOW_PHASE_ACTIONS = Object.freeze({
+  [WORKFLOW_PHASE.noTask]: {
+    allowed: ["enter workflow", "direct answer", "skip workflow"],
+    blocked: ["start", "continue", "complete"],
+  },
+  [WORKFLOW_PHASE.clarification]: {
+    allowed: ["continue clarification", "start execution"],
+    blocked: ["complete", "skip workflow"],
+  },
+  [WORKFLOW_PHASE.execution]: {
+    allowed: ["continue execution", "dispatch subagent"],
+    blocked: ["start", "complete", "skip workflow"],
+  },
+  [WORKFLOW_PHASE.verification]: {
+    allowed: ["complete-verification", "continue verification"],
+    blocked: ["start", "continue", "skip workflow"],
+  },
+  [WORKFLOW_PHASE.closeout]: {
+    allowed: ["checkpoint-commit", "archive"],
+    blocked: ["start", "continue", "complete-verification"],
+  },
+})
+
+const WORKFLOW_LIFECYCLE_INTENTS = [
+  {
+    kind: "complete",
+    patterns: [
+      /\b(complete|completed|finish|finished|wrap up|wrap this up|close out|close this out)\b/i,
+      /(?:已经)?(?:完成|收尾|结束)/,
+    ],
+  },
+  {
+    kind: "continue",
+    patterns: [
+      /\b(continue|resume|carry on|pick up|proceed|go on)\b/i,
+      /(?:继续|接着|继续做|继续推进)/,
+    ],
+  },
+  {
+    kind: "start",
+    patterns: [
+      /\b(start|begin|kick off|initiate|launch)\b/i,
+      /(?:开始|启动|着手|开工)/,
+    ],
+  },
+  {
+    kind: "skip",
+    patterns: [
+      /\b(skip|bypass|omit)\b/i,
+      /(?:跳过|绕过|不经过)/,
+    ],
+  },
+]
+
 const CONTROLLER_PHASE = Object.freeze({
   clarify: "clarify",
   route: "route",
@@ -168,6 +230,92 @@ const extractCurrentText = (output) => {
 
 const argsKeys = (args) => args && typeof args === "object" ? Object.keys(args).sort() : []
 
+const normalizeWorkflowText = (text) => String(text || "").trim()
+
+const currentWorkflowPhase = (activeTask, gateState) => {
+  if (!activeTask) return WORKFLOW_PHASE.noTask
+
+  const status = String(activeTask.status || "").toLowerCase()
+  const step = String(activeTask.current_step || "").toLowerCase()
+  const verification = String(activeTask.verification_status || "").toLowerCase()
+
+  if (verification === "passed") return WORKFLOW_PHASE.closeout
+  if (step.includes("verify") || status.includes("verify")) return WORKFLOW_PHASE.verification
+  if (["execut", "implement", "changes_requested", "tweak", "debug"].some((fragment) => status.includes(fragment) || step.includes(fragment))) {
+    return WORKFLOW_PHASE.execution
+  }
+
+  return gateState?.reason === "no_current_task_selected" ? WORKFLOW_PHASE.noTask : WORKFLOW_PHASE.clarification
+}
+
+const workflowStateActions = (phase) => WORKFLOW_PHASE_ACTIONS[phase] || WORKFLOW_PHASE_ACTIONS[WORKFLOW_PHASE.noTask]
+
+const detectWorkflowLifecycleIntent = (text) => {
+  const body = normalizeWorkflowText(text)
+  if (!body) return null
+
+  for (const intent of WORKFLOW_LIFECYCLE_INTENTS) {
+    if (intent.patterns.some((pattern) => pattern.test(body))) return intent.kind
+  }
+
+  return null
+}
+
+const lifecycleTransitionBlocked = (intent, activeTask, gateState) => {
+  const phase = currentWorkflowPhase(activeTask, gateState)
+  if (!intent) return null
+
+  if (phase === WORKFLOW_PHASE.noTask) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.block,
+      reason_code: gateState?.reason === "no_current_task_selected" ? "select_task_hint" : "workflow_entry_required",
+      rewrite: { mode: "replace", preserve_original: true },
+    }
+  }
+
+  if (intent === "complete" && phase !== WORKFLOW_PHASE.closeout) {
+    return {
+      phase: CONTROLLER_PHASE.close,
+      action: CONTROLLER_ACTION.block,
+      reason_code: phase === WORKFLOW_PHASE.verification ? "verification_closeout" : "execution_needed",
+      rewrite: { mode: "replace", preserve_original: true },
+    }
+  }
+
+  if ((intent === "start" || intent === "continue") && phase === WORKFLOW_PHASE.closeout) {
+    return {
+      phase: CONTROLLER_PHASE.close,
+      action: CONTROLLER_ACTION.block,
+      reason_code: taskNeedsCheckpointFollowUp(activeTask) ? "checkpoint_followup" : "verification_closeout",
+      rewrite: { mode: "replace", preserve_original: true },
+    }
+  }
+
+  if (intent === "skip" && phase !== WORKFLOW_PHASE.noTask) {
+    return {
+      phase: CONTROLLER_PHASE.route,
+      action: CONTROLLER_ACTION.block,
+      reason_code: phase === WORKFLOW_PHASE.verification || phase === WORKFLOW_PHASE.closeout ? "verification_closeout" : "execution_needed",
+      rewrite: { mode: "replace", preserve_original: true },
+    }
+  }
+
+  return null
+}
+
+const formatWorkflowStateLines = (activeTaskId, activeTask, gateState) => {
+  const phase = currentWorkflowPhase(activeTask, gateState)
+  const actions = workflowStateActions(phase)
+  const taskLabel = activeTaskId || (gateState?.reason === "no_current_task_selected" ? "selection pending" : "none")
+  const status = activeTask ? String(activeTask.status || "unknown") : null
+  const nextActions = actions.allowed.join(", ")
+  const blockedActions = actions.blocked.join(", ")
+  const prefix = `${WORKFLOW_STATE_MARKER} task=${taskLabel}; phase=${phase}`
+  const details = status ? `; status=${status}; next=${nextActions}; blocked=${blockedActions}` : `; next=${nextActions}; blocked=${blockedActions}`
+  return `${prefix}${details}`
+}
+
 const topicMemory = new Map()
 
 const updateTopicTurns = (sessionKey, text, reminderState) => {
@@ -257,6 +405,11 @@ const buildControllerDecision = (text, reminderState) => {
   }
 
   const activeTask = reminderState.activeTask
+  const lifecycleDecision = lifecycleTransitionBlocked(detectWorkflowLifecycleIntent(text), activeTask, reminderState)
+  if (lifecycleDecision) {
+    return lifecycleDecision
+  }
+
   if (activeTask) {
     if (textLooksLikeCompletionClaim(text) && taskNeedsVerificationCloseout(activeTask)) {
       return {
@@ -540,16 +693,11 @@ const injectWorkflowStateBanner = (text, activeTaskId, activeTask, gateState) =>
   if (typeof text !== "string") return text
   if (text.includes(WORKFLOW_STATE_MARKER)) return text
 
-  let banner
-  if (activeTaskId && activeTask) {
-    const status = activeTask.status || "unknown"
-    const title = activeTask.title ? ` "${activeTask.title}"` : ""
-    banner = `\n\n${WORKFLOW_STATE_MARKER} Active: ${activeTaskId}${title} (${status})`
-  } else if (gateState?.reason === "no_current_task_selected") {
-    banner = `\n\n${WORKFLOW_STATE_MARKER} Unfinished tasks exist — select a task: \`just-demand . select-task <id>\``
-  } else {
-    banner = `\n\n${WORKFLOW_STATE_MARKER} No active task — routes: enter workflow | direct answer | skip workflow`
-  }
+  const banner = activeTaskId && activeTask
+    ? `\n\n${formatWorkflowStateLines(activeTaskId, activeTask, gateState)}`
+    : gateState?.reason === "no_current_task_selected"
+      ? `\n\n${WORKFLOW_STATE_MARKER} task=selection pending; phase=no-task; next=select-task, resume, direct answer; blocked=start, continue, complete`
+      : `\n\n${WORKFLOW_STATE_MARKER} task=none; phase=no-task; next=enter workflow, direct answer, skip workflow; blocked=start, continue, complete`
 
   return text + banner
 }
