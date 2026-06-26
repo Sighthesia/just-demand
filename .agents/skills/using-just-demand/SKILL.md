@@ -144,6 +144,17 @@ Users skim. Output past ~300 characters is usually not read closely, so every ma
 - Surface deep detail (root cause, tradeoffs, full transcripts, analogy) inline only for debugging, architecture changes, new mechanisms, or when the user explicitly asks.
 - **Focus on expected effect, observed phenomenon, and design -- not line-by-line code.** The user is product manager and architect; do not narrate or restate implementation code line by line. Reference changed files/symbols by name and describe what changed and why, not how each line works. Show code only when the user asks, or when a specific snippet is needed to decide a design or behavior question.
 
+- **First-screen hygiene.** Keep internal workflow labels and form fields out of the first screen: no `Thought`, `Skill`, `Decision card`, `Validation card`, or full task-form field names in the user-facing opening block.
+
+Preferred result-first summary shape:
+
+```text
+Result: <conclusion or user-visible effect>
+Status: <what changed or what is now known>
+Risk: <remaining risk or none>
+Checks: <routine verification detail only if failed or explicitly needed>
+```
+
 `just-demand-verification`'s Default Final Report is the task-closure specialization of this rule; keep the two consistent.
 
 ## User-Facing Output Contract
