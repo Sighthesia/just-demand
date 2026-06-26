@@ -2,14 +2,10 @@
 
 OpenCode-first local agent workflow runtime: Python scripts own workflow state, OpenCode plugins inject lightweight guardrails/context, and `.opencode/skills/` hold the detailed workflow rules.
 
-Canonical workflow spec: [`docs/workflow-spec.md`](docs/workflow-spec.md) owns lifecycle, roles, transitions, recovery, and source-of-truth boundaries. Keep AGENTS concise and route detailed workflow truth there.
-
 
 ## Just Demand Workflow Philosophy
 
 Just Demand is a workflow runtime, not a one-shot prompt bundle.
-
-Use the canonical workflow spec for the durable model; keep this file focused on repo-wide policy, routing, and guardrails.
 
 ### Guiding Principle
 

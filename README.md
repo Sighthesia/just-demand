@@ -8,13 +8,9 @@ Highly inspired by [Trellis](https://github.com/mindfold-ai/Trellis) and [superp
 - OpenCode plugins inject lightweight context.
 - Project skills hold detailed workflow rules.
 
-Canonical workflow spec: [`docs/workflow-spec.md`](docs/workflow-spec.md) owns lifecycle, roles, transitions, recovery, and source-of-truth boundaries. README stays high-level and keeps only the orientation layer.
-
 ## Just Demand Workflow Philosophy
 
 Just Demand is a workflow runtime, not a one-shot prompt bundle.
-
-The canonical workflow spec lives in [`docs/workflow-spec.md`](docs/workflow-spec.md); this page summarizes the model for readers and install-time orientation.
 
 It is written for two audiences:
 
@@ -538,7 +534,6 @@ python3 -m unittest tests.just_demand.test_workflow_core -v
 python3 -m unittest tests.just_demand.test_install -v
 node --test tests/just_demand/test_opencode_plugins.mjs
 python3 -m json.tool .opencode/package.json
-just-demand smoke
 ```
 
 Windows:
@@ -548,5 +543,4 @@ python -m unittest tests.just_demand.test_workflow_core -v
 python -m unittest tests.just_demand.test_install -v
 node --test tests/just_demand/test_opencode_plugins.mjs
 python -m json.tool .opencode/package.json
-just-demand smoke
 ```
