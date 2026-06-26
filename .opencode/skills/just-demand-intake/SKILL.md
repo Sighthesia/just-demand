@@ -7,8 +7,6 @@ description: Use when the user proposes a new goal, feature, bugfix, design, ref
 
 Clarify the user's need before exposing workflow mechanics.
 
-Canonical workflow spec: `docs/workflow-spec.md`. Keep intake focused on shaping clarified work into a promotable task.
-
 ## Core Rules
 
 - Focus on the user's described outcome, expected behavior, anti-outcomes, constraints, and tradeoffs.
@@ -68,6 +66,8 @@ For design and implementation work, the intake must include the final artifact b
 - **Confidence**: high, medium, or low when it helps calibrate trust
 - **Escalation Reason**: why this needs user input instead of safe agent decision
 - **Approval**: explicit user approval of the final artifact
+
+For clarification-heavy work, keep the intake in final-card form: summarize the decision surface the user approves first, and use the field list only as the backing record.
 
 Promotion is blocked for design/implementation tasks when Final Expected Effect, Chosen Approach, Final Implementation Plan, or Approval are missing.
 
@@ -143,6 +143,8 @@ Hard promotion gates by work shape:
 - bug/mismatch: `## Scope`, `## Expected Behavior`, `## Actual Behavior`, `## Reproduction`
 
 `## Decision Card`, `## User Action`, `## Recommended Default`, `## Option Matrix`, `## Touchpoints`, `## Approach Options`, `## Minimum Viable Knowledge`, `## Visible Acceptance`, `## Visible Side Effect`, `## Diagram Intent`, `## Diagram Acceptance`, `## Expression Side Effect`, `## Validation`, `## Validation Card`, `## Diagram`, `## Confidence`, `## Escalation Reason`, `## Current Understanding`, `## Anti-Outcome`, `## Decisions`, and open-question sections should also be updated when the clarification artifact provides them, but the fields above are the runtime hard gates.
+
+Keep those updates in final-card language when possible; avoid rewriting them into a raw form checklist unless the user explicitly wants a form-like artifact.
 
 Recovery recipe after failed `promote`:
 
@@ -316,16 +318,6 @@ Before implementation, provide a low-reading-cost validation summary:
 - Simple diagram when layout, workflow, state, process, or data-flow shape is easier to validate visually than in prose.
 
 For visual or interaction work, the validation card should include the intended motion/layout feel, the rejected anti-outcome, and whether any clipping/masking is a primary effect or only a safety guardrail.
-
-For animation/reveal work, the validation card must read like a short storyboard, not an engineering plan. Include:
-
-- Opening: what is visible in the first frame.
-- During transition: direction, fade/slide relationship, row order, per-row delay, total perceived duration, and curve/feel when known.
-- After open: confirm the steady list looks and behaves the same as before unless intentionally changed.
-- Interruption: what typing, keyboard navigation, page switching, and closing do while the animation is running.
-- Reuse: whether the effect reuses existing transitions/curves or intentionally introduces a new motion language.
-
-If any of these are unknown and guessing could change visible behavior, keep them in `Gaps` and ask before promotion. Do not bury these details in implementation notes; they are part of the user-approved expected effect.
 
 For approval surfaces, prefer `Visible acceptance` and `Visible side effect` labels over broad `Validation` and `Risk` labels. Keep engineering verification in the task record or final report unless it failed or needs user action.
 

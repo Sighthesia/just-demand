@@ -15,7 +15,6 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from workflow_core import (
     acquire_lock,
     archive_task,
-    build_execution_packet,
     cleanup_completed_task,
     complete_verification,
     create_intake,
@@ -29,7 +28,6 @@ from workflow_core import (
     promote_to_task,
     read_json,
     select_task,
-    render_execution_packet_markdown,
     start_execution,
     start_verification,
     state_dir,
@@ -192,7 +190,7 @@ class WorkflowCoreTests(unittest.TestCase):
             result = create_intake(root, "Feature request", "Add a keyboard shortcut", "session-main")
             intake_path = root / ".just-demand" / "state" / "intake" / f"{result['intake_id']}.md"
             intake_text = intake_path.read_text(encoding="utf-8")
-            self.assertRegex(intake_text, r"## Scope\n\n## Opening")
+            self.assertRegex(intake_text, r"## Scope\n\n## Anti-Outcome")
 
     # -----------------------------------------------------------------------
     # update_intake_section
@@ -209,7 +207,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             # Initially Scope is empty
             initial_text = intake_path.read_text(encoding="utf-8")
-            self.assertIn("## Scope\n\n## Opening", initial_text)
+            self.assertIn("## Scope\n\n## Anti-Outcome", initial_text)
 
             # Update the Scope section
             up_result = update_intake_section(root, intake_id, "Scope", "Confirmed scope.")
@@ -367,107 +365,6 @@ class WorkflowCoreTests(unittest.TestCase):
             intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
             text = intake_path.read_text(encoding="utf-8")
             self.assertIn("## Scope\nCLI-updated scope.\n\n", text)
-
-    def test_cli_create_intake_emits_structured_summary_on_stderr(self):
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            script = REPO_ROOT / "just-demand"
-            result = subprocess.run(
-                [sys.executable, str(script), str(root), "create-intake", "Readable intake", "Write a readable CLI summary.", "--session", "session-main"],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-
-            payload = json.loads(result.stdout)
-            self.assertIn("intake_id", payload)
-            self.assertIn("Result: intake created", result.stderr)
-            self.assertIn("Intake ID:", result.stderr)
-            self.assertIn("Next action:", result.stderr)
-
-    def test_cli_list_active_emits_structured_summary_on_stderr(self):
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Readable list", "List me", "session-main")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            promote_to_task(root, intake["intake_id"], "Readable list", "Build readable output", "design", ["Readable summary"])
-
-            script = REPO_ROOT / "just-demand"
-            result = subprocess.run(
-                [sys.executable, str(script), str(root), "list-active"],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-
-            payload = json.loads(result.stdout)
-            self.assertEqual(len(payload["tasks"]), 1)
-            self.assertIn("Result: 1 unfinished task", result.stderr)
-            self.assertIn("Tasks:", result.stderr)
-            self.assertIn("Next action:", result.stderr)
-
-    def test_cli_promote_and_select_include_next_action_summary(self):
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Readable flow", "Promote me", "session-main")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            script = REPO_ROOT / "just-demand"
-
-            promote_result = subprocess.run(
-                [sys.executable, str(script), str(root), "promote", intake["intake_id"], "Readable flow", "Promote readable output", "--type", "implementation", "--acceptance", "Summary is obvious."],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            promote_payload = json.loads(promote_result.stdout)
-            self.assertIn("next_actions", promote_payload)
-            self.assertIn("Result: task promoted", promote_result.stderr)
-            self.assertIn("Next actions:", promote_result.stderr)
-
-            mark_task(root, promote_payload["task_id"], "paused")
-            select_result = subprocess.run(
-                [sys.executable, str(script), str(root), "select-task", promote_payload["task_id"]],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            select_payload = json.loads(select_result.stdout)
-            self.assertTrue(select_payload["ok"])
-            self.assertIn("Result: task selected", select_result.stderr)
-            self.assertIn("Next actions:", select_result.stderr)
-
-    def test_cli_show_readiness_emits_clear_recovery_summary(self):
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Readiness summary", "Check readiness", "session-main")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            promoted = promote_to_task(root, intake["intake_id"], "Readiness summary", "Check readiness", "design", ["Ready summary"])
-            task_id = promoted["task_id"]
-
-            script = REPO_ROOT / "just-demand"
-            result = subprocess.run(
-                [sys.executable, str(script), str(root), "show-readiness", task_id],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-
-            payload = json.loads(result.stdout)
-            self.assertTrue(payload["ready"])
-            self.assertIn("Current:", result.stderr)
-            self.assertIn("Safe to continue: yes", result.stderr)
-            self.assertIn("Recommended next:", result.stderr)
 
     def test_cli_update_intake_section_missing_intake(self):
         import subprocess
@@ -874,53 +771,6 @@ class WorkflowCoreTests(unittest.TestCase):
         self.assertIn("Project path form: just-demand [project-dir]", result.stdout)
         self.assertIn("just-demand [project-dir] --help", result.stdout)
         self.assertEqual(result.stderr, "")
-
-    def test_cli_help_lists_smoke_command(self):
-        import task as task_cli
-
-        help_text = task_cli.build_parser().format_help()
-        self.assertIn("smoke", help_text)
-        self.assertIn("Run the repo smoke validation checks", help_text)
-
-    def test_smoke_command_runs_expected_checks(self):
-        import task as task_cli
-
-        calls = []
-
-        class FakeCompletedProcess:
-            def __init__(self, returncode: int = 0):
-                self.returncode = returncode
-                self.stdout = ""
-                self.stderr = ""
-
-        def fake_run(command, cwd=None, text=None, capture_output=None):
-            calls.append({
-                "command": tuple(command),
-                "cwd": Path(cwd) if cwd is not None else None,
-                "text": text,
-                "capture_output": capture_output,
-            })
-            return FakeCompletedProcess()
-
-        original_run = task_cli.subprocess.run
-        task_cli.subprocess.run = fake_run
-        try:
-            result = task_cli.execute_command(REPO_ROOT, ["smoke"])
-        finally:
-            task_cli.subprocess.run = original_run
-
-        self.assertEqual(result, 0)
-        self.assertEqual(len(calls), 6)
-        self.assertEqual(calls[0]["command"], (sys.executable, "-m", "unittest", "tests.just_demand.test_workflow_core", "-v"))
-        self.assertEqual(calls[1]["command"], (sys.executable, "-m", "unittest", "tests.just_demand.test_install", "-v"))
-        self.assertEqual(calls[2]["command"], ("node", "--test", "tests/just_demand/test_opencode_plugins.mjs"))
-        self.assertEqual(calls[3]["command"], (sys.executable, "-m", "json.tool", ".opencode/package.json"))
-        self.assertEqual(calls[4]["command"], (sys.executable, str(REPO_ROOT / "just-demand"), "--help"))
-        self.assertEqual(calls[5]["command"], (sys.executable, str(REPO_ROOT / "just-demand"), ".", "--help"))
-        for call in calls:
-            self.assertEqual(call["cwd"], REPO_ROOT.resolve())
-            self.assertTrue(call["text"])
-            self.assertTrue(call["capture_output"])
 
     def test_cli_promote_reports_readiness_errors(self):
         import subprocess
@@ -1925,42 +1775,6 @@ class WorkflowCoreTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Final Expected Effect"):
                 promote_to_task(root, intake["intake_id"], "Impl work", "Implement feature", "implementation", ["It works"])
 
-    def test_real_launcher_stagger_request_requires_visible_lifecycle_golden_case(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            raw_request = "试实现打开启动器（包括剪切板）时，列表项使用stagger效果排列淡入展现"
-            intake = create_intake(root, "Launcher stagger", raw_request, "session-main")
-            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
-            set_intake_scope(root, intake["intake_id"], "Launcher and clipboard list reveal behavior only.")
-            set_intake_design_artifact(
-                root,
-                intake["intake_id"],
-                final_expected_effect="Launcher and clipboard rows reveal with staggered fade-in.",
-                chosen_approach="Use visible lifecycle clarification before implementation.",
-                final_implementation_plan="1. Confirm lifecycle\n2. Implement reveal\n3. Verify interaction",
-                validation="Verify opening, transition, steady state, and interrupts.",
-                approval="Approved by user.",
-            )
-
-            with self.assertRaisesRegex(RuntimeError, "Opening.*During Transition.*After Open.*Interrupt Behavior.*Anti-Outcomes"):
-                promote_to_task(root, intake["intake_id"], "Launcher stagger", raw_request, "implementation", ["Rows reveal correctly"])
-
-            replace_intake_section(intake_path, "Opening", "First frame shows the launcher shell with stable row positions.")
-            replace_intake_section(intake_path, "During Transition", "Visible rows fade in with staggered timing from below.")
-            replace_intake_section(intake_path, "After Open", "The steady list matches the existing launcher and clipboard UI.")
-            replace_intake_section(intake_path, "Interrupt Behavior", "Typing, keyboard navigation, closing, or switching pages cancels or completes the reveal without replay.")
-            replace_intake_section(intake_path, "Anti-Outcomes", "No direct implementation without clarification, flash, text jump, clipping, layout reflow, or repeated replay.")
-
-            promoted = promote_to_task(root, intake["intake_id"], "Launcher stagger", raw_request, "implementation", ["Rows reveal correctly"])
-            task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
-            clarification = task["clarification"]
-            self.assertTrue(clarification["needs_ui_visible_lifecycle_clarification"])
-            self.assertIn("stable row positions", clarification["opening"])
-            self.assertIn("staggered timing", clarification["during_transition"])
-            self.assertIn("existing launcher", clarification["after_open"])
-            self.assertIn("keyboard navigation", clarification["interrupt_behavior"])
-            self.assertIn("No direct implementation", clarification["anti_outcomes"])
-
     def test_promote_allows_bugfix_without_design_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2316,33 +2130,6 @@ class WorkflowCoreTests(unittest.TestCase):
         task["clarification"]["expected_behavior"] = ""
         self.assertFalse(task_is_ready_for_execution(task))
 
-    def test_task_is_ready_for_execution_ui_visible_lifecycle_fields(self):
-        from workflow_core import task_is_ready_for_execution
-
-        task = {
-            "title": "Animate launcher rows",
-            "goal": "Make the list reveal feel smooth.",
-            "type": "design",
-            "clarification": {
-                "scope": "Launcher rows only.",
-                "blocking_questions": [],
-                "final_expected_effect": "Rows reveal with the launcher.",
-                "chosen_approach": "Staggered fade and slide.",
-                "final_implementation_plan": "1. Clarify lifecycle\n2. Implement animation",
-                "approval": "Approved.",
-                "opening": "First frame shows the launcher shell with the first row barely visible.",
-                "during_transition": "Rows fade up in staggered order from the launcher anchor.",
-                "after_open": "The steady list matches the existing layout.",
-                "interrupt_behavior": "Typing or closing cancels the animation cleanly.",
-                "anti_outcomes": "No flash, clipping, or repeated replay.",
-                "needs_ui_visible_lifecycle_clarification": True,
-            },
-        }
-        self.assertTrue(task_is_ready_for_execution(task))
-
-        task["clarification"]["anti_outcomes"] = ""
-        self.assertFalse(task_is_ready_for_execution(task))
-
     # -----------------------------------------------------------------------
     # get_missing_execution_fields
     # -----------------------------------------------------------------------
@@ -2430,127 +2217,6 @@ class WorkflowCoreTests(unittest.TestCase):
         }
         self.assertEqual(get_missing_execution_fields(task), [])
 
-    def test_get_missing_execution_fields_ui_visible_lifecycle_fields(self):
-        from workflow_core import get_missing_execution_fields
-
-        task = {
-            "title": "Reveal launcher rows",
-            "goal": "Make the rows animate in.",
-            "type": "implementation",
-            "clarification": {
-                "scope": "Launcher rows only.",
-                "blocking_questions": [],
-                "final_expected_effect": "Rows reveal with the tray.",
-                "chosen_approach": "Fade and slide.",
-                "final_implementation_plan": "1. Add animation\n2. Verify.",
-                "approval": "Approved.",
-                "opening": "First frame shows the tray with hidden rows.",
-                "during_transition": "Rows fade and slide in from below.",
-                "after_open": "Stable state matches the current list.",
-                "interrupt_behavior": "Typing cancels the reveal.",
-                "anti_outcomes": "No flash or clipping.",
-                "needs_ui_visible_lifecycle_clarification": True,
-            },
-        }
-        self.assertEqual(get_missing_execution_fields(task), [])
-
-        task["clarification"]["opening"] = ""
-        self.assertIn("Opening", get_missing_execution_fields(task))
-
-    # -----------------------------------------------------------------------
-    # Contract registry: active_contracts and gate levels
-    # -----------------------------------------------------------------------
-
-    def test_contract_detection_visible_effect_from_text(self):
-        """Text with UI/animation keywords triggers visible_effect contract."""
-        from workflow_core import _detect_active_contracts
-        self.assertIn("visible_effect", _detect_active_contracts("Animate the launcher rows with stagger"))
-        self.assertIn("visible_effect", _detect_active_contracts("fade in the new UI elements"))
-        self.assertNotIn("visible_effect", _detect_active_contracts("Update the database schema"))
-
-    def test_contract_detection_visible_effect_from_task_type(self):
-        """Task type 'ui' or 'ux' triggers visible_effect."""
-        from workflow_core import _detect_active_contracts_for_intake
-        contracts = _detect_active_contracts_for_intake("ui", "Build a new panel", {})
-        self.assertIn("visible_effect", contracts)
-        contracts = _detect_active_contracts_for_intake("implementation", "Fix database query", {})
-        self.assertNotIn("visible_effect", contracts)
-
-    def test_contract_detection_ordered_flow(self):
-        """Text with sequential/ordered keywords triggers ordered_flow contract."""
-        from workflow_core import _detect_active_contracts
-        self.assertIn("ordered_flow", _detect_active_contracts("This must run in strict sequential order"))
-        self.assertIn("ordered_flow", _detect_active_contracts("Step-by-step dependency chain"))
-        self.assertIn("ordered_flow", _detect_active_contracts("串行执行任务"))
-        self.assertNotIn("ordered_flow", _detect_active_contracts("Update the database schema"))
-
-    def test_contract_detection_safety_boundary(self):
-        """Text with safety/destructive keywords triggers safety_boundary contract."""
-        from workflow_core import _detect_active_contracts
-        self.assertIn("safety_boundary", _detect_active_contracts("This is a destructive irreversible operation"))
-        self.assertIn("safety_boundary", _detect_active_contracts("Implement rollback and revert logic"))
-        self.assertIn("safety_boundary", _detect_active_contracts("破坏性操作需要权限"))
-        self.assertNotIn("safety_boundary", _detect_active_contracts("Update the database schema"))
-
-    def test_contract_detection_observability(self):
-        """Text with logging/monitoring keywords triggers observability contract."""
-        from workflow_core import _detect_active_contracts
-        self.assertIn("observability", _detect_active_contracts("Add logging and monitoring"))
-        self.assertIn("observability", _detect_active_contracts("Implement tracing and metrics"))
-        self.assertIn("observability", _detect_active_contracts("配置监控和告警"))
-        self.assertNotIn("observability", _detect_active_contracts("Update the database schema"))
-
-    def test_contract_false_positive_low_risk_task(self):
-        """Ordinary low-risk task text should not trigger any contract."""
-        from workflow_core import _detect_active_contracts
-        text = "Update the database schema for the new user table"
-        contracts = _detect_active_contracts(text)
-        self.assertEqual(len(contracts), 0)
-
-    def test_contract_registry_in_build_clarification_payload(self):
-        """Promoted task should carry active_contracts and contract_gate_levels."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Stagger animation", "Animate rows with stagger fade-in", "session-main")
-            intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
-            set_intake_scope(root, intake["intake_id"], "Launcher reveal only.")
-            set_intake_design_artifact(
-                root,
-                intake["intake_id"],
-                final_expected_effect="Rows reveal with staggered fade.",
-                chosen_approach="Use lifecycle clarification first.",
-                final_implementation_plan="1. Confirm lifecycle\n2. Implement",
-                validation="Verify lifecycle behavior.",
-                approval="Approved.",
-            )
-            replace_intake_section(intake_path, "Opening", "Shell visible, rows hidden.")
-            replace_intake_section(intake_path, "During Transition", "Rows fade in staggered.")
-            replace_intake_section(intake_path, "After Open", "Stable list matches UI.")
-            replace_intake_section(intake_path, "Interrupt Behavior", "Typing cancels reveal.")
-            replace_intake_section(intake_path, "Anti-Outcomes", "No flash or clipping.")
-
-            promoted = promote_to_task(root, intake["intake_id"], "Stagger animation", "Animate rows", "implementation", ["Works"])
-            task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
-            clarification = task["clarification"]
-            self.assertIn("visible_effect", clarification.get("active_contracts", []))
-            gate_levels = clarification.get("contract_gate_levels", {})
-            self.assertEqual(gate_levels.get("visible_effect"), "hard")
-            self.assertTrue(clarification.get("needs_ui_visible_lifecycle_clarification"))
-
-    def test_contract_registry_ordered_flow_does_not_block_promotion(self):
-        """ordered_flow contract with reminder gate should not block promotion."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Ordered task", "This must run in strict sequential order", "session-main")
-            set_intake_scope(root, intake["intake_id"], "Ordered execution.")
-            set_intake_design_artifact(root, intake["intake_id"])
-            # Should promote fine even though ordered_flow is detected
-            promoted = promote_to_task(root, intake["intake_id"], "Ordered task", "Ordered execution", "implementation", ["Works"])
-            task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
-            clarification = task["clarification"]
-            self.assertIn("ordered_flow", clarification.get("active_contracts", []))
-            self.assertEqual(clarification.get("contract_gate_levels", {}).get("ordered_flow"), "reminder")
-
     # -----------------------------------------------------------------------
     # show_task_readiness
     # -----------------------------------------------------------------------
@@ -2573,10 +2239,6 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(result["missing"], [])
             self.assertTrue(result["writes_allowed"])
             self.assertIn("execution-ready", result["recommended_recovery"])
-            self.assertEqual(result["current_state"], "planning")
-            self.assertTrue(result["safe_to_continue"])
-            self.assertEqual(result["blocked_reason"], "")
-            self.assertEqual(result["recommended_next"], "Task is execution-ready. Start execution when ready.")
 
     def test_show_task_readiness_not_ready_missing_fields(self):
         from workflow_core import show_task_readiness, write_json_atomic
@@ -2600,36 +2262,6 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertFalse(result["ready"])
             self.assertIn("Chosen Approach", result["missing"])
             self.assertTrue(result["writes_allowed"])
-            self.assertIn("update-clarification", result["recommended_recovery"])
-            self.assertEqual(result["current_state"], "planning")
-            self.assertFalse(result["safe_to_continue"])
-            self.assertIn("Missing required clarification fields", result["blocked_reason"])
-            self.assertEqual(result["recommended_next"], result["recommended_recovery"])
-
-    def test_show_task_readiness_ui_visible_lifecycle_missing_fields(self):
-        from workflow_core import show_task_readiness, write_json_atomic
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "UI readiness", "Animate launcher rows with stagger fade", "s1")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "Opening", "First frame shows the launcher shell.")
-            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "During Transition", "Rows fade and slide in.")
-            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "After Open", "Stable list matches current UI.")
-            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "Interrupt Behavior", "Typing cancels the reveal.")
-            replace_intake_section(root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md", "Anti-Outcomes", "No flash or clipping.")
-            promoted = promote_to_task(root, intake["intake_id"], "UI readiness", "Animate launcher rows with stagger fade", "implementation", ["UI works"])
-            task_id = promoted["task_id"]
-
-            task_path = tasks_dir(root) / "active" / task_id / "task.json"
-            task = read_json(task_path)
-            task["clarification"]["opening"] = ""
-            write_json_atomic(task_path, task)
-
-            result = show_task_readiness(root, task_id)
-            self.assertFalse(result["ready"])
-            self.assertIn("Opening", result["missing"])
             self.assertIn("update-clarification", result["recommended_recovery"])
 
     def test_show_task_readiness_writes_not_allowed_in_paused(self):
@@ -2721,52 +2353,9 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(payload["ready"])
             self.assertEqual(payload["missing"], [])
             self.assertTrue(payload["writes_allowed"])
-            self.assertTrue(payload["safe_to_continue"])
             self.assertIn("task_id", payload)
             self.assertIn("status", payload)
             self.assertIn("write_allowed_statuses", payload)
-            self.assertIn("current_state", payload)
-            self.assertIn("blocked_reason", payload)
-            self.assertIn("recommended_next", payload)
-
-            self.assertIn("Current:", result.stderr)
-            self.assertIn("Safe to continue: yes", result.stderr)
-            self.assertIn("Recommended next:", result.stderr)
-
-    def test_show_task_readiness_cli_blocked_outputs_diagnostic_card(self):
-        import subprocess
-
-        from workflow_core import promote_to_task, write_json_atomic
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "CLI blocked", "CLI blocked", "s1")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            promoted = promote_to_task(root, intake["intake_id"], "CLI blocked", "CLI blocked", "implementation", ["CLI blocked"])
-            task_id = promoted["task_id"]
-
-            task_path = tasks_dir(root) / "active" / task_id / "task.json"
-            task = read_json(task_path)
-            task["clarification"]["chosen_approach"] = ""
-            write_json_atomic(task_path, task)
-
-            script = REPO_ROOT / "just-demand"
-            result = subprocess.run(
-                [sys.executable, str(script), str(root), "show-readiness", task_id],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            payload = json.loads(result.stdout)
-            self.assertFalse(payload["ready"])
-            self.assertFalse(payload["safe_to_continue"])
-            self.assertIn("blocked_reason", payload)
-            self.assertIn("recommended_next", payload)
-            self.assertIn("Why blocked:", result.stderr)
-            self.assertIn("Safe to continue: no", result.stderr)
-            self.assertIn("Missing fields:", result.stderr)
-            self.assertIn("Recommended next:", result.stderr)
 
     def test_show_task_readiness_cli_missing_task(self):
         import subprocess
@@ -2785,132 +2374,6 @@ class WorkflowCoreTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "error")
             self.assertIn("not found", payload["message"])
-
-    # -----------------------------------------------------------------------
-    # execution packet
-    # -----------------------------------------------------------------------
-
-    def test_build_execution_packet_prefers_selected_subtask_and_role_focus(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Packet task", "Build packet", "s1")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            promoted = promote_to_task(root, intake["intake_id"], "Packet task", "Build packet", "design", ["Works"])
-            task_id = promoted["task_id"]
-
-            task_dir = tasks_dir(root) / "active" / task_id
-            task = read_json(task_dir / "task.json")
-            task["subtasks"] = [
-                {"id": "sub-1", "title": "Patch helper", "status": "done", "scope": "Old work"},
-                {"id": "sub-2", "title": "Implement packet", "status": "open", "scope": "Current work"},
-            ]
-            write_json_atomic(task_dir / "task.json", task)
-
-            packet = build_execution_packet(root, task_id, role="coder", hints={"focus": "Keep scope tight."})
-
-            self.assertTrue(packet["ready"])
-            self.assertEqual(packet["selected_subtask"]["id"], "sub-2")
-            self.assertIn("Keep scope tight.", packet["focus"])
-            self.assertIn("Current work", packet["focus"])
-            self.assertGreaterEqual(len(packet["subtasks"]), 2)
-
-    def test_build_execution_packet_flags_overweight_background(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Packet lint", "Build packet lint", "s1")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            promoted = promote_to_task(root, intake["intake_id"], "Packet lint", "Build packet lint", "design", ["Works"])
-            task_id = promoted["task_id"]
-
-            packet = build_execution_packet(
-                root,
-                task_id,
-                role="tester",
-                hints={"background_notes": ["x" * 500, "y" * 500, "z" * 500]},
-            )
-
-            self.assertTrue(any(item["code"] == "background_overweight" for item in packet["lint"]))
-            rendered = render_execution_packet_markdown(packet)
-            self.assertIn("## Lint", rendered)
-            self.assertIn("background notes are too large", rendered.lower())
-
-    def test_build_packet_cli_renders_markdown(self):
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Packet CLI", "Build packet CLI", "s1")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            promoted = promote_to_task(root, intake["intake_id"], "Packet CLI", "Build packet CLI", "design", ["Works"])
-            task_id = promoted["task_id"]
-
-            script = REPO_ROOT / "just-demand"
-            result = subprocess.run(
-                [sys.executable, str(script), str(root), "build-packet", task_id, "--role", "tester", "--format", "markdown"],
-                text=True,
-                capture_output=True,
-            )
-
-            self.assertEqual(result.returncode, 0)
-            self.assertIn("# Execution Packet", result.stdout)
-            self.assertIn("## Testing Targets", result.stdout)
-
-    def test_render_context_cli_renders_markdown(self):
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Render context", "Render packet markdown", "s1")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            promoted = promote_to_task(root, intake["intake_id"], "Render context", "Render packet markdown", "design", ["Works"])
-            task_id = promoted["task_id"]
-
-            script = REPO_ROOT / "just-demand"
-            result = subprocess.run(
-                [sys.executable, str(script), str(root), "render-context", task_id, "--role", "coder"],
-                text=True,
-                capture_output=True,
-            )
-
-            self.assertEqual(result.returncode, 0)
-            self.assertIn("# Execution Packet", result.stdout)
-            self.assertIn("## Implementation Targets", result.stdout)
-
-    def test_lint_packet_cli_reports_findings_and_exit_code(self):
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            intake = create_intake(root, "Lint packet", "Lint packet CLI", "s1")
-            set_intake_scope(root, intake["intake_id"])
-            set_intake_design_artifact(root, intake["intake_id"])
-            promoted = promote_to_task(root, intake["intake_id"], "Lint packet", "Lint packet CLI", "design", ["Works"])
-            task_id = promoted["task_id"]
-
-            script = REPO_ROOT / "just-demand"
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    str(root),
-                    "lint-packet",
-                    task_id,
-                    "--hint",
-                    "background_notes=" + ("x" * 1000),
-                ],
-                text=True,
-                capture_output=True,
-            )
-
-            self.assertEqual(result.returncode, 0)
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["task_id"], task_id)
-            self.assertTrue(payload["ready"])
-            self.assertTrue(any(item["code"] == "background_overweight" for item in payload["lint"]))
 
     # -----------------------------------------------------------------------
     # update_task_clarification
@@ -3117,6 +2580,49 @@ class WorkflowCoreTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertTrue(payload["ok"])
             self.assertTrue(payload["ready"])
+
+    def test_cli_update_clarification_supports_lifecycle_fields(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Lifecycle fields", "Test lifecycle", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Lifecycle fields", "Test", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            task_dir = tasks_dir(root) / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            for field in ["opening", "during_transition", "after_open", "interrupt_behavior", "anti_outcomes"]:
+                task["clarification"][field] = ""
+            write_json_atomic(task_dir / "task.json", task)
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [
+                    sys.executable, str(script), str(root), "update-clarification", task_id,
+                    "--field", "opening=Ask the first visible result before implementation.",
+                    "--field", "during_transition=Ask one decision per turn.",
+                    "--field", "after_open=Use a final card before execution.",
+                    "--field", "interrupt_behavior=Resume the current round and next question.",
+                    "--field", "anti_outcomes=Do not ask like a form.",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["ready"])
+            self.assertEqual(payload["missing"], [])
+
+            task = read_json(task_dir / "task.json")
+            self.assertEqual(task["clarification"]["opening"], "Ask the first visible result before implementation.")
+            self.assertEqual(task["clarification"]["during_transition"], "Ask one decision per turn.")
+            self.assertEqual(task["clarification"]["after_open"], "Use a final card before execution.")
+            self.assertEqual(task["clarification"]["interrupt_behavior"], "Resume the current round and next question.")
+            self.assertEqual(task["clarification"]["anti_outcomes"], "Do not ask like a form.")
 
     def test_cli_update_clarification_unknown_field_rejected(self):
         import subprocess

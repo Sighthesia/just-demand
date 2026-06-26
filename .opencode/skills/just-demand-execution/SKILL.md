@@ -7,8 +7,6 @@ description: Use when a formal work item is ready to execute, when dispatching j
 
 Execute formal work items through focused subagents and script-owned state.
 
-Canonical workflow spec: `docs/workflow-spec.md`. Keep this skill focused on execution routing, context-package readiness, and recovery.
-
 ## Core Rules
 
 - Main agent coordinates; subagents execute focused work.

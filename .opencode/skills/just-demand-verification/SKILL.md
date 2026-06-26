@@ -7,8 +7,6 @@ description: Use after implementation, after just-demand-tester output, when ver
 
 Verify outcomes against the task brief and active validation revision.
 
-Canonical workflow spec: `docs/workflow-spec.md`. Keep this skill focused on verification closeout, checkpoint semantics, and archive behavior.
-
 ## Core Rules
 
 - No completion claim without fresh verification evidence.
@@ -188,6 +186,8 @@ This is the task-closure specialization of the global Output Style rule in `usin
 3. **Then a few terse bullets if needed**: what changed, verification result, remaining risk or next decision. Lead each bullet with the information-carrying word. For "what changed", describe the effect and design intent and reference changed files/symbols by name; do not paste implementation code line by line unless the user asks or a snippet is needed to pin a decision.
 4. **Default target: keep the whole report under ~300 characters.** This is a target for the main body, not a hard cut. If a required item does not fit, move it into the optional expand section below -- never drop a safety-relevant item (remaining risk, unverified area, checkpoint-commit status) just to hit the length.
 
+For clarification-heavy work, keep the report in final-card form first: summarize the observed effect, the anti-outcome, and the checks that passed before any file-by-file detail.
+
 Use this shape by default, and keep the conclusion/validation card as the first screen the user sees:
 
 ```text
@@ -204,19 +204,6 @@ Validation card:
 - Risk: <remaining non-visible risk or none>
 - User action: <none / review / choose / approve>
 ```
-
-For UI, animation, layout, reveal, overflow, clipping, masking, or visual quality work, the final report must include a storyboard final card before routine engineering detail. The card explains the approved visible lifecycle, not the implementation mechanics:
-
-```text
-Storyboard card:
-- Opening: <what the user sees in the first frame>
-- During Transition: <direction, fade/slide relationship, order, cadence, curve/feel>
-- After Open: <steady state and whether it matches the prior UI>
-- Interrupt Behavior: <typing, navigation, close, and page-switch behavior>
-- Anti-Outcomes: <flash, jank, clipping, reflow, text jump, repeated replay, or other rejected effects>
-```
-
-If any storyboard field is unknown for UI/animation work, do not claim the result is fully verified. Route back to clarification or report the missing field as residual risk.
 
 When the verification work is coming from `just-demand-tester`, preserve the tester's short report shape and use it as the evidence record for main-agent closeout. The tester report should still start with the user-visible effect/result, not with command transcripts:
 

@@ -38,8 +38,6 @@ Skills are best-effort; plugins are the real hard gate. When plugins are unavail
 
 Use this repository as an OpenCode-first local agent workflow runtime.
 
-Canonical workflow spec: `docs/workflow-spec.md`. Keep this skill focused on routing, fallback behavior, and main-agent identity.
-
 ## First Move
 
 Treat every turn as a routing reset. If the turn proposes concrete work, bug fixing, mismatch analysis, or correction feedback, load `socratic-clarification` first, then continue with the workflow route below.
@@ -93,18 +91,6 @@ Next best move: whether to continue comparing options or change the frame.
 
 Use this reset when the user keeps providing new samples, when the conversation is converging on finer detail without stronger evidence, or when a user-provided explanation is becoming the default without being re-tested.
 
-If the topic is UI, layout, animation, reveal, overflow, clipping, masking, or visual quality, the reset must also recover the visible-effect contract because context compression often drops the earlier approved feel. Add these fields before another fix:
-
-```text
-Visible lifecycle: opening -> during transition -> after open.
-Motion decisions still approved: direction, cadence, curve/feel, affected items.
-Interruption behavior: typing, navigation, close, page switch.
-Anti-outcomes: flash, jank, clipping, reflow, text jump, repeated replay.
-Next decision: keep the approved feel, or re-open the approach choice.
-```
-
-Do not continue patching a UI/animation issue after 3+ turns unless this reset has been stated. This catches long conversations and compressed context where the workflow banner survives but the detailed clarification contract has faded.
-
 ## Operating Model
 
 - User owns goals, preferences, constraints, and final approval.
@@ -126,8 +112,6 @@ Instead, immediately ask the user to choose:
 - skip one turn and continue in the main session
 
 Treat one failed subagent attempt as a transient exception, not as permission to stop using subagents for the rest of the conversation.
-
-Subagent interruptions are often caused by model provider or network errors. If the user chooses retry and a prior subagent `task_id` is available, continue that same subagent session instead of dispatching a fresh subagent.
 
 ### Role Model
 

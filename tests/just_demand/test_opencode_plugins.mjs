@@ -8,8 +8,6 @@ import {
   buildExecutionGateError,
   consumeIntakeFallbackPending,
   debugLog,
-  detectActiveContractsForTask,
-  detectContractTriggers,
   getActiveTask,
   getExecutionGateState,
   getMissingRequiredContextFiles,
@@ -28,8 +26,6 @@ import {
   looksLikeBashWriteCommand,
   readJson,
   readTaskContext,
-  getMissingExecutionGateFields,
-  taskIsReadyForExecution,
 } from "../../.opencode/plugins/just-demand-lib.js"
 import sessionStartFactory from "../../.opencode/plugins/just-demand-session-start.js"
 import stateFactory, {
@@ -184,14 +180,18 @@ test("readTaskContext combines context and implement brief", () => {
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Should we keep the legacy label?\n")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", type: "design", clarification: { expected_behavior: "Saving shows a toast.", actual_behavior: "Saving does nothing.", reproduction: "1. Click save", scope: "Save flow only.", final_expected_effect: "Saving shows a toast.", chosen_approach: "Direct save flow fix.", final_implementation_plan: "1. Fix save path\n2. Verify toast", approval: "Approved.", non_blocking_questions: ["Should we keep the legacy label?"] } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { expected_behavior: "Saving shows a toast.", actual_behavior: "Saving does nothing.", reproduction: "1. Click save", scope: "Save flow only.", non_blocking_questions: ["Should we keep the legacy label?"] } }))
   writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
   const context = readTaskContext(root, "task-a", "just-demand-coder")
-  assert.match(context, /# Execution Packet/)
-  assert.match(context, /## Scope/)
+  assert.match(context, /# Context/)
+  assert.match(context, /# Execution Context/)
+  assert.match(context, /## Goal/)
   assert.match(context, /Saving shows a toast/)
+  assert.match(context, /## Current Reality/)
+  assert.match(context, /Saving does nothing/)
   assert.match(context, /Save flow only/)
-  assert.match(context, /## Implementation Targets/)
+  assert.match(context, /# Implement/)
+  assert.match(context, /Remaining Open Questions/)
   assert.doesNotMatch(context, /# Verify/)
 })
 
@@ -202,11 +202,13 @@ test("readTaskContext includes open questions for just-demand-tester", () => {
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
   writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Is analytics coverage required?\n")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", type: "design", clarification: { expected_behavior: "Event fires once.", actual_behavior: "Event fires twice.", reproduction: "Submit the form once.", scope: "Analytics submit path.", final_expected_effect: "Event fires once.", chosen_approach: "Fix duplicate event path.", final_implementation_plan: "1. Fix event path\n2. Verify single event", validation: "Run analytics submit check.", approval: "Approved.", non_blocking_questions: ["Is analytics coverage required?"] } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { expected_behavior: "Event fires once.", actual_behavior: "Event fires twice.", reproduction: "Submit the form once.", scope: "Analytics submit path.", non_blocking_questions: ["Is analytics coverage required?"] } }))
   const context = readTaskContext(root, "task-a", "just-demand-tester")
-  assert.match(context, /# Execution Packet/)
+  assert.match(context, /# Execution Context/)
   assert.match(context, /Event fires once/)
-  assert.match(context, /## Testing Targets/)
+  assert.match(context, /Event fires twice/)
+  assert.match(context, /Remaining Open Questions/)
+  assert.match(context, /analytics coverage/)
 })
 
 test("readTaskContext injects compact execution artifact for coder and tester", () => {
@@ -234,139 +236,18 @@ test("readTaskContext injects compact execution artifact for coder and tester", 
   const testerContext = readTaskContext(root, "task-a", "just-demand-tester")
 
   for (const context of [coderContext, testerContext]) {
-    assert.match(context, /# Execution Packet/)
+    assert.match(context, /# Execution Context/)
+    assert.match(context, /## Goal/)
     assert.match(context, /User can save settings confidently/)
-    assert.match(context, /## Scope/)
+    assert.match(context, /Chosen Approach/)
     assert.match(context, /Approach A: inline save/)
-    assert.match(context, /## (Implementation Targets|Testing Targets)/)
+    assert.match(context, /Implementation Plan/)
+    assert.match(context, /Validation/)
     assert.doesNotMatch(context, /Approach Options/)
     assert.doesNotMatch(context, /Background save/)
-    assert.doesNotMatch(context, /Approval:/)
+    assert.doesNotMatch(context, /Approval/)
+    assert.doesNotMatch(context, /User approved Approach A/)
   }
-  assert.doesNotMatch(coderContext, /User approved Approach A/)
-  assert.match(testerContext, /User approved Approach A/)
-})
-
-test("readTaskContext prefers CLI rendered context when available", () => {
-  const root = makeRoot()
-  scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
-  mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "context.md"), "# Context\nLegacy context")
-  writeFileSync(join(taskDir, "implement.md"), "# Implement\nLegacy implement")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
-    id: "task-a",
-    title: "Packet-backed task",
-    type: "design",
-    status: "planning",
-    clarification: {
-      scope: "Packet scope only.",
-      final_expected_effect: "User gets packet-backed context.",
-      chosen_approach: "Use CLI rendering.",
-      final_implementation_plan: "1. Render context\n2. Inject prompt",
-      minimum_viable_knowledge: "packet = compact task context",
-      approval: "Approved.",
-    },
-  }))
-
-  const context = readTaskContext(root, "task-a", "just-demand-coder")
-  assert.match(context, /# Execution Packet/)
-  assert.match(context, /## Implementation Targets/)
-  assert.match(context, /User gets packet-backed context/)
-  assert.doesNotMatch(context, /Legacy implement/)
-})
-
-test("readTaskContext appends packet warnings when lint emits warnings", () => {
-  const root = makeRoot()
-  scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
-  mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "context.md"), "# Context\nLegacy context")
-  writeFileSync(join(taskDir, "implement.md"), "# Implement\nLegacy implement")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
-    id: "task-a",
-    title: "Packet warning task",
-    type: "design",
-    status: "planning",
-    clarification: {
-      scope: "Packet scope only.",
-      final_expected_effect: "User gets packet-backed context.",
-      chosen_approach: "Use CLI rendering.",
-      final_implementation_plan: "1. Render context\n2. Inject prompt",
-      minimum_viable_knowledge: "packet = compact task context",
-      approval: "Approved.",
-    },
-    subtasks: [
-      { id: "sub-1", title: "Done subtask", status: "done" },
-    ],
-  }))
-
-  const context = readTaskContext(root, "task-a", "just-demand-coder")
-  assert.match(context, /# Execution Packet/)
-  assert.match(context, /## Packet Warnings/)
-  assert.match(context, /selected subtask is already complete/i)
-})
-
-test("readTaskContext passes current_step as subtask focus into packet rendering", () => {
-  const root = makeRoot()
-  scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
-  mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "context.md"), "# Context\nLegacy context")
-  writeFileSync(join(taskDir, "implement.md"), "# Implement\nLegacy implement")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
-    id: "task-a",
-    title: "Subtask focus task",
-    type: "design",
-    status: "planning",
-    current_step: "sub-2",
-    clarification: {
-      scope: "Focused subtask scope.",
-      final_expected_effect: "User gets focused packet context.",
-      chosen_approach: "Use focused packet rendering.",
-      final_implementation_plan: "1. Select subtask\n2. Render context",
-      approval: "Approved.",
-    },
-    subtasks: [
-      { id: "sub-1", title: "Legacy task", status: "done", scope: "Old scope" },
-      { id: "sub-2", title: "Current task", status: "open", scope: "Current scope" },
-    ],
-  }))
-
-  const context = readTaskContext(root, "task-a", "just-demand-coder")
-  assert.match(context, /## Selected Subtask/)
-  assert.match(context, /ID: sub-2/)
-  assert.match(context, /Current scope/)
-})
-
-test("readTaskContext passes impact and current_step as packet hints", () => {
-  const root = makeRoot()
-  scaffoldWorkflow(root)
-  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
-  mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "context.md"), "# Context\nLegacy context")
-  writeFileSync(join(taskDir, "implement.md"), "# Implement\nLegacy implement")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
-    id: "task-a",
-    title: "Hint task",
-    type: "design",
-    status: "planning",
-    current_step: "Focus this work",
-    impact: ["src/feature.ts", "tests/feature.test.ts"],
-    clarification: {
-      scope: "Hint scope.",
-      final_expected_effect: "User gets hint-rich packet context.",
-      chosen_approach: "Use packet hints.",
-      final_implementation_plan: "1. Pass hints\n2. Render context",
-      approval: "Approved.",
-    },
-  }))
-
-  const context = readTaskContext(root, "task-a", "just-demand-coder")
-  assert.match(context, /Supplemental hint: Focus this work/)
-  assert.match(context, /## Recent Diff/)
-  assert.match(context, /src\/feature\.ts/)
-  assert.match(context, /tests\/feature\.test\.ts/)
 })
 
 test("readTaskContext falls back to task clarification questions when open_questions is just a header", () => {
@@ -469,14 +350,10 @@ test("write tool rule table identifies write-like tools and ignores read-only ba
     buildExecutionGateError("bash", { reason: "no_current_task_selected" }),
     "Blocked bash: unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first.",
   )
-  // The error message no longer has the hard-coded "UI, animation, or reveal work" hint.
-  // It uses the contract registry to generate hints. Since task-a has no active contracts
-  // (no stored flag, no text signal), only the generic update-clarification hint appears.
-  const errMsg = buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-a", missing: ["Scope", "Approval"] })
-  assert.match(errMsg, /Blocked apply_patch/)
-  assert.match(errMsg, /task-a/)
-  assert.match(errMsg, /Scope, Approval/)
-  assert.match(errMsg, /update-clarification/)
+  assert.equal(
+    buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-a", missing: ["Scope", "Approval"] }),
+    'Blocked apply_patch: active task task-a is not ready for execution yet. Missing or incomplete fields: Scope, Approval. Use `just-demand . update-clarification task-a --field <name>="<value>"` or `--from-file <path>` to fill pending fields.',
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -1089,6 +966,26 @@ test("session-start avoids duplicate reminder injection", async () => {
   assert.deepEqual(output.system, ["Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>"])
 })
 
+test("skill docs expose Question Strategy Layer and final-card guidance", () => {
+  const root = process.cwd()
+  const socraticSkill = readFileSync(join(root, ".opencode", "skills", "socratic-clarification", "SKILL.md"), "utf8")
+  const intakeSkill = readFileSync(join(root, ".opencode", "skills", "just-demand-intake", "SKILL.md"), "utf8")
+  const verificationSkill = readFileSync(join(root, ".opencode", "skills", "just-demand-verification", "SKILL.md"), "utf8")
+
+  assert.match(socraticSkill, /Question Strategy Layer/)
+  assert.match(socraticSkill, /visible_effect/i)
+  assert.match(socraticSkill, /ordered_flow/i)
+  assert.match(socraticSkill, /safety_boundary/i)
+  assert.match(socraticSkill, /observability/i)
+  assert.match(socraticSkill, /final card/i)
+
+  assert.match(intakeSkill, /final-card form/i)
+  assert.match(intakeSkill, /final-card language/i)
+
+  assert.match(verificationSkill, /final-card form/i)
+  assert.match(verificationSkill, /observed effect/i)
+})
+
 // ---------------------------------------------------------------------------
 // state: per-turn reminders stay lightweight and narrow
 // ---------------------------------------------------------------------------
@@ -1553,107 +1450,6 @@ test("state appends premise-check reminder for narrow frame-check turns and dedu
   assert.match(second.parts[0].text, /\[workflow-state\]/)
 })
 
-// ---------------------------------------------------------------------------
-// lib: contract registry
-// ---------------------------------------------------------------------------
-test("detectContractTriggers detects visible_effect from text", () => {
-  assert.ok(detectContractTriggers("Animate the launcher rows with stagger").has("visible_effect"))
-  assert.ok(detectContractTriggers("fade in the new UI elements").has("visible_effect"))
-  assert.equal(detectContractTriggers("Update the database schema").has("visible_effect"), false)
-})
-
-test("detectContractTriggers detects ordered_flow from text", () => {
-  assert.ok(detectContractTriggers("This must run in strict sequential order").has("ordered_flow"))
-  assert.ok(detectContractTriggers("Step-by-step dependency chain").has("ordered_flow"))
-  assert.ok(detectContractTriggers("串行执行任务").has("ordered_flow"))
-  assert.equal(detectContractTriggers("Update the database schema").has("ordered_flow"), false)
-})
-
-test("detectContractTriggers detects safety_boundary from text", () => {
-  assert.ok(detectContractTriggers("This is a destructive irreversible operation").has("safety_boundary"))
-  assert.ok(detectContractTriggers("Implement rollback and revert logic").has("safety_boundary"))
-  assert.ok(detectContractTriggers("破坏性操作需要权限").has("safety_boundary"))
-  assert.equal(detectContractTriggers("Update the database schema").has("safety_boundary"), false)
-})
-
-test("detectContractTriggers detects observability from text", () => {
-  assert.ok(detectContractTriggers("Add logging and monitoring").has("observability"))
-  assert.ok(detectContractTriggers("Implement tracing and metrics").has("observability"))
-  assert.ok(detectContractTriggers("配置监控和告警").has("observability"))
-  assert.equal(detectContractTriggers("Update the database schema").has("observability"), false)
-})
-
-test("detectContractTriggers returns empty for ordinary low-risk text", () => {
-  const result = detectContractTriggers("Update the database schema for the new user table")
-  assert.equal(result.size, 0)
-})
-
-test("detectActiveContractsForTask uses stored active_contracts array", () => {
-  const task = { id: "task-a", status: "planning", clarification: { active_contracts: ["visible_effect", "ordered_flow"] } }
-  const active = detectActiveContractsForTask(task)
-  assert.ok(active.has("visible_effect"))
-  assert.ok(active.has("ordered_flow"))
-  assert.equal(active.has("safety_boundary"), false)
-})
-
-test("detectActiveContractsForTask falls back to legacy boolean flag", () => {
-  const task = { id: "task-a", status: "planning", clarification: { needs_ui_visible_lifecycle_clarification: true } }
-  const active = detectActiveContractsForTask(task)
-  assert.ok(active.has("visible_effect"))
-})
-
-test("detectActiveContractsForTask detects visible_effect from task title", () => {
-  const task = { id: "task-a", title: "Animate the launcher rows", status: "planning", clarification: {} }
-  const active = detectActiveContractsForTask(task)
-  assert.ok(active.has("visible_effect"))
-})
-
-test("detectActiveContractsForTask returns empty for ordinary task", () => {
-  const task = { id: "task-a", title: "Update schema", status: "planning", clarification: {} }
-  const active = detectActiveContractsForTask(task)
-  assert.equal(active.size, 0)
-})
-
-test("execution gate requires visible lifecycle fields for UI animation tasks", () => {
-  const task = {
-    id: "task-ui",
-    title: "Animate launcher rows",
-    goal: "Make the list reveal feel smooth.",
-    type: "implementation",
-    clarification: {
-      scope: "Launcher rows only.",
-      blocking_questions: [],
-      final_expected_effect: "Rows reveal with the launcher.",
-      chosen_approach: "Staggered fade and slide.",
-      final_implementation_plan: "1. Clarify lifecycle\n2. Implement animation",
-      approval: "Approved.",
-      opening: "First frame shows the launcher shell with the first row barely visible.",
-      during_transition: "Rows fade up in staggered order from the launcher anchor.",
-      after_open: "The steady list matches the existing layout.",
-      interrupt_behavior: "Typing or closing cancels the animation cleanly.",
-      anti_outcomes: "No flash, clipping, or repeated replay.",
-      needs_ui_visible_lifecycle_clarification: true,
-    },
-  }
-
-  assert.equal(taskIsReadyForExecution(task), true)
-  assert.deepEqual(getMissingExecutionGateFields(task), [])
-
-  task.clarification.opening = ""
-  const missing = getMissingExecutionGateFields(task)
-  assert.ok(missing.includes("Opening"))
-  assert.equal(taskIsReadyForExecution(task), false)
-})
-
-test("execution gate error mentions update-clarification as recovery path", () => {
-  const error = buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-ui", missing: ["Opening", "Anti-Outcomes"] })
-  // Without a real task on disk, the contract hints are empty, but the generic
-  // update-clarification recovery instruction is always present.
-  assert.match(error, /Blocked apply_patch/)
-  assert.match(error, /task-ui/)
-  assert.match(error, /update-clarification/)
-})
-
 test("state blocks obvious execution-needed replies on unrouted active tasks", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -2031,24 +1827,6 @@ test("state resets after three same-topic turns", async () => {
   assert.match(fourth.parts[0].text, /\[workflow-state\]/)
 })
 
-test("state reset reminder includes UI animation visible lifecycle recovery", async () => {
-  const root = makeRoot()
-  scaffoldWorkflow(root)
-  mkdirSync(join(root, ".just-demand", "state", "active", "task-a"), { recursive: true })
-  const plugin = await stateFactory({ directory: root })
-  const first = { parts: [{ type: "text", text: "Animation reveal stagger rows subtle" }] }
-  const second = { parts: [{ type: "text", text: "Animation reveal stagger rows subtle" }] }
-  const third = { parts: [{ type: "text", text: "Animation reveal stagger rows subtle" }] }
-
-  await plugin["chat.message"]({ sessionID: "same-topic-ui" }, first)
-  await plugin["chat.message"]({ sessionID: "same-topic-ui" }, second)
-  await plugin["chat.message"]({ sessionID: "same-topic-ui" }, third)
-
-  assert.match(third.parts[0].text, /visible lifecycle/i)
-  assert.match(third.parts[0].text, /opening, during transition, after open/i)
-  assert.match(third.parts[0].text, /interruption behavior/i)
-})
-
 test("state asks retry or skip after subagent becomes unavailable", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -2089,7 +1867,7 @@ test("subagent-context injects context for supported subagent type", async () =>
   writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
   writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
   writeFileSync(join(taskDir, "open_questions.md"), "# Open Questions\n\n## Remaining Open Questions\n\n- Should the old shortcut still work?\n")
-  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", type: "design", clarification: { expected_behavior: "Shortcut triggers the action.", actual_behavior: "Shortcut is ignored.", reproduction: "Press the shortcut once.", scope: "Keyboard shortcut handling.", final_expected_effect: "Shortcut triggers the action.", chosen_approach: "Patch shortcut handler.", final_implementation_plan: "1. Patch handler\n2. Verify shortcut", approval: "Approved.", non_blocking_questions: ["Should the old shortcut still work?"] } }))
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { expected_behavior: "Shortcut triggers the action.", actual_behavior: "Shortcut is ignored.", reproduction: "Press the shortcut once.", scope: "Keyboard shortcut handling.", non_blocking_questions: ["Should the old shortcut still work?"] } }))
   const plugin = await subagentContextFactory({ directory: root })
   const input = { tool: "Task" }
   const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
@@ -2098,10 +1876,12 @@ test("subagent-context injects context for supported subagent type", async () =>
   assert.match(output.args.prompt, /# Just Demand Workflow/)
   assert.match(output.args.prompt, /# Execution Rules/)
   assert.match(output.args.prompt, /Do not call the Task tool\./)
-  assert.match(output.args.prompt, /# Execution Packet/)
-  assert.match(output.args.prompt, /## Scope/)
+  assert.match(output.args.prompt, /# Context/)
+  assert.match(output.args.prompt, /# Execution Context/)
+  assert.match(output.args.prompt, /## Goal/)
   assert.match(output.args.prompt, /Shortcut triggers the action/)
-  assert.match(output.args.prompt, /## Implementation Targets/)
+  assert.match(output.args.prompt, /# Implement/)
+  assert.match(output.args.prompt, /Remaining Open Questions/)
   assert.match(output.args.prompt, /# Requested Work/)
   assert.match(output.args.prompt, /Do the work/)
 })

@@ -7,8 +7,6 @@ description: Use when the user proposes a need, request, feature, design/refacto
 
 Force progressive clarification and design approval before implementation. This is a hard gate, not optional guidance, but it should feel like a short decision surface: default to options, defaults, and the smallest sufficient artifact before asking for prose.
 
-Canonical workflow spec: `docs/workflow-spec.md`. Keep this skill focused on the clarification gate and approval surface.
-
 This skill is the required second step after `using-just-demand`. When a turn pivots from Q&A into a request, bug, correction, or mismatch, reset here before intake, execution, or verification. In skill-only fallback mode, self-enforce the same rule: approval enters intake/formal-task flow, not inline editing, and codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) is also execution work that must wait for a formal task.
 
 <HARD-GATE>
@@ -254,16 +252,6 @@ If the evidence suggests the user's metric or experiment cannot answer the state
 
 For UI, animation, layout, reveal, overflow, clipping, masking, or "quality/feel" problems, do not collapse the symptom into the first containment fix. The approach comparison must distinguish user-visible solution shapes when they would feel different:
 
-For motion/reveal requests, progressive clarification is mandatory before implementation. Do not jump from "add stagger/fade/slide" directly to code. Ask the smallest set of user-visible questions that pin the effect:
-
-- **Start state**: what the user should see at the first frame (empty list, dim rows, stable rows with hidden content, or existing content that transforms).
-- **Motion shape**: whether rows fade only, slide in, rise from below, move from the launcher anchor, or follow container expansion.
-- **Cadence**: whether the stagger feels subtle, clearly sequential, or dramatic, and whether only the first screen or every newly appearing row participates.
-- **Interruption behavior**: what happens if the user types, navigates, closes, or switches pages mid-animation.
-- **End state**: confirm the final open state is visually identical to the current steady list unless the user asks otherwise.
-
-Use multiple small questions when a single question would hide decisions. A good sequence is: first ask what "展开效果" should look like, then ask direction/cadence, then ask interruption/anti-outcomes, then present the final visible-effect card. Do not treat the user's approval of a broad direction as approval of unspoken timing, direction, clipping, or interruption behavior.
-
 - **Containment**: clip, hide, mask, or delay drawing so the bad state is not visible. Good for strict bounds; risky when it feels like hard cutting.
 - **Synchronized entrance**: make foreground content follow the same expansion, anchor, timing, or direction as its background. Good when the issue is content arriving before its container.
 - **Layout/reflow**: change spacing, anchoring, available size, or row reveal so the content naturally fits. Good when clipping would make text or controls feel broken.
@@ -286,12 +274,6 @@ Use this compact shape when a UI/layout/animation approval would otherwise be am
 ```text
 Recommended: <one sentence describing the visible effect>
 
-Open motion:
-first frame -> row 1 fades/slides -> row 2 fades/slides -> ... -> steady list
-Direction: <from below / from side / from anchor / opacity only>
-Cadence: <delay per row, max rows, duration, curve>
-Interrupt: <typing/navigation/close behavior>
-
 Current:
 +-- <component/region> h=<current height> --+
 | <current visible problem>                  |
@@ -309,16 +291,6 @@ Target:
 Touchpoints: `<file/module>` and `<component>`; not changing <explicit exclusion>.
 Visible acceptance: <1-2 visible or operational checks>.
 Visible side effect: <expected on-screen side effect, or none>.
-```
-
-For animation final artifacts, always describe the whole visible lifecycle in user language:
-
-```text
-Opening: <what appears first and from where>
-During transition: <which rows move/fade, order, direction, approximate timing, and reused/easing feel>
-After open: <steady state and whether it matches current UI>
-Interrupted by typing/navigation/close: <cancel, finish, or continue behavior>
-Anti-outcomes: <flash, row reflow, clipping, text jumping, keyboard lag, repeated replay>
 ```
 
 ### Diagram Intent Cards
@@ -581,6 +553,18 @@ Keep `question` tool prompt text short and scannable. Do NOT dump full implement
 
 Bad: a 300-word plan pasted into the question prompt field.
 Good: a one-sentence summary in the prompt, with the full plan in the preceding chat message.
+
+## Question Strategy Layer
+
+Translate risk-shaped contracts into conversation, not a form. Default to: understand first, ask one decision per turn, offer a recommended default, show contrastive options, then assemble a final card before execution.
+
+- **visible_effect**: start with the first observable frame, first visible result, or what the user should notice on screen before asking about polish details.
+- **ordered_flow**: start with entry state, single-step order, and transition handoff; only then ask about follow-up states or recovery ordering.
+- **safety_boundary**: start with protected resources, confirmation gates, rollback/undo, and irreversible actions; do not bury the boundary inside a wider feature question.
+- **observability**: use success signals, logs, or checkpoints as supporting evidence, not as the primary question when the visible effect or boundary is still unclear.
+- **final card**: summarize intent, recommended default, contrastive options, anti-outcomes, and approval in one compact decision surface before execution.
+
+If a task only needs a light check, keep the round small and stop at the minimum decision that changes behavior. Do not turn the user into a field-by-field reviewer.
 
 ## Routing Rule
 
