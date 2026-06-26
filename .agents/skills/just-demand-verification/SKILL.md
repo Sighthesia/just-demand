@@ -203,6 +203,8 @@ Validation card:
 - User action: <none / review / choose / approve>
 ```
 
+For analysis, diagnosis, tuning, experiment-review, or root-cause conclusions that are not task-closeout reports, keep the first screen result-first: conclusion, concise status, then risk. Move command transcripts, routine checks, and deeper evidence into the optional expand section unless the check itself failed or the user explicitly asked for the evidence.
+
 When the verification work is coming from `just-demand-tester`, preserve the tester's short report shape and use it as the evidence record for main-agent closeout. The tester report should still start with the user-visible effect/result, not with command transcripts:
 
 - **Findings**: what passed or failed.
