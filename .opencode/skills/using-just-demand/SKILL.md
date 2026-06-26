@@ -19,6 +19,7 @@ These thoughts mean STOP and re-run routing:
 
 - "This is simple; I can just do it." Simple changes still require workflow routing.
 - "The user chose A, so I can implement now." Approach approval means enter intake/formal task flow unless execution readiness is already satisfied.
+- "The user approved the direction, so I can code now." Approval authorizes workflow entry and task readiness checks; it does not authorize inline execution by itself.
 - "I can inspect or patch first and clean up later." Reads may inform clarification, but writes wait for formal readiness.
 - "I can inspect the codebase first to prepare." Codebase investigation is also execution work and waits for a formal task.
 - "The plugins will catch mistakes." Skill-only fallback must self-enforce the process because plugins may be unavailable or unstable.
@@ -98,6 +99,7 @@ Use this reset when the user keeps providing new samples, when the conversation 
 - Subagents execute focused work from injected task context.
 - Scripts are the write path for `.just-demand/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
+- Approval words such as `批准`, `继续`, `同意`, `approved`, and `go ahead` are workflow-entry signals, not execution permission.
 - Long-context-consumption work belongs to subagents. The main agent MUST NOT perform broad code reading, large multi-file edits, or extended verification inline when a `just-demand-*` subagent can do it from a formal task package. An explicit workflow skip override is required to proceed inline.
 - Prefer proactive subagent dispatch for long-context execution work. Do not stay inline in the main session just because one direct attempt seems possible. The plugin's execution block enforces this default.
 - Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
@@ -206,6 +208,7 @@ These skills describe routing; runtime plugins enforce workflow entry and task-g
 - Task context is injected only for supported `just-demand-*` subagents.
 - Execution must not start until the current task context files exist and the intake is actually ready. Promotion is blocked when required clarification fields are still missing or blocking questions remain. Use `just-demand . list-active` to inspect unfinished tasks before dispatch.
 - `create-intake` is not the same as `promote`: `list-active` should remain empty until a formal task is promoted.
+- A one-time subagent skip is only for the current turn. Later long-context work or code edits must route again unless there is an explicit new override.
 - Restart OpenCode after changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`.
 
 ### No-Active-Task Three-Route Model

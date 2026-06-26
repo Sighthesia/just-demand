@@ -396,11 +396,13 @@ const buildReminderLines = (type) => {
       return [
         "- This looks like execution work that should run through a just-demand-* workflow subagent.",
         "- Dispatch the supported subagent path instead of continuing the long-context work inline.",
+        "- A one-turn skip does not carry forward: later code edits or long-context analysis need routing again unless you state a fresh explicit override.",
       ]
     case "verification_closeout":
       return [
         "- This sounds like a completion claim, but the task has not been closed with complete-verification yet.",
         "- Run `just-demand . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
+        "- Treat implementation checks as done, but do not present workflow closure as complete until verification closeout runs.",
       ]
     case "checkpoint_followup":
       return [
@@ -474,6 +476,7 @@ const blockVerificationCloseout = (text, reminderState) => {
     CLOSEOUT_BLOCKED_HEADER,
     "- This reads like a completion claim, but the task has not passed verification closeout yet.",
     "- Run `just-demand . complete-verification <task-id> passed \"<summary>\"` before concluding the task.",
+    "- If the implementation is done, say that checks are done but workflow closure is still incomplete.",
     "",
     "Original response:",
     quotedText,
@@ -497,6 +500,7 @@ const blockExecutionNeeded = (text, reminderState) => {
     EXECUTION_BLOCKED_HEADER,
     "- This reads like execution work that must run through a just-demand-* workflow subagent, not inline in the main session.",
     "- Dispatch the supported just-demand-* subagent for the current task.",
+    "- A skip only covers this turn; later analysis or code edits need a fresh routing decision unless you state a new explicit override.",
     "- To explicitly override the workflow path and continue inline, include \"skip workflow\" or \"workflow override\" in your response.",
     "",
     "Original response:",

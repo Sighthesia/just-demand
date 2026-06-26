@@ -616,6 +616,20 @@ test("controller decision allows workflow-entry narration before select-task hin
   })
 })
 
+test("approval words do not unlock execution without concrete workflow intent", () => {
+  const samples = [
+    "批准，继续分析",
+    "同意，继续看看",
+    "approved, go ahead with the analysis",
+  ]
+
+  for (const sample of samples) {
+    const decision = buildControllerDecision(sample, { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
+    assert.equal(decision.action, CONTROLLER_ACTION.allow)
+    assert.equal(decision.reason_code, "no_op")
+  }
+})
+
 test("workflow-entry narration detector allows command narration but not inline execution intent", () => {
   assert.equal(textLooksLikeWorkflowEntryNarration("I am creating the workflow entry now: create-intake first, then promote, then list-active."), true)
   assert.equal(textLooksLikeWorkflowEntryNarration("Run just-demand . --help so we can verify the help path."), true)
@@ -1430,7 +1444,62 @@ test("state stays quiet for ordinary analysis and status-summary language", asyn
     assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
     assert.doesNotMatch(output.parts[0].text, /execution work that should run through a just-demand-\* workflow subagent/i)
     assert.doesNotMatch(output.parts[0].text, /complete-verification/i)
+    assert.doesNotMatch(output.parts[0].text, /Preparing final response|Thought|Decision card|Validation card/i)
   }
+})
+
+test("subagent skip applies only to the current turn and later code edits block again", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const first = { parts: [{ type: "text", text: "Continue with the main session." }] }
+  const second = { parts: [{ type: "text", text: "I will inspect the codebase and implement the fix inline." }] }
+
+  markSubagentUnavailablePending(root, "skip-scope")
+  await plugin["chat.message"]({ sessionID: "skip-scope" }, first)
+  await plugin["chat.message"]({ sessionID: "skip-scope" }, second)
+
+  assert.match(first.parts[0].text, /retry now, or skip one turn/i)
+  assert.match(first.parts[0].text, /\[workflow-state\]/)
+  assert.match(second.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.match(second.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+})
+
+test("analysis-to-implementation pivot re-enters execution gating", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "After the analysis, I will implement the fix inline." }] }
+
+  await plugin["chat.message"]({ sessionID: "pivot-reset" }, output)
+
+  assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+})
+
+test("completion claims are blocked until verification closeout", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "This is done and ready to ship." }] }
+
+  await plugin["chat.message"]({ sessionID: "completion-block" }, output)
+
+  assert.match(output.parts[0].text, /closeout blocked/i)
+  assert.match(output.parts[0].text, /workflow closure is still incomplete/i)
+  assert.match(output.parts[0].text, /complete-verification/i)
 })
 
 test("state appends premise-check reminder for narrow frame-check turns and deduplicates it", async () => {

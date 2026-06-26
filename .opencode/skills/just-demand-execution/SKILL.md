@@ -16,9 +16,11 @@ Execute formal work items through focused subagents and script-owned state.
 - Do not dispatch implementation before the user has confirmed the direction and the task is ready.
 - Long-context implementation, research, and verification must run through subagents. The main session should coordinate and summarize, not absorb the full execution context inline.
 - When a suitable `just-demand-*` subagent exists for long-context work, prefer dispatch over continuing inline in the main session.
+- A one-turn subagent skip is not a persistent permission to keep doing later long-context work inline; new broad analysis or code edits require routing again unless the user gives a fresh explicit override.
 - When reporting progress or a result, lead with the user-visible effect or the decision the user needs to make; treat task state, mark commands, and checkpoint mechanics as supporting detail.
 - If a suitable subagent is unavailable, ask the user to retry now or skip one turn rather than silently falling back.
 - Implementation or verification must not start unless the current formal task already has the required task context files. Do not treat missing task context as a recoverable inline shortcut.
+- If analysis, diagnosis, or advice turns into code modification, treat that as a boundary reset and return to clarification before writing unless the task already contains explicit execution readiness.
 - Before dispatching a subagent or starting implementation, mark the task status with `mark`.
 - Before ending a turn with unfinished work, mark the task `paused` with current progress and known impact.
 
@@ -28,6 +30,8 @@ Execute formal work items through focused subagents and script-owned state.
 - `just-demand-coder`: use for scoped implementation once the task is clarified and the chosen approach is explicit.
 - `just-demand-tester`: use for validation against the task brief, visible-effect checks, and low-risk local fixes after implementation or when a result needs review.
 - `just-demand-advisor`: use for fresh-context diagnosis, repeated failures, cross-boundary framing, or when the main session needs an independent recommendation before choosing a path.
+
+- Approval words like `批准`, `继续`, `同意`, `approved`, and `go ahead` only confirm the workflow direction; they do not authorize inline execution by themselves.
 
 ## Output Handoff Rules
 

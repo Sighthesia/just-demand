@@ -186,6 +186,8 @@ This is the task-closure specialization of the global Output Style rule in `usin
 3. **Then a few terse bullets if needed**: what changed, verification result, remaining risk or next decision. Lead each bullet with the information-carrying word. For "what changed", describe the effect and design intent and reference changed files/symbols by name; do not paste implementation code line by line unless the user asks or a snippet is needed to pin a decision.
 4. **Default target: keep the whole report under ~300 characters.** This is a target for the main body, not a hard cut. If a required item does not fit, move it into the optional expand section below -- never drop a safety-relevant item (remaining risk, unverified area, checkpoint-commit status) just to hit the length.
 
+If `complete-verification` has not run yet, the report must not imply task closure: say the implementation/checks are done, but workflow closeout is still incomplete.
+
 For clarification-heavy work, keep the report in final-card form first: summarize the observed effect, the anti-outcome, and the checks that passed before any file-by-file detail.
 
 Use this shape by default, and keep the result-first summary as the first screen the user sees:

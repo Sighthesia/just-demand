@@ -23,6 +23,7 @@ Do NOT rationalize skipping any of these:
 
 - "I already know what the user wants" -- you still present the final artifact and get approval.
 - "The user said to just do it" -- you still present the final expected effect and get explicit approval before code changes.
+- Approval words like `批准`, `继续`, `同意`, `approved`, and `go ahead` only authorize workflow entry and readiness checks; they do not authorize code changes on their own.
 - "This is a small change" -- small changes cause mismatches too. Present the artifact.
 - "I can fix this while clarifying" -- no. Clarify first, then implement.
 - "The user is in a hurry" -- a short artifact is faster than a mismatched implementation.
@@ -52,6 +53,7 @@ You MUST complete these steps in order. Do not skip steps.
 6. **Capture final artifact** -- final expected effect, scope, anti-outcomes, chosen approach, final implementation plan, validation criteria, open questions.
 7. **Get user approval** -- explicit approval on the final artifact before any execution.
 8. **Promote or execute** -- only after approval, promote to a formal task when no ready task exists; begin execution only when formal execution readiness is satisfied.
+9. **Reset on pivot** -- when analysis, advice, or diagnosis turns into implementation/code edits, re-open clarification and confirm the new boundary before editing.
 
 ## Process Flow
 
