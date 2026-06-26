@@ -6,7 +6,6 @@ import {
   enforceExecutionGate,
   getExecutionGateState,
   getReminderState,
-  hasAssignedWorkflowSubagents,
   readTaskJson,
   taskLooksLikeLongContextExecutionCandidate,
   taskNeedsCheckpointFollowUp,
@@ -286,7 +285,7 @@ const buildControllerDecision = (text, reminderState) => {
       const taskSignalsExecution = ["execut", "implement", "verify", "changes_requested"].some(
         (fragment) => currentStep.includes(fragment) || status.includes(fragment),
       )
-      if (taskSignalsExecution && !hasAssignedWorkflowSubagents(activeTask)) {
+      if (taskSignalsExecution) {
         return {
           phase: CONTROLLER_PHASE.execute,
           action: CONTROLLER_ACTION.block,

@@ -494,7 +494,6 @@ export const textLooksLikeExplicitWorkflowSkip = (text) => {
 
 export const taskLooksLikeLongContextExecutionCandidate = (task, text) => {
   if (!task || task.status === "done") return false
-  if (hasAssignedWorkflowSubagents(task)) return false
 
   const currentStep = String(task.current_step || "").toLowerCase()
   const status = String(task.status || "").toLowerCase()

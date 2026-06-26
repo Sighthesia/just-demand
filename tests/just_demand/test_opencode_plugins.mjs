@@ -1679,7 +1679,7 @@ test("explicit workflow skip overrides execution block for new patterns and code
   }
 })
 
-test("state leaves execution-needed wording unchanged when workflow subagents are already assigned", async () => {
+test("state still blocks execution-needed text after workflow subagents were previously assigned", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -1691,8 +1691,27 @@ test("state leaves execution-needed wording unchanged when workflow subagents ar
 
   await plugin["chat.message"]({}, output)
 
-  assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(output.parts[0].text, /\[just-demand reminder\]/i)
+  assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+})
+
+test("controller decision still blocks execution intent after workflow subagents were previously assigned", () => {
+  const decision = buildControllerDecision("I will implement the feature and debug the bug inline.", {
+    activeTask: {
+      id: "task-a",
+      status: "executing",
+      current_step: "execute",
+      verification_status: "not_started",
+      assigned_subagents: ["just-demand-coder"],
+    },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+
+  assert.equal(decision.phase, CONTROLLER_PHASE.execute)
+  assert.equal(decision.action, CONTROLLER_ACTION.block)
+  assert.equal(decision.reason_code, "execution_needed")
+  assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true })
 })
 
 test("state blocks obvious verification closeout claims until complete-verification", async () => {
