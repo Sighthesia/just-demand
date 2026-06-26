@@ -182,26 +182,21 @@ When the verification work is coming from `just-demand-tester`, preserve the tes
 This is the task-closure specialization of the global Output Style rule in `using-just-demand`. Users skim; output past ~300 characters is usually not read closely. Write the final report bottom-line-up-front (BLUF) and scannable:
 
 1. **First line is the conclusion.** State the outcome in one sentence before any context. The user should get the result from line one alone.
-2. **Then a validation card**: expected effect, anti-outcome, visible/diagram acceptance, visible/expression side effect, checks passed, remaining risk, and user action. Keep it short. For UI/layout/animation and diagram work, user-facing behavior or diagram meaning comes before routine engineering checks.
+2. **Then a result-first summary**: status, remaining risk, and routine checks deferred below the fold unless a check failed or the user asked for it. Keep user-facing wording plain; do not label the opening block with internal workflow artifacts like `Validation card`.
 3. **Then a few terse bullets if needed**: what changed, verification result, remaining risk or next decision. Lead each bullet with the information-carrying word. For "what changed", describe the effect and design intent and reference changed files/symbols by name; do not paste implementation code line by line unless the user asks or a snippet is needed to pin a decision.
 4. **Default target: keep the whole report under ~300 characters.** This is a target for the main body, not a hard cut. If a required item does not fit, move it into the optional expand section below -- never drop a safety-relevant item (remaining risk, unverified area, checkpoint-commit status) just to hit the length.
 
 For clarification-heavy work, keep the report in final-card form first: summarize the observed effect, the anti-outcome, and the checks that passed before any file-by-file detail.
 
-Use this shape by default, and keep the conclusion/validation card as the first screen the user sees:
+Use this shape by default, and keep the result-first summary as the first screen the user sees:
 
 ```text
 <Conclusion in one sentence.>
 
-Validation card:
-- Expected: <user-visible result>
-- Anti-outcome: <what should not happen>
-- Visible acceptance: <what the user can see, feel, or operate>
-- Visible side effect: <expected screen/operational side effect, or none>
-- Diagram acceptance: <for diagram work, what the user can identify from the diagram>
-- Expression side effect: <for diagram work, what the diagram emphasizes, collapses, hides, or intentionally omits>
-- Checked: <tests/review passed; omit routine detail from first screen unless failed>
+Result:
+- Status: <what passed or what is now known>
 - Risk: <remaining non-visible risk or none>
+- Checks: <tests/review passed; omit routine detail from first screen unless failed>
 - User action: <none / review / choose / approve>
 ```
 

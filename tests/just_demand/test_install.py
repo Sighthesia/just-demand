@@ -360,14 +360,23 @@ class InstallIntegrationTests(unittest.TestCase):
             self.assertIn("`socratic-clarification` - always loaded second", using_skill)
             self.assertIn("follow-up turns that pivot from ordinary Q&A into concrete work", using_skill)
             self.assertIn("analysis, diagnosis, tuning, experiment review, or root-cause replies", using_skill)
+            self.assertIn("First-screen hygiene", using_skill)
+            self.assertIn("Result: <conclusion or user-visible effect>", using_skill)
             self.assertIn("reset the problem model", socratic_skill)
+            self.assertIn("Recommendation:", socratic_skill)
             self.assertIn("retry now", using_skill)
             self.assertIn("skip one turn", using_skill)
             self.assertIn("retry now or skip one turn", execution_skill)
+            self.assertIn("Result-first progress summary", execution_skill)
             self.assertIn("analysis or diagnosis updates, lead with the result and concise status", execution_skill)
+            self.assertIn("Do not surface internal workflow labels", execution_skill)
+            self.assertIn("Result:", verification_skill)
             self.assertIn("analysis, diagnosis, tuning, experiment-review, or root-cause conclusions", verification_skill)
+            self.assertNotIn("Validation card:", verification_skill)
             self.assertIn("socratic-clarification", intake_skill)
             self.assertIn("Do not outrank `socratic-clarification`", intake_skill)
+            self.assertIn("Recommendation:", intake_skill)
+            self.assertIn("Quick checks:", intake_skill)
 
     def test_install_opencode_global_deploys_expected_agent_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:

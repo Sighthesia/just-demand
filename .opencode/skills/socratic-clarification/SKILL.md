@@ -155,10 +155,10 @@ After gathering enough context, propose 2-3 different approaches with trade-offs
 
 This proposal is the highest-information moment of the turn, so it MUST follow the Output Style rules in `using-just-demand` (BLUF, scannable, user language). The user is the product manager and architect, not the implementer.
 
-Default to a low-reading-cost decision card, not a long analysis. The user should usually be able to approve, reject, or adjust the recommendation after reading one compact block.
+Default to a low-reading-cost recommendation block, not a long analysis. The user should usually be able to approve, reject, or adjust the recommendation after reading one compact block. Do not surface internal workflow labels like `Decision card` on the first screen; keep the opening block in user language.
 
 ```text
-Decision card:
+Recommendation:
 - Intent: <one sentence in user language>
 - Recommended default: <the path you would take if the user does not care>
 - Why this default: <one practical reason>
@@ -341,7 +341,7 @@ Before execution, capture this artifact and get explicit user approval.
 Present it under the same Output Style rules as the approach comparison: BLUF, user language, effect first. The `Final implementation plan` is the only section that names steps; keep even those at the level of observable behavior plus referenced files/symbols by name, not line-by-line code. Push internal mechanics into an optional expand section.
 
 ```text
-Decision card:
+Recommendation:
 - Intent: <one-sentence interpretation>
 - Recommended default: <chosen path unless user changes it>
 - Why: <short rationale>
@@ -375,10 +375,10 @@ Visible acceptance:
 Diagram acceptance:
 - <for diagram-heavy work, what the user can identify from the diagram: flow, boundary, owner, state, transition, source, transform, or destination>
 
-Validation card:
-- Quick check 1: <observable expectation>
-- Quick check 2: <observable expectation>
-- Quick check 3: <observable expectation>
+Quick checks:
+- <observable expectation 1>
+- <observable expectation 2>
+- <observable expectation 3>
 
 Visible side effect:
 - <expected screen/operational side effect, or "none"; do not introduce alternate unchosen solutions here>

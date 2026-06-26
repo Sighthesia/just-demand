@@ -73,14 +73,22 @@ Keep this summary short and structured. Prefer names as they appear in code. If 
 
 ### User-Facing Execution Updates
 
-When reporting execution progress or subagent results to the user, follow the User-Facing Output Contract from `using-just-demand` and keep the first screen effect-first:
+When reporting execution progress or subagent results to the user, follow the User-Facing Output Contract from `using-just-demand` and keep the first screen effect-first. Do not surface internal workflow labels like `Thought`, `Skill`, `Decision card`, `Validation card`, or full task-form fields in the opening block.
 
-- **First-screen answer**: what changed or what is happening now, in user-visible terms.
+Result-first progress summary:
+
+```text
+Result: <what changed or what is happening now, in user-visible terms>
+Status: <current state or concise progress>
+Risk: <remaining risk or none>
+Checks: <routine verification detail only if failed or explicitly needed>
+```
+
 - **User action**: usually "none" during execution unless a real product/architecture/risk decision is needed.
 - **Recommended default**: if blocked, state the recommended next move before alternatives.
 - **Analysis summary shape**: for analysis or diagnosis updates, lead with the result and concise status before any verification details; keep checks and transcripts below the fold unless something failed.
 - **Visible or diagram acceptance first**: for UI work, state the expected on-screen behavior, rejected anti-outcome, and visible side effects before routine checks; for diagram work, state the intended diagram meaning, diagram acceptance, and expression side effects before routine checks.
-- **Validation card**: when work is ready for review, state expected effect, anti-outcome, checks run, and remaining risk. Routine tests/build/lint are mandatory agent work; summarize them after the visible result unless they failed or require user action.
+- **Review-ready detail**: when work is ready for review, keep expected effect, anti-outcome, checks run, and remaining risk in the report body, but defer routine tests/build/lint detail unless a check failed or the user asked for it.
 - **Optional expansion**: changed files, structure summary, logs, and detailed rationale after the user-facing result.
 
 When summarizing subagent work back to the user, preserve the subagent's role-specific payload:

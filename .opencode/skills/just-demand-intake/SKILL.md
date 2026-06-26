@@ -206,10 +206,10 @@ Preferred prompts:
 - "Which choice would materially change the implementation path if guessed wrong?"
 - "Which details are nice-to-have and can stay open until execution?"
 
-Default to this low-reading-cost shape before asking the user to make a tradeoff; keep it readable as a decision card, not a spec template:
+Default to this low-reading-cost shape before asking the user to make a tradeoff; keep it readable as a recommendation block, not a spec template. Do not surface internal workflow labels like `Decision card` or `Validation card` on the first screen.
 
 ```text
-Decision card:
+Recommendation:
 - Intent: <one sentence>
 - Recommended default: <what the agent recommends>
 - Why: <one practical reason>
@@ -242,11 +242,10 @@ Target:
 <parent or surrounding region effect>
 
 Touchpoints: `<file/module>` and `<component>`; not changing <explicit exclusion>.
+Quick checks:
+- <observable checks; routine tests/build/lint are agent obligations and can be moved to optional detail unless failed>
 Visible acceptance: <1-2 visible or operational checks>.
 Visible side effect: <expected on-screen side effect, or none>.
-
-Validation card:
-- <observable checks; routine tests/build/lint are agent obligations and can be moved to optional detail unless failed>
 
 Diagram:
 - <small Mermaid/ASCII diagram when it reduces ambiguity, otherwise not needed>
