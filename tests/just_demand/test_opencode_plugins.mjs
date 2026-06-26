@@ -11,6 +11,7 @@ import {
   getActiveTask,
   getExecutionGateState,
   getMissingRequiredContextFiles,
+  getMissingExecutionGateFields,
   getWorkflowSubagentName,
   impactsOverlap,
   isIntakeFilePath,
@@ -26,6 +27,8 @@ import {
   looksLikeBashWriteCommand,
   readJson,
   readTaskContext,
+  detectActiveContractsForTask,
+  detectContractTriggers,
 } from "../../.opencode/plugins/just-demand-lib.js"
 import sessionStartFactory from "../../.opencode/plugins/just-demand-session-start.js"
 import stateFactory, {
@@ -1450,6 +1453,65 @@ test("state appends premise-check reminder for narrow frame-check turns and dedu
   assert.match(second.parts[0].text, /\[workflow-state\]/)
 })
 
+test("contract trigger detection covers visible effect, ordered flow, safety, and observability", () => {
+  assert.ok(detectContractTriggers("Animate launcher rows with stagger fade").has("visible_effect"))
+  assert.ok(detectContractTriggers("按顺序执行迁移步骤").has("ordered_flow"))
+  assert.ok(detectContractTriggers("Delete files with rollback safety").has("safety_boundary"))
+  assert.ok(detectContractTriggers("Add logging and metrics").has("observability"))
+  assert.equal(detectContractTriggers("Update the README wording").size, 0)
+})
+
+test("execution gate requires visible lifecycle and safety boundary fields", () => {
+  const visibleTask = {
+    id: "task-ui",
+    title: "Animate launcher rows",
+    goal: "Make the list reveal feel smooth.",
+    type: "implementation",
+    clarification: {
+      scope: "Launcher rows only.",
+      blocking_questions: [],
+      final_expected_effect: "Rows reveal with the launcher.",
+      chosen_approach: "Staggered fade and slide.",
+      final_implementation_plan: "1. Clarify lifecycle\n2. Implement animation",
+      approval: "Approved.",
+      needs_ui_visible_lifecycle_clarification: true,
+    },
+  }
+
+  assert.ok(detectActiveContractsForTask(visibleTask).has("visible_effect"))
+  const visibleMissing = getMissingExecutionGateFields(visibleTask)
+  assert.ok(visibleMissing.includes("Opening"))
+  assert.ok(visibleMissing.includes("During Transition"))
+  assert.ok(visibleMissing.includes("After Open"))
+  assert.ok(visibleMissing.includes("Interrupt Behavior"))
+  assert.ok(visibleMissing.includes("Anti-Outcomes"))
+
+  const safetyTask = {
+    id: "task-safety",
+    title: "Delete old backups safely",
+    goal: "Run a destructive cleanup with rollback safety.",
+    type: "implementation",
+    clarification: {
+      scope: "Backup cleanup only.",
+      blocking_questions: [],
+      final_expected_effect: "Old backups are cleaned safely.",
+      chosen_approach: "Dry-run then delete.",
+      final_implementation_plan: "1. List targets\n2. Delete approved targets",
+      approval: "Approved.",
+      active_contracts: ["safety_boundary"],
+    },
+  }
+
+  assert.ok(detectActiveContractsForTask(safetyTask).has("safety_boundary"))
+  assert.ok(getMissingExecutionGateFields(safetyTask).includes("Anti-Outcomes"))
+})
+
+test("execution gate error points contract tasks to recovery fields", () => {
+  const error = buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-ui", missing: ["Opening", "Anti-Outcomes"] })
+  assert.match(error, /Missing or incomplete fields: Opening, Anti-Outcomes/i)
+  assert.match(error, /update-clarification task-ui/i)
+})
+
 test("state blocks obvious execution-needed replies on unrouted active tasks", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -1907,6 +1969,56 @@ test("subagent-context resumes prior subagent session after unavailable retry", 
   assert.match(output.args.prompt, /Active task: task-a/)
 })
 
+test("subagent-context reuses parent subagent session for follow-up task lineage", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const parentDir = join(root, ".just-demand", "state", "active", "task-parent")
+  const childDir = join(root, ".just-demand", "state", "active", "task-child")
+  const followUpDir = join(root, ".just-demand", "state", "active", "task-followup")
+  const unrelatedDir = join(root, ".just-demand", "state", "active", "task-unrelated")
+  mkdirSync(parentDir, { recursive: true })
+  mkdirSync(childDir, { recursive: true })
+  mkdirSync(followUpDir, { recursive: true })
+  mkdirSync(unrelatedDir, { recursive: true })
+  writeFileSync(join(parentDir, "context.md"), "# Context\nParent")
+  writeFileSync(join(parentDir, "implement.md"), "# Implement\nParent")
+  writeFileSync(join(childDir, "context.md"), "# Context\nChild")
+  writeFileSync(join(childDir, "implement.md"), "# Implement\nChild")
+  writeFileSync(join(followUpDir, "context.md"), "# Context\nFollow-up")
+  writeFileSync(join(followUpDir, "implement.md"), "# Implement\nFollow-up")
+  writeFileSync(join(unrelatedDir, "context.md"), "# Context\nOther")
+  writeFileSync(join(unrelatedDir, "implement.md"), "# Implement\nOther")
+  writeFileSync(join(unrelatedDir, "task.json"), JSON.stringify({ id: "task-unrelated", status: "planning", clarification: { scope: "Unrelated scope." }, root_task_id: "task-unrelated", lineage_task_ids: [] }))
+  writeFileSync(join(parentDir, "task.json"), JSON.stringify({ id: "task-parent", status: "planning", clarification: { scope: "Parent scope." }, root_task_id: "task-parent", lineage_task_ids: [] }))
+  writeFileSync(join(childDir, "task.json"), JSON.stringify({ id: "task-child", status: "planning", clarification: { scope: "Child scope." }, parent_task_id: "task-parent", root_task_id: "task-parent", lineage_task_ids: ["task-parent"] }))
+  writeFileSync(join(followUpDir, "task.json"), JSON.stringify({ id: "task-followup", status: "planning", clarification: { scope: "Follow-up scope." }, parent_task_id: "task-parent", root_task_id: "task-parent", lineage_task_ids: ["task-parent"] }))
+  recordLastSubagentDispatchTaskId(root, "task-parent", "just-demand-coder", "opencode-task-parent")
+  recordLastSubagentDispatchTaskId(root, "task-child", "just-demand-coder", "opencode-task-child")
+
+  const plugin = await subagentContextFactory({ directory: root })
+
+  const childInput = { tool: "Task" }
+  const childOutput = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-child" }))
+  markSubagentUnavailablePending(root, "main")
+  await plugin["tool.execute.before"](childInput, childOutput)
+  assert.equal(childOutput.args.task_id, "opencode-task-child")
+
+  const followUpInput = { tool: "Task" }
+  const followUpOutput = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-followup" }))
+  markSubagentUnavailablePending(root, "main")
+  await plugin["tool.execute.before"](followUpInput, followUpOutput)
+  assert.equal(followUpOutput.args.task_id, "opencode-task-parent")
+
+  const unrelatedInput = { tool: "Task" }
+  const unrelatedOutput = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-unrelated" }))
+  markSubagentUnavailablePending(root, "main")
+  await plugin["tool.execute.before"](unrelatedInput, unrelatedOutput)
+  assert.equal(unrelatedOutput.args.task_id, undefined)
+})
+
 test("subagent-context records recovered task ids from task tool output", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
@@ -1923,6 +2035,24 @@ test("subagent-context records recovered task ids from task tool output", async 
   await plugin["tool.execute.after"](input, output)
 
   assert.equal(getLastSubagentDispatchTaskId(root, "task-a", "just-demand-coder"), "opencode-task-456")
+})
+
+test("subagent-context records recovered task ids from task tool input shape", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
+
+  const plugin = await subagentContextFactory({ directory: root })
+  const input = { tool: "Task", args: { subagent_type: "just-demand-coder", task_id: "opencode-task-input", prompt: "Do the work" } }
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+
+  await plugin["tool.execute.after"](input, output)
+
+  assert.equal(getLastSubagentDispatchTaskId(root, "task-a", "just-demand-coder"), "opencode-task-input")
 })
 
 test("subagent-context injects context when runtime uses agent argument key", async () => {

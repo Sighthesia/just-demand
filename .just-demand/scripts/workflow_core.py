@@ -38,6 +38,14 @@ def unique_readable_id(directories: list[Path], base_id: str, suffix: str = "") 
     raise RuntimeError(f"Could not generate unique id for {base_id}")
 
 
+def normalize_task_id(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
+    return None
+
+
 def workflow_dir(root: Path) -> Path:
     return root / ".just-demand"
 
@@ -211,12 +219,19 @@ def default_task_json(
     goal: str,
     task_type: str,
     acceptance_criteria: list[str],
+    *,
+    parent_task_id: str | None = None,
+    root_task_id: str | None = None,
+    lineage_task_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     now = utc_now()
     return {
         "schema_version": SCHEMA_VERSION,
         "id": task_id,
         "source_intake_id": intake_id,
+        "parent_task_id": parent_task_id,
+        "root_task_id": root_task_id or task_id,
+        "lineage_task_ids": list(lineage_task_ids or []),
         "title": title,
         "type": task_type,
         "status": "planning",
@@ -327,6 +342,27 @@ def read_intake_sections(root: Path, intake_id: str) -> dict[str, str]:
     if not intake_md.is_file():
         return {}
     return parse_markdown_sections(intake_md.read_text(encoding="utf-8"))
+
+
+def read_intake_parent_task_id(root: Path, intake_id: str) -> str | None:
+    intake_md = state_dir(root) / "intake" / f"{intake_id}.md"
+    if not intake_md.is_file():
+        return None
+
+    for line in intake_md.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            break
+        if line.startswith("Parent Task:"):
+            return normalize_task_id(line.partition(":")[2])
+    return None
+
+
+def find_task_json_path(root: Path, task_id: str) -> Path | None:
+    for base in (tasks_dir(root) / "active", tasks_dir(root) / "archive"):
+        candidate = base / task_id / "task.json"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def intake_needs_bug_clarification(task_type: str, raw_request: str, sections: dict[str, str]) -> bool:
@@ -547,13 +583,42 @@ def promote_to_task(
     if readiness_errors:
         raise RuntimeError("Promotion blocked: " + " ".join(readiness_errors))
 
+    parent_task_id = read_intake_parent_task_id(root, intake_id)
+    root_task_id = None
+    lineage_task_ids: list[str] = []
+    if parent_task_id:
+        parent_task_path = find_task_json_path(root, parent_task_id)
+        if parent_task_path is None:
+            raise FileNotFoundError(f"Parent task not found: {parent_task_id}")
+        parent_task = read_json(parent_task_path)
+        root_task_id = normalize_task_id(parent_task.get("root_task_id")) or normalize_task_id(parent_task.get("id")) or parent_task_id
+        lineage_task_ids = [parent_task_id]
+        parent_lineage = parent_task.get("lineage_task_ids", [])
+        if isinstance(parent_lineage, list):
+            for ancestor_id in parent_lineage:
+                normalized = normalize_task_id(ancestor_id)
+                if normalized and normalized not in lineage_task_ids:
+                    lineage_task_ids.append(normalized)
+        if root_task_id and root_task_id not in lineage_task_ids:
+            lineage_task_ids.append(root_task_id)
+
     date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     task_id = unique_readable_id(
         [tasks_dir(root) / "active", tasks_dir(root) / "archive"],
         f"{date_prefix}-{slugify(title)}-task",
     )
 
-    task_data = default_task_json(task_id, intake_id, title, goal, task_type, acceptance_criteria)
+    task_data = default_task_json(
+        task_id,
+        intake_id,
+        title,
+        goal,
+        task_type,
+        acceptance_criteria,
+        parent_task_id=parent_task_id,
+        root_task_id=root_task_id,
+        lineage_task_ids=lineage_task_ids,
+    )
     task_data["clarification"] = build_clarification_payload(root, intake_id, task_type)
     state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
@@ -687,7 +752,13 @@ def update_intake_section(root: Path, intake_id: str, section_name: str, value: 
     }
 
 
-def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> dict[str, str]:
+def create_intake(
+    root: Path,
+    title: str,
+    raw_request: str,
+    session_id: str,
+    parent_task_id: str | None = None,
+) -> dict[str, str]:
     ensure_workspace(root)
     date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     intake_id = unique_readable_id(
@@ -706,6 +777,7 @@ def create_intake(root: Path, title: str, raw_request: str, session_id: str) -> 
                 "Status: clarifying",
                 f"Created At: {now}",
                 f"Session: {session_id}",
+                *([f"Parent Task: {parent_task_id}"] if parent_task_id else []),
                 "",
                 "## Raw Request",
                 raw_request.strip(),

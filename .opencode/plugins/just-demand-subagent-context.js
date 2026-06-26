@@ -31,14 +31,14 @@ export default async ({ directory }) => {
       const toolName = String(input?.tool || "").toLowerCase()
       if (toolName !== "task") return
 
-      const args = output?.args
+      const args = output?.args || input?.args
       const subagentName = getWorkflowSubagentName(args)
       if (!args || !SUPPORTED.has(subagentName)) return
 
       const taskId = getActiveTask(directory)
       if (!taskId) return
 
-      const recoveredTaskId = getRecoveredSubagentTaskId(directory, taskId, subagentName, output)
+      const recoveredTaskId = getRecoveredSubagentTaskId(directory, taskId, subagentName, input, output)
       if (!recoveredTaskId) return
 
       recordLastSubagentDispatchTaskId(directory, taskId, subagentName, recoveredTaskId)
@@ -50,12 +50,12 @@ export default async ({ directory }) => {
         return
       }
       const toolName = String(input?.tool || "").toLowerCase()
-      enforceExecutionGate(directory, toolName, output?.args, "subagent.gate")
+      const args = output?.args || input?.args
+      enforceExecutionGate(directory, toolName, args, "subagent.gate")
       if (toolName !== "task") {
         debugLog("subagent.tool.before.skip", { reason: "not_task_tool", tool: toolName }, directory)
         return
       }
-      const args = output?.args
       const subagentName = getWorkflowSubagentName(args)
       debugLog("subagent.tool.before", { args_keys: argsKeys(args), workflow_subagent: subagentName }, directory)
       if (!args || !SUPPORTED.has(subagentName)) {
@@ -78,6 +78,9 @@ export default async ({ directory }) => {
       const resumedTaskId = reminderState.subagent_unavailable_pending
         ? getLastSubagentDispatchTaskId(directory, taskId, subagentName)
         : null
+      if (!output.args && args) {
+        output.args = args
+      }
       if (resumedTaskId && !args.task_id) {
         output.args.task_id = resumedTaskId
         debugLog("subagent.tool.before.resume", { task_id: taskId, workflow_subagent: subagentName, resumed_task_id: resumedTaskId }, directory)

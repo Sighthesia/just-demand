@@ -294,6 +294,31 @@ const getLastSubagentDispatchPath = (directory) => join(workflowRoot(directory),
 
 const readLastSubagentDispatchState = (directory) => readJson(getLastSubagentDispatchPath(directory)) || {}
 
+const dedupeStrings = (values) => {
+  const seen = new Set()
+  const result = []
+  for (const value of values) {
+    const text = String(value || "").trim()
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    result.push(text)
+  }
+  return result
+}
+
+const getTaskDispatchLookupTaskIds = (directory, workflowTaskId) => {
+  if (!workflowTaskId) return []
+  const task = readTaskJson(directory, workflowTaskId)
+  if (!task) return [workflowTaskId]
+
+  const lineage = [
+    task.parent_task_id,
+    ...(Array.isArray(task.lineage_task_ids) ? task.lineage_task_ids : []),
+    task.root_task_id,
+  ]
+  return dedupeStrings([workflowTaskId, ...lineage])
+}
+
 const extractTaskIdFromValue = (value, depth = 0) => {
   if (depth > 4 || value == null) return null
 
@@ -305,7 +330,7 @@ const extractTaskIdFromValue = (value, depth = 0) => {
       try {
         return extractTaskIdFromValue(JSON.parse(text), depth + 1)
       } catch {
-        // Fall through to direct pattern matching.
+        // fall through to pattern matching
       }
     }
 
@@ -354,7 +379,11 @@ const extractTaskIdFromValue = (value, depth = 0) => {
 export const getLastSubagentDispatchTaskId = (directory, workflowTaskId, subagentName) => {
   if (!workflowTaskId || !subagentName) return null
   const state = readLastSubagentDispatchState(directory)
-  return state?.[workflowTaskId]?.[subagentName]?.task_id || null
+  for (const taskId of getTaskDispatchLookupTaskIds(directory, workflowTaskId)) {
+    const taskDispatch = state?.[taskId]?.[subagentName]?.task_id
+    if (taskDispatch) return taskDispatch
+  }
+  return null
 }
 
 export const recordLastSubagentDispatchTaskId = (directory, workflowTaskId, subagentName, taskId) => {
@@ -374,7 +403,9 @@ export const recordLastSubagentDispatchTaskId = (directory, workflowTaskId, suba
   return current[subagentName]
 }
 
-export const getRecoveredSubagentTaskId = (directory, workflowTaskId, subagentName, output = null) => {
+export const getRecoveredSubagentTaskId = (directory, workflowTaskId, subagentName, input = null, output = null) => {
+  const fromInput = extractTaskIdFromValue(input)
+  if (fromInput) return fromInput
   const fromOutput = extractTaskIdFromValue(output)
   if (fromOutput) return fromOutput
   return getLastSubagentDispatchTaskId(directory, workflowTaskId, subagentName)
@@ -713,7 +744,7 @@ export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
       : { reason: "no_formal_task" }
 
   const suffix = normalized.reason === "task_not_ready"
-    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}.${_buildContractHints(normalized.taskId ? readTaskJson(".", normalized.taskId) : null)} Use \`just-demand . update-clarification ${normalized.taskId} --field <name>="<value>"\` or \`--from-file <path>\` to fill pending fields.`
+    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}. Use \`just-demand . update-clarification ${normalized.taskId} --field <name>="<value>"\` or \`--from-file <path>\` to fill pending fields.`
     : normalized.reason === "status_not_allowed"
       ? `active task ${normalized.taskId} is in status '${normalized.status}', which does not allow writes. Allowed statuses: planning, executing, verifying, changes_requested, tweaking, debugging.`
       : normalized.reason === "no_current_task_selected"
@@ -830,6 +861,7 @@ export const listUnfinishedTasks = (directory) => {
     return []
   }
 }
+
 
 
 const packetRoleForAgent = (agentName) => {

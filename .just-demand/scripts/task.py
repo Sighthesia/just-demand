@@ -123,6 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("title")
     create.add_argument("raw_request")
     create.add_argument("--session", default="main")
+    create.add_argument("--parent-task", default=None, dest="parent_task_id", help="Parent task id for follow-up intake lineage")
 
     promote = sub.add_parser("promote", help="Promote an intake to a formal task")
     promote.add_argument("intake_id")
@@ -216,7 +217,7 @@ def execute_command(root: Path, args: list[str]) -> int:
 
     try:
         if parsed.command == "create-intake":
-            result = create_intake(root, parsed.title, parsed.raw_request, parsed.session)
+            result = create_intake(root, parsed.title, parsed.raw_request, parsed.session, parsed.parent_task_id)
         elif parsed.command == "update-intake-section":
             result = update_intake_section(root, parsed.intake_id, parsed.section, parsed.value)
         elif parsed.command == "checkpoint-commit":

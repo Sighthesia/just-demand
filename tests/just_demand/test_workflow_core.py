@@ -447,6 +447,69 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(state["current_task_id"], result["task_id"])
             self.assertIn(result["task_id"], state["active_task_ids"])
 
+    def test_promote_follow_up_task_persists_parent_lineage(self):
+        from workflow_core import promote_to_task
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            parent_intake = create_intake(root, "Parent task", "Build the parent flow", "session-main")
+            set_intake_scope(root, parent_intake["intake_id"], "Parent scope.")
+            set_intake_design_artifact(root, parent_intake["intake_id"])
+            parent_task = promote_to_task(
+                root,
+                parent_intake["intake_id"],
+                "Parent task",
+                "Build the parent flow",
+                "implementation",
+                ["Parent task is ready."],
+            )
+
+            child_intake = create_intake(root, "Child task", "Build a follow-up flow", "session-main", parent_task["task_id"])
+            child_intake_path = root / ".just-demand" / "state" / "intake" / f"{child_intake['intake_id']}.md"
+            self.assertIn(f"Parent Task: {parent_task['task_id']}", child_intake_path.read_text(encoding="utf-8"))
+
+            set_intake_scope(root, child_intake["intake_id"], "Child scope.")
+            set_intake_design_artifact(root, child_intake["intake_id"], approval="Child approved.")
+            child_task = promote_to_task(
+                root,
+                child_intake["intake_id"],
+                "Child task",
+                "Build a follow-up flow",
+                "implementation",
+                ["Child task is ready."],
+            )
+
+            task = read_json(root / ".just-demand" / "state" / "active" / child_task["task_id"] / "task.json")
+            self.assertEqual(task["parent_task_id"], parent_task["task_id"])
+            self.assertEqual(task["root_task_id"], parent_task["task_id"])
+            self.assertEqual(task["lineage_task_ids"], [parent_task["task_id"]])
+
+    def test_promote_follow_up_task_accepts_archived_parent(self):
+        from workflow_core import complete_verification, promote_to_task
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+            parent_intake = create_intake(root, "Archived parent", "Build parent", "session-main")
+            set_intake_scope(root, parent_intake["intake_id"], "Parent scope.")
+            set_intake_design_artifact(root, parent_intake["intake_id"])
+            parent_task = promote_to_task(root, parent_intake["intake_id"], "Archived parent", "Build parent", "implementation", ["Parent ready."])
+            parent_task_id = parent_task["task_id"]
+            start_execution(root, parent_task_id, ["just-demand-coder"])
+            parent_path = root / ".just-demand" / "state" / "active" / parent_task_id / "tracked.txt"
+            parent_path.write_text("parent change\n", encoding="utf-8")
+            complete_verification(root, parent_task_id, "passed", "Parent verified", auto_archive=True)
+
+            child_intake = create_intake(root, "Child of archived", "Build child", "session-main", parent_task_id)
+            set_intake_scope(root, child_intake["intake_id"], "Child scope.")
+            set_intake_design_artifact(root, child_intake["intake_id"], approval="Child approved.")
+            child_task = promote_to_task(root, child_intake["intake_id"], "Child of archived", "Build child", "implementation", ["Child ready."])
+            task = read_json(root / ".just-demand" / "state" / "active" / child_task["task_id"] / "task.json")
+
+            self.assertEqual(task["parent_task_id"], parent_task_id)
+            self.assertEqual(task["root_task_id"], parent_task_id)
+            self.assertEqual(task["lineage_task_ids"], [parent_task_id])
+
     def test_promote_carries_low_reading_clarification_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -735,6 +798,28 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("intake_id", result.stdout)
             state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNotNone(state["current_intake_id"])
+
+    def test_cli_create_intake_accepts_parent_task(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            parent_intake = create_intake(root, "Parent workflow", "Build parent", "session-main")
+            set_intake_scope(root, parent_intake["intake_id"], "Parent scope.")
+            set_intake_design_artifact(root, parent_intake["intake_id"])
+            parent_task = promote_to_task(root, parent_intake["intake_id"], "Parent workflow", "Build parent", "implementation", ["Parent ready."])
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "create-intake", "Follow-up", "Build child", "--session", "session-main", "--parent-task", parent_task["task_id"]],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("intake_id", result.stdout)
+            payload = json.loads(result.stdout)
+            intake_path = root / ".just-demand" / "state" / "intake" / f"{payload['intake_id']}.md"
+            self.assertIn(f"Parent Task: {parent_task['task_id']}", intake_path.read_text(encoding="utf-8"))
 
     def test_create_intake_does_not_create_active_task_or_list_active_entry(self):
         import subprocess
