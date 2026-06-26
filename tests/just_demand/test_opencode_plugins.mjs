@@ -53,6 +53,20 @@ function scaffoldWorkflow(root) {
   writeFileSync(join(base, "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
 }
 
+function readWorkflowFailureGoldenTranscript() {
+  const fixturePath = join(process.cwd(), "tests/just_demand/fixtures/workflow_failure_golden.md")
+  const turns = []
+
+  for (const line of readFileSync(fixturePath, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*\d+\s*\|\s*([a-z-]+)\s*\|\s*(.+?)\s*$/i)
+    if (match) {
+      turns.push({ kind: match[1], text: match[2] })
+    }
+  }
+
+  return turns
+}
+
 // ---------------------------------------------------------------------------
 // lib: getActiveTask
 // ---------------------------------------------------------------------------
@@ -1467,6 +1481,55 @@ test("subagent skip applies only to the current turn and later code edits block 
   assert.match(first.parts[0].text, /\[workflow-state\]/)
   assert.match(second.parts[0].text, /\[just-demand execution blocked\]/i)
   assert.match(second.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+})
+
+test("workflow failure golden transcript keeps approval, skip scope, pivot gate, and closeout gate intact", async () => {
+  const [analysisTurn, approvalTurn, skipTurn, pivotTurn, closeoutTurn] = readWorkflowFailureGoldenTranscript()
+
+  assert.deepEqual(
+    [analysisTurn.kind, approvalTurn.kind, skipTurn.kind, pivotTurn.kind, closeoutTurn.kind],
+    ["analysis", "approval", "skip", "pivot", "closeout"],
+  )
+
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  const analysis = { parts: [{ type: "text", text: analysisTurn.text }] }
+  await plugin["chat.message"]({ sessionID: "golden-transcript" }, analysis)
+  assert.ok(analysis.parts[0].text.includes(analysisTurn.text))
+  assert.match(analysis.parts[0].text, /\[workflow-state\]/)
+  assert.doesNotMatch(analysis.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.doesNotMatch(analysis.parts[0].text, /closeout blocked/i)
+
+  const approvalDecision = buildControllerDecision(approvalTurn.text, {
+    activeTask: { id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+  assert.equal(approvalDecision.action, CONTROLLER_ACTION.allow)
+  assert.equal(approvalDecision.reason_code, "no_op")
+
+  markSubagentUnavailablePending(root, "golden-transcript")
+  const skip = { parts: [{ type: "text", text: skipTurn.text }] }
+  await plugin["chat.message"]({ sessionID: "golden-transcript" }, skip)
+  assert.match(skip.parts[0].text, /retry now, or skip one turn/i)
+  assert.match(skip.parts[0].text, /subagent was unavailable/i)
+
+  const pivot = { parts: [{ type: "text", text: pivotTurn.text }] }
+  await plugin["chat.message"]({ sessionID: "golden-transcript" }, pivot)
+  assert.match(pivot.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.match(pivot.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+  assert.doesNotMatch(pivot.parts[0].text, /retry now, or skip one turn/i)
+
+  const closeout = { parts: [{ type: "text", text: closeoutTurn.text }] }
+  await plugin["chat.message"]({ sessionID: "golden-transcript" }, closeout)
+  assert.match(closeout.parts[0].text, /closeout blocked/i)
+  assert.match(closeout.parts[0].text, /complete-verification/i)
 })
 
 test("analysis-to-implementation pivot re-enters execution gating", async () => {
