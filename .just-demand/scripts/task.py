@@ -284,6 +284,8 @@ def execute_command(root: Path, args: list[str]) -> int:
                 auto_archive=not parsed.no_auto_archive,
                 checkpoint_commit=not parsed.no_checkpoint_commit,
             )
+            if isinstance(result, dict) and result.get("completion_report"):
+                print_completion_report(result["completion_report"])
         elif parsed.command == "init":
             result = init_project(root)
             if result.get("status") == "success":
@@ -429,6 +431,27 @@ def print_numstat(numstat: list[dict[str, object]]) -> None:
         deletions = entry.get("deletions", 0)
         path = entry.get("path", "")
         print(f"    {additions}\t{deletions}\t{path}")
+
+
+def print_completion_report(report: dict[str, Any]) -> None:
+    completed = report.get("completed_items", []) or []
+    risks = report.get("remaining_risks", []) or []
+    verification_result = report.get("verification_result", "")
+    verification_summary = report.get("verification_summary", "")
+
+    print("\nCompletion report:", file=sys.stderr)
+    print(
+        f"  Completed: {', '.join(completed) if completed else 'none recorded'}",
+        file=sys.stderr,
+    )
+    print(
+        f"  Verification: {verification_result}{f' — {verification_summary}' if verification_summary else ''}",
+        file=sys.stderr,
+    )
+    print(
+        f"  Remaining risks: {', '.join(risks) if risks else 'none noted'}",
+        file=sys.stderr,
+    )
 
 
 def script_path() -> Path:

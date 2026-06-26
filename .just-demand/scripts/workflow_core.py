@@ -569,6 +569,139 @@ def render_open_questions_markdown(non_blocking_questions: list[str]) -> str:
     return "\n".join(lines)
 
 
+PLAN_STEP_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(?P<title>.+?)\s*$")
+
+
+def extract_ordered_plan_steps(plan_text: str) -> list[str]:
+    text = str(plan_text or "")
+    steps: list[str] = []
+    for line in text.splitlines():
+        match = PLAN_STEP_PATTERN.match(line)
+        if match:
+            title = match.group("title").strip()
+            if title:
+                steps.append(title)
+
+    if steps:
+        return steps
+
+    fallback = [line.strip() for line in text.splitlines() if line.strip()]
+    if fallback:
+        return fallback
+
+    stripped = text.strip()
+    return [stripped] if stripped else []
+
+
+def build_implementation_plan_subtasks(plan_text: str) -> list[dict[str, Any]]:
+    subtasks: list[dict[str, Any]] = []
+    for order, title in enumerate(extract_ordered_plan_steps(plan_text), start=1):
+        subtasks.append(
+            {
+                "id": f"plan-step-{order}",
+                "order": order,
+                "title": title,
+                "status": "todo",
+            }
+        )
+    return subtasks
+
+
+def render_implementation_plan_markdown(task: dict[str, Any], subtasks: list[dict[str, Any]] | None = None) -> str:
+    clarification = task.get("clarification", {}) or {}
+    plan_text = str(clarification.get("final_implementation_plan", "") or "").strip()
+    plan_subtasks = subtasks if subtasks is not None else build_implementation_plan_subtasks(plan_text)
+
+    lines = [
+        "# Implement",
+        "",
+        "## Approved Plan",
+        "",
+        plan_text or "_No approved implementation plan recorded._",
+        "",
+        "## Ordered Todo",
+        "",
+    ]
+    if plan_subtasks:
+        for subtask in plan_subtasks:
+            status = str(subtask.get("status", "todo") or "todo").strip().lower()
+            marker = "x" if status == "done" else " "
+            lines.append(f"- [{marker}] {subtask.get('title', '').strip()}")
+    else:
+        lines.append("- [ ] No ordered steps captured yet.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def sync_implementation_plan_context(
+    root: Path,
+    task_id: str,
+    *,
+    task: dict[str, Any] | None = None,
+    require_plan: bool = False,
+    mark_done: bool = False,
+) -> dict[str, Any]:
+    tpath = task_path(root, task_id)
+    task_json_path = tpath / "task.json"
+    if task is None:
+        task = read_json(task_json_path)
+
+    task_type = str(task.get("type", "") or "").strip().lower()
+    if task_type not in {"design", "implementation", "feature", "feat", "refactor", "architecture"}:
+        return task
+
+    clarification = task.get("clarification", {}) or {}
+    plan_text = str(clarification.get("final_implementation_plan", "") or "").strip()
+    if require_plan and not plan_text:
+        raise RuntimeError(
+            f"Cannot capture approved plan for task {task_id}: Final Implementation Plan is empty"
+        )
+
+    subtasks = build_implementation_plan_subtasks(plan_text)
+    if mark_done:
+        completed_at = utc_now()
+        subtasks = [
+            {**subtask, "status": "done", "completed_at": completed_at}
+            for subtask in subtasks
+        ]
+
+    task_updates = {"subtasks": subtasks}
+    task = update_task(root, task_id, task_updates)
+    (tpath / "implement.md").write_text(render_implementation_plan_markdown(task, subtasks), encoding="utf-8")
+    return task
+
+
+def build_completion_report(task: dict[str, Any], result: str, summary: str) -> dict[str, Any]:
+    subtasks = task.get("subtasks", []) or []
+    completed_items = [
+        str(subtask.get("title", "")).strip()
+        for subtask in subtasks
+        if str(subtask.get("status", "") or "").strip().lower() == "done" and str(subtask.get("title", "") or "").strip()
+    ]
+    if result == "passed" and not completed_items:
+        completed_items = [
+            str(subtask.get("title", "")).strip()
+            for subtask in subtasks
+            if str(subtask.get("title", "") or "").strip()
+        ]
+
+    clarification = task.get("clarification", {}) or {}
+    remaining_risks = [
+        str(item).strip()
+        for item in (clarification.get("non_blocking_questions", []) or [])
+        if str(item).strip()
+    ]
+    if not remaining_risks:
+        remaining_risks = ["None noted."]
+
+    return {
+        "completed_items": completed_items,
+        "verification_result": result,
+        "verification_summary": summary,
+        "remaining_risks": remaining_risks,
+    }
+
+
 def promote_to_task(
     root: Path,
     intake_id: str,
@@ -620,6 +753,9 @@ def promote_to_task(
         lineage_task_ids=lineage_task_ids,
     )
     task_data["clarification"] = build_clarification_payload(root, intake_id, task_type)
+    task_data["subtasks"] = build_implementation_plan_subtasks(
+        str(task_data["clarification"].get("final_implementation_plan", "") or "")
+    )
     state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
 
@@ -636,7 +772,7 @@ def promote_to_task(
             "context.md": "# Context\n\n",
             "decisions.md": "# Decisions\n\n",
             "open_questions.md": render_open_questions_markdown(task_data["clarification"]["non_blocking_questions"]),
-            "implement.md": "# Implement\n\n",
+            "implement.md": render_implementation_plan_markdown(task_data, task_data["subtasks"]),
             "verify.md": "# Verify\n\n",
         }.items():
             (tmp_path / name).write_text(content, encoding="utf-8")
@@ -1105,6 +1241,8 @@ def update_task_clarification(root: Path, task_id: str, fields: dict[str, Any]) 
 
     task["clarification"] = clarification
     update_task(root, task_id, {"clarification": clarification})
+
+    task = sync_implementation_plan_context(root, task_id, task=task)
 
     # Regenerate open_questions.md from non_blocking_questions
     non_blocking = clarification.get("non_blocking_questions", []) or []
@@ -1777,7 +1915,9 @@ def start_execution(root: Path, task_id: str, subagents: list[str]) -> dict[str,
         if not (tpath / name).is_file():
             raise FileNotFoundError(f"Missing required file for execution: {name}")
 
-    before_status = read_json(tpath / "task.json")["status"]
+    task = read_json(tpath / "task.json")
+    task = sync_implementation_plan_context(root, task_id, task=task, require_plan=True)
+    before_status = task["status"]
 
     updates = {
         "status": "executing",
@@ -1894,6 +2034,9 @@ def complete_verification(
     if result == "passed" and checkpoint_commit:
         checkpoint_result = create_checkpoint_commit(root, task_id)
 
+    if result == "passed":
+        task = sync_implementation_plan_context(root, task_id, task=task, mark_done=True)
+
     # Auto-archive when verification passes
     archive_result = None
     archive_error = None
@@ -1923,6 +2066,8 @@ def complete_verification(
         result_data["archived"] = False
         if archive_error:
             result_data["archive_error"] = archive_error
+
+    result_data["completion_report"] = build_completion_report(result_data, result, summary)
 
     return result_data
 

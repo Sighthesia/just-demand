@@ -33,6 +33,7 @@ from workflow_core import (
     state_dir,
     tasks_dir,
     task_event_path,
+    update_task_clarification,
     write_json_atomic,
 )
 
@@ -441,6 +442,11 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(task["acceptance_criteria"], ["Workspace intake can be promoted to a formal task."])
             self.assertEqual(task["clarification"]["scope"], "Build the initial OpenCode-first workflow runtime.")
             self.assertEqual(task["clarification"]["blocking_questions"], [])
+            self.assertEqual(
+                [item["title"] for item in task["subtasks"]],
+                ["Implement", "Verify"],
+            )
+            self.assertIn("## Ordered Todo", (task_dir / "implement.md").read_text(encoding="utf-8"))
 
             state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNone(state["current_intake_id"])
@@ -1263,6 +1269,8 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(payload["archived"])
             self.assertTrue(payload["checkpoint_commit"]["created"])
             self.assertTrue((tasks_dir(root) / "archive" / task_id).is_dir())
+            self.assertIn("Completion report:", result.stderr)
+            self.assertIn("Verification: passed — All done", result.stderr)
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
             self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint cli checkpoint")
@@ -1850,6 +1858,28 @@ class WorkflowCoreTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "Approval"):
                 promote_to_task(root, intake["intake_id"], "Design work", "Build feature", "design", ["It works"])
+
+    def test_update_clarification_refreshes_ordered_plan_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Plan refresh", "Build a flow", "session-main")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"], final_implementation_plan="1. First step\n2. Second step", approval="Approved")
+            promoted = promote_to_task(root, intake["intake_id"], "Plan refresh", "Build a flow", "design", ["Plan refresh works"])
+            task_id = promoted["task_id"]
+
+            task_dir = root / ".just-demand" / "state" / "active" / task_id
+            task = read_json(task_dir / "task.json")
+            task["clarification"]["final_implementation_plan"] = "1. Updated first\n2. Updated second"
+            write_json_atomic(task_dir / "task.json", task)
+
+            update_task_clarification(root, task_id, {"chosen_approach": "Approach A."})
+
+            task = read_json(task_dir / "task.json")
+            self.assertEqual([item["title"] for item in task["subtasks"]], ["Updated first", "Updated second"])
+            implement_text = (task_dir / "implement.md").read_text(encoding="utf-8")
+            self.assertIn("- [ ] Updated first", implement_text)
+            self.assertIn("- [ ] Updated second", implement_text)
 
     def test_promote_blocks_implementation_without_design_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:
