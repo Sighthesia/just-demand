@@ -11,6 +11,8 @@ description: "Load this skill first for repo work so the correct just-demand rou
 
 If you were dispatched as a subagent to execute a specific task, skip this skill. Otherwise, load it first for repo work and follow the routing below whenever a matching workflow skill applies.
 
+Canonical workflow spec: `docs/workflow-spec.md`. When this skill or any agent guidance diverges from the spec, the spec is the reference. It covers product philosophy, role model, lifecycle, and the user-expectation contract model.
+
 ## Mandatory Skill Check
 
 If there is even a small chance this turn involves repo work, workflow state, a request, a bug, a correction, a design/refactor, or execution, invoke the relevant Just Demand skill before responding or taking action.
@@ -117,8 +119,10 @@ Treat one failed subagent attempt as a transient exception, not as permission to
 
 ### Role Model
 
-- **User**: boss, product manager, and architecture approver. Defines goals, constraints, module boundaries, and tradeoff preferences.
-- **Main agent**: workflow owner and dispatcher. Owns clarification, intake, promotion, subagent routing, verification closeout, and summaries.
+This section summarizes the role contract. For the full model including default ambiguity, effect-first communication, mismatch optioning, and reflection triggers, see `docs/workflow-spec.md`.
+
+- **User**: boss, product manager, and architecture approver. Defines goals, constraints, module boundaries, and tradeoff preferences. The user does not write implementation plans, read diffs line by line, or compose deviation descriptions from scratch.
+- **Main agent**: workflow owner and dispatcher. Owns clarification, intake, promotion, subagent routing, verification closeout, and summaries. Reports in effect-first style by default; implementation detail is secondary.
 - **Subagent team**: `just-demand-researcher` investigates, `just-demand-coder` implements, `just-demand-tester` verifies, and `just-demand-advisor` gives fresh-context diagnosis or solution framing for hard cross-boundary problems.
 - **Documentation ownership**: reusable lessons become skills, and task-only decisions stay in the archive or task-local notes; there is no active standalone docs role.
 

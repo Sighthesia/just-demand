@@ -973,69 +973,105 @@ const readPacketLintWarnings = (directory, taskId, agentName, task = null) => {
 
 
 
+export const readLatestFollowup = (directory, taskId) => {
+  const followupsDir = join(workflowRoot(directory), "state", "active", taskId, "followups")
+  if (!existsSync(followupsDir)) return null
+  const entries = readdirSync(followupsDir)
+    .filter((name) => /^followup-\d{3}\.md$/.test(name))
+    .sort()
+  if (entries.length === 0) return null
+  const content = readTextIfExists(join(followupsDir, entries[entries.length - 1]))
+  return content || null
+}
+
+export const readReflectionContext = (directory, taskId) => {
+  const path = join(workflowRoot(directory), "state", "active", taskId, "reflection.md")
+  const content = readTextIfExists(path)
+  return content || null
+}
+
 export const readTaskContext = (directory, taskId, agentName) => {
   const task = readTaskJson(directory, taskId)
   const renderedContext = readRenderedTaskContext(directory, taskId, agentName, task)
+  let context
+
   if (renderedContext) {
     const lintWarnings = readPacketLintWarnings(directory, taskId, agentName, task)
-    if (lintWarnings.length > 0) {
-      return `${renderedContext}\n\n## Packet Warnings\n${lintWarnings.join("\n")}`
+    context = lintWarnings.length > 0
+      ? `${renderedContext}\n\n## Packet Warnings\n${lintWarnings.join("\n")}`
+      : renderedContext
+  } else {
+    const taskDir = join(workflowRoot(directory), "state", "active", taskId)
+    const parts = []
+
+    const ctx = readTextIfExists(join(taskDir, "context.md"))
+    if (ctx) parts.push(ctx)
+
+    if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+      const clarificationContext = renderClarificationContext(task)
+      if (clarificationContext) parts.push(clarificationContext)
     }
-    return renderedContext
+
+    const decisions = readTextIfExists(join(taskDir, "decisions.md"))
+    if (decisions) parts.push(decisions)
+
+    const openQuestions = readTextIfExists(join(taskDir, "open_questions.md"))
+    const clarificationQuestions = task?.clarification?.non_blocking_questions || []
+    const hasRemainingOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, "")) || clarificationQuestions.length > 0
+    const renderedOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, ""))
+      ? openQuestions
+      : `# Open Questions\n\n## Remaining Open Questions\n\n${clarificationQuestions.map((question) => `- ${question}`).join("\n")}\n`
+    if (hasRemainingOpenQuestions && ["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+      parts.push(renderedOpenQuestions)
+    }
+
+    switch (agentName) {
+      case "just-demand-coder": {
+        const implement = readTextIfExists(join(taskDir, "implement.md"))
+        if (implement) parts.push(implement)
+        break
+      }
+      case "just-demand-tester": {
+        const verify = readTextIfExists(join(taskDir, "verify.md"))
+        if (verify) parts.push(verify)
+        break
+      }
+      case "just-demand-researcher": {
+        const researchDir = join(taskDir, "research")
+        if (existsSync(researchDir)) {
+          parts.push("Research outputs: write any artifacts under this task's local research/ directory.")
+        }
+        break
+      }
+      case "just-demand-advisor": {
+        const advisorDir = join(taskDir, "advisor")
+        if (existsSync(advisorDir)) {
+          parts.push("Advisory outputs: write any analysis artifacts under this task's local advisor/ directory.")
+        }
+        break
+      }
+    }
+
+    context = parts.join("\n\n---\n\n")
   }
 
-  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
-  const parts = []
-
-  const context = readTextIfExists(join(taskDir, "context.md"))
-  if (context) parts.push(context)
-
+  // Append latest follow-up context for coder and tester
   if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
-    const clarificationContext = renderClarificationContext(task)
-    if (clarificationContext) parts.push(clarificationContext)
-  }
-
-  const decisions = readTextIfExists(join(taskDir, "decisions.md"))
-  if (decisions) parts.push(decisions)
-
-  const openQuestions = readTextIfExists(join(taskDir, "open_questions.md"))
-  const clarificationQuestions = task?.clarification?.non_blocking_questions || []
-  const hasRemainingOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, "")) || clarificationQuestions.length > 0
-  const renderedOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, ""))
-    ? openQuestions
-    : `# Open Questions\n\n## Remaining Open Questions\n\n${clarificationQuestions.map((question) => `- ${question}`).join("\n")}\n`
-  if (hasRemainingOpenQuestions && ["just-demand-coder", "just-demand-tester"].includes(agentName)) {
-    parts.push(renderedOpenQuestions)
-  }
-
-  switch (agentName) {
-    case "just-demand-coder": {
-      const implement = readTextIfExists(join(taskDir, "implement.md"))
-      if (implement) parts.push(implement)
-      break
-    }
-    case "just-demand-tester": {
-      const verify = readTextIfExists(join(taskDir, "verify.md"))
-      if (verify) parts.push(verify)
-      break
-    }
-    case "just-demand-researcher": {
-      const researchDir = join(taskDir, "research")
-      if (existsSync(researchDir)) {
-        parts.push("Research outputs: write any artifacts under this task's local research/ directory.")
-      }
-      break
-    }
-    case "just-demand-advisor": {
-      const advisorDir = join(taskDir, "advisor")
-      if (existsSync(advisorDir)) {
-        parts.push("Advisory outputs: write any analysis artifacts under this task's local advisor/ directory.")
-      }
-      break
+    const followup = readLatestFollowup(directory, taskId)
+    if (followup) {
+      context += `\n\n---\n\n# Latest Follow-Up Context\n\n${followup}`
     }
   }
 
-  return parts.join("\n\n---\n\n")
+  // Append reflection context for advisor
+  if (agentName === "just-demand-advisor") {
+    const reflection = readReflectionContext(directory, taskId)
+    if (reflection) {
+      context += `\n\n---\n\n# Reflection Context\n\n${reflection}`
+    }
+  }
+
+  return context
 }
 
 export const getRequiredContextFiles = (agentName) => {

@@ -7,6 +7,8 @@ description: Use when a formal work item is ready to execute, when dispatching j
 
 Execute formal work items through focused subagents and script-owned state.
 
+Canonical workflow spec: `docs/workflow-spec.md`. The spec is the reference for lifecycle, role model, context-package requirements, and the **task context as user-expectation contract** model. Context files capture what the user expects to see, feel, or operate — not just an implementation brief.
+
 ## Core Rules
 
 - Main agent coordinates; subagents execute focused work.

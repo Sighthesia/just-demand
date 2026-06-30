@@ -2,6 +2,8 @@
 
 OpenCode-first local agent workflow runtime: Python scripts own workflow state, OpenCode plugins inject lightweight guardrails/context, and `.opencode/skills/` hold the detailed workflow rules.
 
+Canonical workflow specification: `docs/workflow-spec.md` — the authoritative reference for lifecycle, role model, product philosophy, and user-expectation contract. When this file or any skill diverges from the spec, the spec is the reference.
+
 
 ## Just Demand Workflow Philosophy
 

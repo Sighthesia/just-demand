@@ -7,6 +7,8 @@ description: Use after implementation, after just-demand-tester output, when ver
 
 Verify outcomes against the task brief and active validation revision.
 
+Canonical workflow spec: `docs/workflow-spec.md`. The spec is the reference for the **effect-first output contract**, verification closeout template, and **repeated-mismatch reflection** rule. When vague feedback or consecutive failures occur, route back to the clarification or advisor path defined in the spec — do not guess and patch blindly.
+
 ## Core Rules
 
 - No completion claim without fresh verification evidence.
@@ -14,6 +16,9 @@ Verify outcomes against the task brief and active validation revision.
 - User correction after implementation creates a new validation revision unless it is purely explanatory.
 - The user may correct drift in outcome language without knowing implementation details.
 - When `just-demand-tester` is used, treat its report as the active verification record: it should name findings, any low-risk fixes applied, verification results, and residual risk.
+- Lead verification reports with the user-visible effect or outcome. Place routine tests, build, and lint detail below the fold unless they failed or the user asked.
+- If correction feedback is vague, proactively present deviation options (Stage 1: dimension, Stage 2: contrast) before re-implementing. See `socratic-clarification`'s Proactive Deviation Options and `docs/workflow-spec.md` for the full model.
+- If two consecutive attempts fail on the same issue, stop patching and route to the `advisor` subagent for fresh-context analysis before any more implementation.
 
 ## Status Flow
 

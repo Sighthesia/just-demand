@@ -7,6 +7,8 @@ description: Use when the user proposes a new goal, feature, bugfix, design, ref
 
 Clarify the user's need before exposing workflow mechanics.
 
+Canonical workflow spec: `docs/workflow-spec.md`. The spec is the reference for the full lifecycle, role model, clarification rules, and the task context as user-expectation contract model.
+
 ## Core Rules
 
 - Focus on the user's described outcome, expected behavior, anti-outcomes, constraints, and tradeoffs.

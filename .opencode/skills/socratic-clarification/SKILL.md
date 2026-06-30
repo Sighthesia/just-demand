@@ -7,6 +7,8 @@ description: Use when the user proposes a need, request, feature, design/refacto
 
 Force progressive clarification and design approval before implementation. This is a hard gate, not optional guidance, but it should feel like a short decision surface: default to options, defaults, and the smallest sufficient artifact before asking for prose.
 
+This skill implements the **default ambiguity** and **effect-first communication** principles from `docs/workflow-spec.md`. The canonical spec is the reference for the full product philosophy, role model, and user-expectation contract model.
+
 This skill is the required second step after `using-just-demand`. When a turn pivots from Q&A into a request, bug, correction, or mismatch, reset here before intake, execution, or verification. In skill-only fallback mode, self-enforce the same rule: approval enters intake/formal-task flow, not inline editing, and codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) is also execution work that must wait for a formal task.
 
 <HARD-GATE>

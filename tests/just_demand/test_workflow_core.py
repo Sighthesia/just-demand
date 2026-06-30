@@ -17,6 +17,7 @@ from workflow_core import (
     archive_task,
     cleanup_completed_task,
     complete_verification,
+    create_followup,
     create_intake,
     create_validation_revision,
     ensure_workspace,
@@ -29,6 +30,7 @@ from workflow_core import (
     read_json,
     select_task,
     start_execution,
+    start_reflection,
     start_verification,
     state_dir,
     tasks_dir,
@@ -447,6 +449,42 @@ class WorkflowCoreTests(unittest.TestCase):
                 ["Implement", "Verify"],
             )
             self.assertIn("## Ordered Todo", (task_dir / "implement.md").read_text(encoding="utf-8"))
+
+            # --- Verify enhanced context.md sections ---
+            context_text = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn("## User Raw Request", context_text)
+            self.assertIn("Build an OpenCode-first agent workflow.", context_text)
+            self.assertIn("## User Expected Effect", context_text)
+            self.assertIn("User sees the expected result.", context_text)
+            self.assertIn("## Clarified Design / Current Understanding", context_text)
+            self.assertIn("## Visible Acceptance", context_text)
+            self.assertIn("- Workspace intake can be promoted to a formal task.", context_text)
+            self.assertIn("## Anti-Outcomes", context_text)
+            self.assertIn("## Scope", context_text)
+            self.assertIn("Build the initial OpenCode-first workflow runtime.", context_text)
+            self.assertIn("## Out Of Scope", context_text)
+            self.assertIn("## Current Status", context_text)
+            self.assertIn("planning", context_text)
+            self.assertIn("## Progress", context_text)
+            self.assertIn("## Known Risks", context_text)
+            self.assertIn("## Notes For Subagents", context_text)
+
+            # --- Verify enhanced implement.md sections ---
+            implement_text = (task_dir / "implement.md").read_text(encoding="utf-8")
+            self.assertIn("## Goal", implement_text)
+            self.assertIn("Build an OpenCode-first local workflow runtime.", implement_text)
+            self.assertIn("## Must Preserve", implement_text)
+            self.assertIn("## Must Avoid", implement_text)
+            self.assertIn("## Implementation Boundary", implement_text)
+            self.assertIn("## Expected Output", implement_text)
+
+            # --- Verify enhanced verify.md sections ---
+            verify_text = (task_dir / "verify.md").read_text(encoding="utf-8")
+            self.assertIn("## User-Visible Checks", verify_text)
+            self.assertIn("## Functional Checks", verify_text)
+            self.assertIn("## Regression Checks", verify_text)
+            self.assertIn("## Mismatch Checks", verify_text)
+            self.assertIn("## Report Format", verify_text)
 
             state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNone(state["current_intake_id"])
@@ -3515,6 +3553,582 @@ Approach from markdown (should be overridden).
             intake_path = root / ".just-demand" / "state" / "intake" / f"{intake_id}.md"
             text = intake_path.read_text(encoding="utf-8")
             self.assertIn("Updated via update-intake-section command.", text)
+
+
+    # -----------------------------------------------------------------------
+    # create_followup — reflection recommendation on second follow-up
+    # -----------------------------------------------------------------------
+
+    def test_create_followup_first_does_not_recommend_reflection(self):
+        """First follow-up does not include reflection_recommended."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Refl check", "Test reflection", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Refl check",
+                                       "Test reflection", "design", ["Refl works"])
+            task_id = promoted["task_id"]
+
+            result = create_followup(
+                root, task_id,
+                user_feedback="First feedback",
+                observed_phenomenon="Observed 1",
+                expected_phenomenon="Expected 1",
+                delta_scope="Scope 1",
+                must_not_change="Must not 1",
+                acceptance="Accept 1",
+            )
+
+            self.assertNotIn("reflection_recommended", result)
+            self.assertNotIn("next_action", result)
+
+    def test_create_followup_second_recommends_reflection(self):
+        """Second follow-up includes reflection_recommended and next_action."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Refl second", "Test second reflection", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Refl second",
+                                       "Test second reflection", "design", ["Refl second works"])
+            task_id = promoted["task_id"]
+
+            create_followup(
+                root, task_id,
+                user_feedback="First",
+                observed_phenomenon="Obs A",
+                expected_phenomenon="Exp A",
+                delta_scope="Scope A",
+                must_not_change="Must A",
+                acceptance="Acc A",
+            )
+
+            result = create_followup(
+                root, task_id,
+                user_feedback="Second",
+                observed_phenomenon="Obs B",
+                expected_phenomenon="Exp B",
+                delta_scope="Scope B",
+                must_not_change="Must B",
+                acceptance="Acc B",
+            )
+
+            self.assertTrue(result.get("reflection_recommended"))
+            self.assertIn("next_action", result)
+            self.assertIn("start-reflection", result["next_action"])
+            self.assertIn(task_id, result["next_action"])
+
+    # -----------------------------------------------------------------------
+    # start_reflection
+    # -----------------------------------------------------------------------
+
+    def test_start_reflection_creates_reflection_md(self):
+        """start_reflection creates reflection.md in the task directory."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Start refl", "Test start reflection", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Start refl",
+                                       "Test start reflection", "design", ["Start refl works"])
+            task_id = promoted["task_id"]
+
+            # Add two follow-ups
+            for i in range(2):
+                create_followup(
+                    root, task_id,
+                    user_feedback=f"Feedback {i}",
+                    observed_phenomenon=f"Observed {i}",
+                    expected_phenomenon=f"Expected {i}",
+                    delta_scope=f"Delta {i}",
+                    must_not_change=f"Must not {i}",
+                    acceptance=f"Accept {i}",
+                )
+
+            result = start_reflection(root, task_id)
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["task_id"], task_id)
+            self.assertEqual(result["reflection_count"], 2)
+            self.assertTrue(result["path"].endswith("reflection.md"))
+
+            refl_path = tasks_dir(root) / "active" / task_id / "reflection.md"
+            self.assertTrue(refl_path.is_file())
+
+    def test_start_reflection_contains_followup_content(self):
+        """reflection.md includes content from recent follow-ups."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Refl content", "Test content", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Refl content",
+                                       "Test content", "design", ["Content works"])
+            task_id = promoted["task_id"]
+
+            for i in range(2):
+                create_followup(
+                    root, task_id,
+                    user_feedback=f"FB msg {i}",
+                    observed_phenomenon=f"Obs text {i}",
+                    expected_phenomenon=f"Exp text {i}",
+                    delta_scope=f"Delta text {i}",
+                    must_not_change=f"Must not {i}",
+                    acceptance=f"Acc text {i}",
+                )
+
+            start_reflection(root, task_id)
+
+            refl_path = tasks_dir(root) / "active" / task_id / "reflection.md"
+            content = refl_path.read_text(encoding="utf-8")
+
+            # Should include goal, follow-up data, and summary sections
+            self.assertIn("## Goal / Context", content)
+            self.assertIn("## Follow-Up History", content)
+            self.assertIn("## Summary", content)
+            self.assertIn("## Questions For Advisor", content)
+            self.assertIn("FB msg 0", content)
+            self.assertIn("FB msg 1", content)
+            self.assertIn("Obs text 1", content)
+            self.assertIn("Exp text 1", content)
+            self.assertIn("Delta text 1", content)
+            self.assertIn("Must not 1", content)
+            self.assertIn("Acc text 1", content)
+
+    def test_start_reflection_records_event(self):
+        """start_reflection records a reflection_started task event."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Refl event", "Test event", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Refl event",
+                                       "Test event", "design", ["Event works"])
+            task_id = promoted["task_id"]
+
+            for i in range(2):
+                create_followup(
+                    root, task_id,
+                    user_feedback=f"F{i}", observed_phenomenon=f"O{i}",
+                    expected_phenomenon=f"E{i}", delta_scope=f"D{i}",
+                    must_not_change=f"M{i}", acceptance=f"A{i}",
+                )
+
+            start_reflection(root, task_id)
+
+            # Check task events
+            task_events = [json.loads(line)
+                           for line in task_event_path(root, task_id).read_text(encoding="utf-8").splitlines()
+                           if line]
+            reflection_events = [e for e in task_events if e["type"] == "reflection_started"]
+            self.assertEqual(len(reflection_events), 1)
+            self.assertEqual(reflection_events[0]["task_id"], task_id)
+            self.assertEqual(reflection_events[0]["reflection_count"], 2)
+            self.assertIn("reflection_count", reflection_events[0])
+            self.assertIn("before_status", reflection_events[0])
+            self.assertIn("after_status", reflection_events[0])
+            self.assertEqual(reflection_events[0]["after_status"], "debugging")
+
+            # Check workspace events
+            ws_events = [json.loads(line)
+                         for line in (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+                         if line]
+            ws_reflection = [e for e in ws_events if e["type"] == "reflection_started"]
+            self.assertEqual(len(ws_reflection), 1)
+
+    def test_start_reflection_marks_task_debugging(self):
+        """start_reflection sets task status to debugging."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Refl status", "Test status change", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Refl status",
+                                       "Test status change", "design", ["Status works"])
+            task_id = promoted["task_id"]
+
+            for i in range(2):
+                create_followup(
+                    root, task_id,
+                    user_feedback=f"F{i}", observed_phenomenon=f"O{i}",
+                    expected_phenomenon=f"E{i}", delta_scope=f"D{i}",
+                    must_not_change=f"M{i}", acceptance=f"A{i}",
+                )
+
+            start_reflection(root, task_id)
+
+            task = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertEqual(task["status"], "debugging")
+
+    def test_start_reflection_missing_task_raises(self):
+        """start_reflection raises FileNotFoundError for missing task."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+
+            with self.assertRaises(FileNotFoundError):
+                start_reflection(root, "nonexistent-task")
+
+    def test_start_reflection_insufficient_followups_raises(self):
+        """start_reflection raises RuntimeError with fewer than 2 follow-ups."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Insufficient", "Test insufficient", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Insufficient",
+                                       "Test insufficient", "design", ["Insuff works"])
+            task_id = promoted["task_id"]
+
+            # Only one follow-up
+            create_followup(
+                root, task_id,
+                user_feedback="Only one",
+                observed_phenomenon="Obs",
+                expected_phenomenon="Exp",
+                delta_scope="Delta",
+                must_not_change="Must not",
+                acceptance="Accept",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "at least 2 follow-up"):
+                start_reflection(root, task_id)
+
+    def test_start_reflection_no_followups_raises(self):
+        """start_reflection raises RuntimeError when no follow-ups directory exists."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "No followups", "Test no followups", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "No followups",
+                                       "Test no followups", "design", ["No fups works"])
+            task_id = promoted["task_id"]
+
+            with self.assertRaisesRegex(RuntimeError, "No follow-up context"):
+                start_reflection(root, task_id)
+
+    def test_start_reflection_preserves_followup_files(self):
+        """start_reflection does not delete or overwrite follow-up files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Preserve", "Test preserve", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Preserve",
+                                       "Test preserve", "design", ["Preserve works"])
+            task_id = promoted["task_id"]
+
+            for i in range(2):
+                create_followup(
+                    root, task_id,
+                    user_feedback=f"F{i}", observed_phenomenon=f"O{i}",
+                    expected_phenomenon=f"E{i}", delta_scope=f"D{i}",
+                    must_not_change=f"M{i}", acceptance=f"A{i}",
+                )
+
+            followups_dir = tasks_dir(root) / "active" / task_id / "followups"
+            self.assertTrue((followups_dir / "followup-001.md").is_file())
+            self.assertTrue((followups_dir / "followup-002.md").is_file())
+            content_before = (followups_dir / "followup-001.md").read_text(encoding="utf-8")
+
+            start_reflection(root, task_id)
+
+            # Follow-up files must still exist
+            self.assertTrue((followups_dir / "followup-001.md").is_file())
+            self.assertTrue((followups_dir / "followup-002.md").is_file())
+            self.assertEqual(
+                (followups_dir / "followup-001.md").read_text(encoding="utf-8"),
+                content_before,
+            )
+
+    def test_cli_start_reflection_success(self):
+        """CLI start-reflection creates reflection.md and returns JSON."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI refl", "Test CLI refl", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "CLI refl",
+                                       "Test CLI refl", "design", ["CLI refl works"])
+            task_id = promoted["task_id"]
+
+            for i in range(2):
+                create_followup(
+                    root, task_id,
+                    user_feedback=f"F{i}", observed_phenomenon=f"O{i}",
+                    expected_phenomenon=f"E{i}", delta_scope=f"D{i}",
+                    must_not_change=f"M{i}", acceptance=f"A{i}",
+                )
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "start-reflection", task_id],
+                text=True, capture_output=True, check=True,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["task_id"], task_id)
+            self.assertEqual(payload["reflection_count"], 2)
+            self.assertTrue(payload["path"].endswith("reflection.md"))
+
+            refl_path = Path(payload["path"])
+            self.assertTrue(refl_path.is_file())
+
+    def test_cli_start_reflection_missing_task(self):
+        """CLI start-reflection errors on missing task."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "start-reflection", "nonexistent-task"],
+                text=True, capture_output=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Task not found", payload["message"])
+
+    # -----------------------------------------------------------------------
+    # create_followup (original tests follow)
+    # -----------------------------------------------------------------------
+
+    def test_create_followup_creates_file_with_sections(self):
+        """create_followup writes a structured markdown file under followups/."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Followup test", "Test followup", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Followup test",
+                                       "Test followup", "design", ["Followup works"])
+            task_id = promoted["task_id"]
+
+            result = create_followup(
+                root, task_id,
+                user_feedback="User says the feature is missing",
+                observed_phenomenon="No feature visible",
+                expected_phenomenon="Feature should be visible after save",
+                delta_scope="Add visibility toggle",
+                must_not_change="Existing save behavior",
+                acceptance="Feature is visible after save",
+            )
+
+            self.assertIn("followup_id", result)
+            self.assertEqual(result["task_id"], task_id)
+            self.assertTrue(result["followup_id"].startswith("followup-"))
+
+            followup_path = Path(result["path"])
+            self.assertTrue(followup_path.is_file())
+            self.assertIn("followups", str(followup_path))
+
+            content = followup_path.read_text(encoding="utf-8")
+            self.assertIn("## User Feedback", content)
+            self.assertIn("User says the feature is missing", content)
+            self.assertIn("## Observed Phenomenon", content)
+            self.assertIn("No feature visible", content)
+            self.assertIn("## Expected Phenomenon", content)
+            self.assertIn("Feature should be visible after save", content)
+            self.assertIn("## Delta Scope", content)
+            self.assertIn("Add visibility toggle", content)
+            self.assertIn("## Must Not Change", content)
+            self.assertIn("Existing save behavior", content)
+            self.assertIn("## Acceptance", content)
+            self.assertIn("Feature is visible after save", content)
+            self.assertIn(f"Task: {task_id}", content)
+
+    def test_create_followup_sequential_numbering(self):
+        """Multiple follow-ups on same task get sequential numbered IDs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Seq followup", "Test seq", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Seq followup",
+                                       "Test seq", "design", ["Seq works"])
+            task_id = promoted["task_id"]
+
+            first = create_followup(
+                root, task_id,
+                user_feedback="First feedback",
+                observed_phenomenon="Observed A",
+                expected_phenomenon="Expected A",
+                delta_scope="Scope A",
+                must_not_change="Must not A",
+                acceptance="Accept A",
+            )
+            second = create_followup(
+                root, task_id,
+                user_feedback="Second feedback",
+                observed_phenomenon="Observed B",
+                expected_phenomenon="Expected B",
+                delta_scope="Scope B",
+                must_not_change="Must not B",
+                acceptance="Accept B",
+            )
+
+            self.assertEqual(first["followup_id"], "followup-001")
+            self.assertEqual(second["followup_id"], "followup-002")
+
+            # Both files exist and are distinct
+            first_path = Path(first["path"])
+            second_path = Path(second["path"])
+            self.assertTrue(first_path.is_file())
+            self.assertTrue(second_path.is_file())
+            self.assertNotEqual(first_path.read_text(encoding="utf-8"),
+                                second_path.read_text(encoding="utf-8"))
+
+    def test_create_followup_unknown_task_raises(self):
+        """create_followup raises FileNotFoundError for missing task."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+
+            with self.assertRaises(FileNotFoundError):
+                create_followup(
+                    root, "nonexistent-task",
+                    user_feedback="Feedback",
+                    observed_phenomenon="Observed",
+                    expected_phenomenon="Expected",
+                    delta_scope="Scope",
+                    must_not_change="Must not",
+                    acceptance="Accept",
+                )
+
+    def test_create_followup_does_not_overwrite_existing(self):
+        """Follow-up files are never overwritten — new files get new numbers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "No overwrite", "Test overwrite", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "No overwrite",
+                                       "Test overwrite", "design", ["No overwrite works"])
+            task_id = promoted["task_id"]
+
+            # Create three follow-ups
+            ids = set()
+            for i in range(3):
+                r = create_followup(
+                    root, task_id,
+                    user_feedback=f"Feedback {i}",
+                    observed_phenomenon=f"Observed {i}",
+                    expected_phenomenon=f"Expected {i}",
+                    delta_scope=f"Scope {i}",
+                    must_not_change=f"Must not {i}",
+                    acceptance=f"Accept {i}",
+                )
+                ids.add(r["followup_id"])
+
+            self.assertEqual(len(ids), 3)
+            self.assertIn("followup-001", ids)
+            self.assertIn("followup-002", ids)
+            self.assertIn("followup-003", ids)
+
+            # Verify all three files exist
+            followups_dir = tasks_dir(root) / "active" / task_id / "followups"
+            self.assertTrue((followups_dir / "followup-001.md").is_file())
+            self.assertTrue((followups_dir / "followup-002.md").is_file())
+            self.assertTrue((followups_dir / "followup-003.md").is_file())
+
+    def test_create_followup_emits_task_event(self):
+        """create_followup records a followup_created task event."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Event followup", "Test event", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Event followup",
+                                       "Test event", "design", ["Event works"])
+            task_id = promoted["task_id"]
+
+            create_followup(
+                root, task_id,
+                user_feedback="Event feedback",
+                observed_phenomenon="Observed",
+                expected_phenomenon="Expected",
+                delta_scope="Scope",
+                must_not_change="Must not",
+                acceptance="Accept",
+            )
+
+            task_events = [json.loads(line)
+                           for line in task_event_path(root, task_id).read_text(encoding="utf-8").splitlines()
+                           if line]
+            followup_events = [e for e in task_events if e["type"] == "followup_created"]
+            self.assertEqual(len(followup_events), 1)
+            self.assertIn("followup-001", followup_events[0]["summary"])
+
+    def test_cli_record_followup_success(self):
+        """CLI record-followup creates the follow-up file."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI followup", "Test CLI followup", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "CLI followup",
+                                       "Test CLI followup", "design", ["CLI works"])
+            task_id = promoted["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run([
+                sys.executable, str(script), str(root), "record-followup", task_id,
+                "--feedback", "CLI feedback",
+                "--observed", "CLI observed",
+                "--expected", "CLI expected",
+                "--delta-scope", "CLI delta scope",
+                "--must-not-change", "CLI must not change",
+                "--acceptance", "CLI acceptance",
+            ], text=True, capture_output=True, check=True)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["followup_id"], "followup-001")
+            self.assertEqual(payload["task_id"], task_id)
+
+            followup_path = Path(payload["path"])
+            self.assertTrue(followup_path.is_file())
+            content = followup_path.read_text(encoding="utf-8")
+            self.assertIn("CLI feedback", content)
+            self.assertIn("CLI observed", content)
+            self.assertIn("CLI expected", content)
+            self.assertIn("CLI delta scope", content)
+            self.assertIn("CLI must not change", content)
+            self.assertIn("CLI acceptance", content)
+
+    def test_cli_record_followup_unknown_task(self):
+        """CLI record-followup errors on missing task."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run([
+                sys.executable, str(script), str(root), "record-followup", "nonexistent-task",
+                "--feedback", "Feedback",
+                "--observed", "Observed",
+                "--expected", "Expected",
+                "--delta-scope", "Delta scope",
+                "--must-not-change", "Must not change",
+                "--acceptance", "Acceptance",
+            ], text=True, capture_output=True)
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Task not found", payload["message"])
 
 
 if __name__ == "__main__":

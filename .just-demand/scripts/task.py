@@ -14,6 +14,7 @@ from workflow_core import (
     cleanup_completed_task,
     complete_verification,
     create_checkpoint_commit,
+    create_followup,
     create_intake,
     list_unfinished_tasks,
     mark_task,
@@ -21,6 +22,7 @@ from workflow_core import (
     promote_to_task,
     select_task,
     show_task_readiness,
+    start_reflection,
     start_verification,
     update_intake_section,
     update_task_clarification,
@@ -46,9 +48,11 @@ COMMANDS = {
     "list-active",
     "mark",
     "promote",
+    "record-followup",
     "resume",
     "select-task",
     "show-readiness",
+    "start-reflection",
     "start-verification",
     "uninstall",
     "update",
@@ -199,6 +203,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     show_readiness = sub.add_parser("show-readiness", help="Show readiness diagnostics for a task")
     show_readiness.add_argument("task_id", help="Task ID to check readiness for")
+
+    record_followup = sub.add_parser("record-followup", help="Record a follow-up correction context for an active task")
+    record_followup.add_argument("task_id", help="Task ID to record follow-up for")
+    record_followup.add_argument("--feedback", required=True, help="User correction feedback")
+    record_followup.add_argument("--observed", required=True, help="Observed phenomenon (current behavior/output)")
+    record_followup.add_argument("--expected", required=True, help="Expected phenomenon (target behavior/output)")
+    record_followup.add_argument("--delta-scope", required=True, help="Scope of the correction/delta")
+    record_followup.add_argument("--must-not-change", required=True, help="Things that must not be altered")
+    record_followup.add_argument("--acceptance", required=True, help="Acceptance criteria for the correction")
+
+    start_reflection_parser = sub.add_parser("start-reflection", help="Create structured reflection context for a task with repeated follow-ups")
+    start_reflection_parser.add_argument("task_id", help="Task ID with at least 2 follow-up contexts")
 
     sub.add_parser("where", help="Print the global CLI path and invocation example")
 
@@ -381,8 +397,21 @@ def execute_command(root: Path, args: list[str]) -> int:
             else:
                 config_root = Path(parsed.config_root) if parsed.config_root else None
                 result = uninstall_opencode_global(config_root)
+        elif parsed.command == "record-followup":
+            result = create_followup(
+                root,
+                parsed.task_id,
+                user_feedback=parsed.feedback,
+                observed_phenomenon=parsed.observed,
+                expected_phenomenon=parsed.expected,
+                delta_scope=parsed.delta_scope,
+                must_not_change=parsed.must_not_change,
+                acceptance=parsed.acceptance,
+            )
         elif parsed.command == "show-readiness":
             result = show_task_readiness(root, parsed.task_id)
+        elif parsed.command == "start-reflection":
+            result = start_reflection(root, parsed.task_id)
         else:
             raise RuntimeError(f"Unsupported command: {parsed.command}")
     except Exception as exc:
@@ -412,7 +441,9 @@ def show_help():
     print("  archive-task <id>                 Archive completed task")
     print("  cleanup-task <id>                 Clean up completed task")
     print("  update-clarification <id>          Update task clarification fields (JSON or ## markdown file via --from-file)")
+    print("  record-followup <id>               Record correction follow-up context")
     print("  show-readiness <id>                Show task readiness diagnostics and recovery guidance")
+    print("  start-reflection <id>              Create structured reflection for repeated follow-ups")
     print("  init                              Initialize project")
     print("  doctor                            Check installation status")
     print("  where                             Print global CLI invocation example")

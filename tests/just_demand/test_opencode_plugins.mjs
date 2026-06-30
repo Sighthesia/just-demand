@@ -26,6 +26,8 @@ import {
   hasUnquotedShellRedirection,
   looksLikeBashWriteCommand,
   readJson,
+  readLatestFollowup,
+  readReflectionContext,
   readTaskContext,
   detectActiveContractsForTask,
   detectContractTriggers,
@@ -336,6 +338,210 @@ test("readTaskContext for just-demand-advisor keeps archive-only lessons in deci
   assert.match(context, /keep task history in archive/i)
   assert.match(context, /reusable lessons belong in skills/i)
   assert.doesNotMatch(context, /workspace facts/i)
+})
+
+// ---------------------------------------------------------------------------
+// lib: readLatestFollowup
+// ---------------------------------------------------------------------------
+test("readLatestFollowup returns null when followups directory missing", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  assert.equal(readLatestFollowup(root, "task-a"), null)
+})
+
+test("readLatestFollowup returns null when followups directory is empty", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  assert.equal(readLatestFollowup(root, "task-a"), null)
+})
+
+test("readLatestFollowup returns the latest follow-up file content", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: followup-001\n\nCorrection 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: followup-002\n\nCorrection 2")
+  const result = readLatestFollowup(root, "task-a")
+  assert.match(result, /Correction 2/)
+  assert.doesNotMatch(result, /Correction 1/)
+})
+
+test("readLatestFollowup ignores non-followup files in the directory", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  writeFileSync(join(taskDir, "followups", "readme.txt"), "not a follow-up")
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: followup-001\n\nReal follow-up")
+  const result = readLatestFollowup(root, "task-a")
+  assert.match(result, /Real follow-up/)
+})
+
+// ---------------------------------------------------------------------------
+// lib: readReflectionContext
+// ---------------------------------------------------------------------------
+test("readReflectionContext returns null when reflection.md missing", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  assert.equal(readReflectionContext(root, "task-a"), null)
+})
+
+test("readReflectionContext returns reflection.md content when present", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\n\n## Root Cause\nMissing validation.\n\n## Pattern\nAlways validate inputs.\n")
+  const result = readReflectionContext(root, "task-a")
+  assert.match(result, /Missing validation/)
+  assert.match(result, /Always validate/)
+})
+
+// ---------------------------------------------------------------------------
+// lib: readTaskContext includes latest follow-up for coder and tester
+// ---------------------------------------------------------------------------
+test("readTaskContext for coder includes latest follow-up context when present", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: followup-001\n\nCorrection 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: followup-002\n\nCorrection 2")
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
+  assert.match(context, /# Latest Follow-Up Context/)
+  assert.match(context, /Correction 2/)
+  assert.doesNotMatch(context, /Correction 1/)
+})
+
+test("readTaskContext for tester includes latest follow-up context when present", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck all")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: followup-001\n\nCorrection 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: followup-002\n\nCorrection 2")
+  const context = readTaskContext(root, "task-a", "just-demand-tester")
+  assert.match(context, /# Latest Follow-Up Context/)
+  assert.match(context, /Correction 2/)
+  assert.doesNotMatch(context, /Correction 1/)
+})
+
+test("readTaskContext latest-only behavior: only the most recent follow-up is injected", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: followup-001\n\nFirst correction")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: followup-002\n\nSecond correction")
+  writeFileSync(join(taskDir, "followups", "followup-003.md"), "# Follow-Up: followup-003\n\nThird correction")
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
+  // Should contain the latest (third)
+  assert.match(context, /Third correction/)
+  // Should not contain older ones
+  assert.doesNotMatch(context, /First correction/)
+  assert.doesNotMatch(context, /Second correction/)
+})
+
+test("readTaskContext for advisor includes reflection context when present", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: analyze pattern")
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\n\n## Root Cause\nRace condition\n")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  const context = readTaskContext(root, "task-a", "just-demand-advisor")
+  assert.match(context, /# Reflection Context/)
+  assert.match(context, /Race condition/)
+})
+
+test("readTaskContext for advisor does not include follow-up context", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: analyze")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: followup-001\n\nCorrection")
+  const context = readTaskContext(root, "task-a", "just-demand-advisor")
+  assert.doesNotMatch(context, /# Latest Follow-Up Context/)
+})
+
+test("readTaskContext for coder does not include reflection context", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\n\n## Root Cause\nDesign issue\n")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
+  assert.doesNotMatch(context, /# Reflection Context/)
+})
+
+test("readTaskContext missing follow-up preserves existing behavior for coder", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nBuild")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", clarification: { scope: "Feature only." } }))
+  const context = readTaskContext(root, "task-a", "just-demand-coder")
+  assert.doesNotMatch(context, /# Latest Follow-Up Context/)
+  assert.doesNotMatch(context, /# Reflection Context/)
+  assert.match(context, /# Context/)
+  assert.match(context, /# Implement/)
+})
+
+test("readTaskContext missing reflection preserves existing behavior for advisor", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: analyze")
+  writeFileSync(join(taskDir, "decisions.md"), "# Decisions\n\n## Decision: Use option A\n\nApproved.\n")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a" }))
+  const context = readTaskContext(root, "task-a", "just-demand-advisor")
+  assert.doesNotMatch(context, /# Reflection Context/)
+  assert.match(context, /# Context/)
+  assert.match(context, /Use option A/)
 })
 
 test("getMissingRequiredContextFiles reports missing coder context files", () => {

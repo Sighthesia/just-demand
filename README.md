@@ -8,6 +8,8 @@ Highly inspired by [Trellis](https://github.com/mindfold-ai/Trellis) and [superp
 - OpenCode plugins inject lightweight context.
 - Project skills hold detailed workflow rules.
 
+Canonical workflow specification: `docs/workflow-spec.md` — the authoritative reference for lifecycle, role model, product philosophy, and user-expectation contract. Skills and docs may summarize the model; the spec is the truth.
+
 ## Just Demand Workflow Philosophy
 
 Just Demand is a workflow runtime, not a one-shot prompt bundle.

@@ -403,6 +403,7 @@ def build_clarification_payload(root: Path, intake_id: str, task_type: str) -> d
         "expected_behavior": sections.get("Expected Behavior", sections.get("Expected Outcome", "")),
         "actual_behavior": sections.get("Actual Behavior", ""),
         "reproduction": sections.get("Reproduction", ""),
+        "raw_request": raw_request,
         "scope": sections.get("Scope", ""),
         "opening": sections.get("Opening", ""),
         "during_transition": sections.get("During Transition", ""),
@@ -569,6 +570,127 @@ def render_open_questions_markdown(non_blocking_questions: list[str]) -> str:
     return "\n".join(lines)
 
 
+def render_context_markdown(task: dict[str, Any]) -> str:
+    """Render context.md for a task, including user-expectation contract fields."""
+    clarification = task.get("clarification", {}) or {}
+    title = str(task.get("title", "") or "")
+    goal = str(task.get("goal", "") or "")
+    acceptance = task.get("acceptance_criteria", []) or []
+    status = str(task.get("status", "") or "")
+    progress = task.get("progress")
+
+    raw_request = str(clarification.get("raw_request", "") or "")
+    expected_effect = str(clarification.get("final_expected_effect", "") or "")
+    current_understanding = str(clarification.get("current_understanding", "") or "")
+    anti_outcomes = str(clarification.get("anti_outcomes", "") or "")
+    scope = str(clarification.get("scope", "") or "")
+
+    lines = [
+        "# Context",
+        "",
+        "## Task",
+        "",
+        title,
+        "",
+        "## User Raw Request",
+        "",
+        raw_request or "_No raw request recorded._",
+        "",
+        "## User Expected Effect",
+        "",
+        expected_effect or "_No expected effect recorded yet._",
+        "",
+        "## Clarified Design / Current Understanding",
+        "",
+        current_understanding or "_No current understanding recorded yet._",
+        "",
+        "## Visible Acceptance",
+        "",
+    ]
+    if acceptance:
+        for criterion in acceptance:
+            lines.append(f"- {criterion}")
+    else:
+        lines.append("_No acceptance criteria recorded yet._")
+    lines.append("")
+
+    lines += [
+        "## Anti-Outcomes",
+        "",
+        anti_outcomes or "_No anti-outcomes recorded yet._",
+        "",
+        "## Scope",
+        "",
+        scope or "_No scope recorded yet._",
+        "",
+        "## Out Of Scope",
+        "",
+        "_No out-of-scope items recorded yet._",
+        "",
+        "## Current Status",
+        "",
+        status,
+        "",
+        "## Progress",
+        "",
+    ]
+    if progress is not None:
+        lines.append(str(progress))
+    else:
+        lines.append("_No progress recorded yet._")
+    lines.append("")
+
+    lines += [
+        "## Known Risks",
+        "",
+        "_No known risks recorded yet._",
+        "",
+        "## Follow-Up Context",
+        "",
+        "_No follow-up context recorded yet._",
+        "",
+        "## Last User Feedback",
+        "",
+        "_No user feedback recorded yet._",
+        "",
+        "## Notes For Subagents",
+        "",
+        "_No specific subagent notes recorded yet._",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def render_verify_markdown(task: dict[str, Any]) -> str:
+    """Render verify.md for a task, including user-visible and functional checks."""
+    _ = task  # placeholder for future task-data driven checks
+    lines = [
+        "# Verify",
+        "",
+        "## User-Visible Checks",
+        "",
+        "_No user-visible checks recorded yet._",
+        "",
+        "## Functional Checks",
+        "",
+        "_No functional checks recorded yet._",
+        "",
+        "## Regression Checks",
+        "",
+        "_No regression checks recorded yet._",
+        "",
+        "## Mismatch Checks",
+        "",
+        "_No mismatch checks recorded yet._",
+        "",
+        "## Report Format",
+        "",
+        "_No report format specified yet._",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 PLAN_STEP_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(?P<title>.+?)\s*$")
 
 
@@ -609,11 +731,32 @@ def build_implementation_plan_subtasks(plan_text: str) -> list[dict[str, Any]]:
 
 def render_implementation_plan_markdown(task: dict[str, Any], subtasks: list[dict[str, Any]] | None = None) -> str:
     clarification = task.get("clarification", {}) or {}
+    goal = str(task.get("goal", "") or "")
     plan_text = str(clarification.get("final_implementation_plan", "") or "").strip()
     plan_subtasks = subtasks if subtasks is not None else build_implementation_plan_subtasks(plan_text)
 
     lines = [
         "# Implement",
+        "",
+        "## Goal",
+        "",
+        goal or "_No goal recorded._",
+        "",
+        "## Must Preserve",
+        "",
+        "_No preservation constraints recorded yet._",
+        "",
+        "## Must Avoid",
+        "",
+        "_No specific avoidance constraints recorded yet._",
+        "",
+        "## Implementation Boundary",
+        "",
+        "_No explicit implementation boundary recorded yet._",
+        "",
+        "## Expected Output",
+        "",
+        "_No expected output format recorded yet._",
         "",
         "## Approved Plan",
         "",
@@ -769,11 +912,11 @@ def promote_to_task(
         tmp_path = Path(tmp)
         write_json_atomic(tmp_path / "task.json", task_data)
         for name, content in {
-            "context.md": "# Context\n\n",
+            "context.md": render_context_markdown(task_data),
             "decisions.md": "# Decisions\n\n",
             "open_questions.md": render_open_questions_markdown(task_data["clarification"]["non_blocking_questions"]),
             "implement.md": render_implementation_plan_markdown(task_data, task_data["subtasks"]),
-            "verify.md": "# Verify\n\n",
+            "verify.md": render_verify_markdown(task_data),
         }.items():
             (tmp_path / name).write_text(content, encoding="utf-8")
         (tmp_path / "outputs").mkdir()
@@ -1859,6 +2002,252 @@ def archive_task(root: Path, task_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Validation revision
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Follow-up correction context
+# ---------------------------------------------------------------------------
+
+
+def create_followup(
+    root: Path,
+    task_id: str,
+    user_feedback: str,
+    observed_phenomenon: str,
+    expected_phenomenon: str,
+    delta_scope: str,
+    must_not_change: str,
+    acceptance: str,
+) -> dict[str, str]:
+    """Create a follow-up correction context file for an active task.
+
+    Stores user correction feedback as a structured markdown file under
+    the task's ``followups/`` directory. Files are sequentially numbered
+    and never overwrite existing files.
+
+    Args:
+        root: Project root path.
+        task_id: Active task id.
+        user_feedback: User's correction feedback.
+        observed_phenomenon: What was observed (current behavior/output).
+        expected_phenomenon: What was expected (target behavior/output).
+        delta_scope: Scope of the correction/delta.
+        must_not_change: Things that must not be altered.
+        acceptance: Acceptance criteria for the correction.
+
+    Returns:
+        Dict with followup_id, path, and task_id.
+
+    Raises:
+        FileNotFoundError: If task does not exist.
+    """
+    ensure_workspace(root)
+    tpath = task_path(root, task_id)
+    if not (tpath / "task.json").is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    followups_dir = tpath / "followups"
+    followups_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine next sequential number to avoid overwriting
+    existing = sorted(f for f in followups_dir.iterdir() if f.suffix == ".md" and f.stem.startswith("followup-"))
+    next_num = len(existing) + 1
+    followup_id = f"followup-{next_num:03d}"
+
+    followup_path = followups_dir / f"{followup_id}.md"
+
+    lines = [
+        f"# Follow-Up: {followup_id}",
+        "",
+        f"Task: {task_id}",
+        "",
+        "## User Feedback",
+        user_feedback.strip(),
+        "",
+        "## Observed Phenomenon",
+        observed_phenomenon.strip(),
+        "",
+        "## Expected Phenomenon",
+        expected_phenomenon.strip(),
+        "",
+        "## Delta Scope",
+        delta_scope.strip(),
+        "",
+        "## Must Not Change",
+        must_not_change.strip(),
+        "",
+        "## Acceptance",
+        acceptance.strip(),
+        "",
+    ]
+    followup_path.write_text("\n".join(lines), encoding="utf-8")
+
+    append_task_event(
+        root,
+        task_id,
+        "followup_created",
+        f"Created follow-up {followup_id}",
+    )
+
+    result: dict[str, Any] = {
+        "followup_id": followup_id,
+        "path": str(followup_path),
+        "task_id": task_id,
+    }
+
+    # When this is at least the second follow-up, signal reflection guidance
+    # so the main agent can convert repeated corrections into structured analysis.
+    if len(existing) >= 1:
+        result["reflection_recommended"] = True
+        result["next_action"] = (
+            f"This task now has {len(existing) + 1} follow-up corrections. "
+            f"Use `start-reflection {task_id}` to create a structured "
+            f"reflection context for advisor analysis."
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Reflection
+# ---------------------------------------------------------------------------
+
+
+def start_reflection(root: Path, task_id: str) -> dict[str, Any]:
+    """Create a structured reflection context for a task with repeated follow-ups.
+
+    Generates ``reflection.md`` under the active task directory, records a
+    ``reflection_started`` event, and marks the task as ``debugging`` so the
+    main agent has a clear point to ask the advisor for analysis before further
+    implementation.
+
+    Args:
+        root: Project root path.
+        task_id: Active task id with at least 2 follow-up contexts.
+
+    Returns:
+        Dict with ok, task_id, path, and reflection_count.
+
+    Raises:
+        FileNotFoundError: If the task does not exist.
+        RuntimeError: If the task has fewer than 2 follow-up contexts.
+    """
+    ensure_workspace(root)
+    tpath = task_path(root, task_id)
+    task_json_path = tpath / "task.json"
+    if not task_json_path.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(task_json_path)
+    clarification = task.get("clarification", {}) or {}
+    goal = str(task.get("goal", "") or "")
+    current_understanding = str(clarification.get("current_understanding", "") or "")
+
+    # Check follow-up existence and count
+    followups_dir = tpath / "followups"
+    if not followups_dir.is_dir():
+        raise RuntimeError(
+            f"No follow-up context found for task {task_id}. "
+            f"Reflection requires at least two follow-ups."
+        )
+
+    existing_followups = sorted(
+        f for f in followups_dir.iterdir()
+        if f.suffix == ".md" and f.stem.startswith("followup-")
+    )
+    if len(existing_followups) < 2:
+        raise RuntimeError(
+            f"Reflection requires at least 2 follow-up contexts, "
+            f"but task {task_id} has {len(existing_followups)}. "
+            f"Record more follow-ups with `record-followup {task_id}`."
+        )
+
+    # Parse the two most recent follow-ups
+    recent = existing_followups[-2:]
+    followup_sections: list[dict[str, str]] = []
+    followup_ids: list[str] = []
+    for fup_path in recent:
+        content = fup_path.read_text(encoding="utf-8")
+        followup_ids.append(fup_path.stem)
+        sections = parse_markdown_sections(content)
+        followup_sections.append(sections)
+
+    # Build reflection.md
+    lines = [
+        "# Reflection",
+        "",
+        f"Task: {task_id}",
+        "",
+        "## Goal / Context",
+        "",
+        goal or "_No goal recorded._",
+        "",
+        "## Current Understanding",
+        "",
+        current_understanding or "_No current understanding recorded._",
+        "",
+        "## Follow-Up History",
+        "",
+    ]
+
+    for idx, sections in enumerate(followup_sections):
+        fol_id = followup_ids[idx] if idx < len(followup_ids) else f"followup-{idx + 1:03d}"
+        lines.append(f"### {fol_id}")
+        lines.append("")
+
+        for heading, body in sections.items():
+            lines.append(f"**{heading}:**")
+            lines.append(body)
+            lines.append("")
+
+    # Summary
+    lines += [
+        "## Summary",
+        "",
+        f"- Total follow-up corrections: {len(existing_followups)}",
+        "- Repeated corrections detected — analysis recommended before further implementation.",
+        "",
+        "## Questions For Advisor",
+        "",
+        "_What underlying issue is causing repeated corrections? "
+        "Is the current approach still valid, or does scope need adjustment? "
+        "What is the safest next step?_",
+        "",
+    ]
+
+    reflection_path = tpath / "reflection.md"
+    reflection_path.write_text("\n".join(lines), encoding="utf-8")
+
+    # Record reflection_started events
+    reflection_count = len(existing_followups)
+    append_task_event(
+        root,
+        task_id,
+        "reflection_started",
+        f"Started reflection for {task_id} ({reflection_count} follow-ups)",
+        before_status=task.get("status", ""),
+        after_status="debugging",
+        reflection_count=reflection_count,
+    )
+    append_workspace_event(
+        root,
+        "reflection_started",
+        "task",
+        task_id,
+        f"Started reflection for {task_id} ({reflection_count} follow-ups)",
+        before_status=task.get("status", ""),
+        after_status="debugging",
+    )
+
+    # Mark task as debugging — a reflection-compatible status
+    mark_task(root, task_id, "debugging", note="Reflection started — repeated follow-ups detected")
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "path": str(reflection_path),
+        "reflection_count": reflection_count,
+    }
 
 
 def create_validation_revision(
