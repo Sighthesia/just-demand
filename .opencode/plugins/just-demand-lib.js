@@ -145,6 +145,7 @@ const WORKFLOW_CONTROL_CLI_COMMANDS = new Set([
   "list-active",
   "--help",
   "-h",
+  "start-reflection",
   "archive",
   "cleanup",
   "status",
@@ -675,6 +676,20 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
     throw new Error(buildExecutionGateError(rule.label, { reason: "task_not_ready", taskId, missing }))
   }
 
+  // Gate 4: Reflection hard gate.
+  // Blocks coder dispatch and write tools (apply_patch, write-like bash) when
+  // the current task has reflection_pending or reflection_active state.
+  // Allows advisor, researcher, tester, and workflow-control commands.
+  const reflectionState = getReflectionGateState(directory, taskId)
+  if (reflectionState) {
+    const subagentName = getWorkflowSubagentName(args)
+    // Block coder dispatch and non-dispatch write tools (apply_patch, bash)
+    if (subagentName === "just-demand-coder" || rule.name !== "task:workflow-subagent") {
+      debugLog(`${logPrefix}.block`, { reason: reflectionState, rule: rule.name, task_id: taskId, subagent: subagentName || null }, directory)
+      throw new Error(buildReflectionGateError(rule.label, taskId, reflectionState))
+    }
+  }
+
   debugLog(`${logPrefix}.allow`, { reason: "gate_passed", rule: rule.name, task_id: taskId }, directory)
   return rule
 }
@@ -988,6 +1003,52 @@ export const readReflectionContext = (directory, taskId) => {
   const path = join(workflowRoot(directory), "state", "active", taskId, "reflection.md")
   const content = readTextIfExists(path)
   return content || null
+}
+
+export const getReflectionGateState = (directory, taskId) => {
+  if (!taskId) return null
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
+  if (!existsSync(taskDir)) return null
+
+  // Check for reflection.md
+  const reflectionPath = join(taskDir, "reflection.md")
+  const hasReflection = existsSync(reflectionPath)
+
+  // Check for follow-up count
+  const followupsDir = join(taskDir, "followups")
+  let followupCount = 0
+  if (existsSync(followupsDir)) {
+    try {
+      const entries = readdirSync(followupsDir)
+      followupCount = entries.filter((name) => /^followup-\d{3}\.md$/.test(name)).length
+    } catch {
+      followupCount = 0
+    }
+  }
+
+  // Reflection pending: >=2 follow-ups and no reflection.md
+  if (followupCount >= 2 && !hasReflection) {
+    return "reflection_pending"
+  }
+
+  // Reflection active: debugging status and has reflection.md
+  const task = readTaskJson(directory, taskId)
+  const isDebugging = String(task?.status || "").toLowerCase() === "debugging"
+  if (isDebugging && hasReflection) {
+    return "reflection_active"
+  }
+
+  return null
+}
+
+export const buildReflectionGateError = (toolLabel, taskId, reflectionState) => {
+  if (reflectionState === "reflection_pending") {
+    return `Blocked ${toolLabel}: reflection is pending for task ${taskId} (2+ follow-ups, no reflection.md). Run \`just-demand . start-reflection ${taskId}\` before making code changes.`
+  }
+  if (reflectionState === "reflection_active") {
+    return `Blocked ${toolLabel}: reflection is active for task ${taskId} (debugging status with reflection.md). Dispatch \`just-demand-advisor\` to analyze the reflection context before making code changes.`
+  }
+  return `Blocked ${toolLabel}: reflection gate is active for task ${taskId}.`
 }
 
 export const readTaskContext = (directory, taskId, agentName) => {

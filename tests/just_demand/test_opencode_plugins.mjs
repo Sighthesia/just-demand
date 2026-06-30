@@ -6,12 +6,14 @@ import test from "node:test"
 
 import {
   buildExecutionGateError,
+  buildReflectionGateError,
   consumeIntakeFallbackPending,
   debugLog,
   getActiveTask,
   getExecutionGateState,
   getMissingRequiredContextFiles,
   getMissingExecutionGateFields,
+  getReflectionGateState,
   getWorkflowSubagentName,
   impactsOverlap,
   isIntakeFilePath,
@@ -2888,5 +2890,363 @@ test("state still blocks non-intake writes even after intake fallback warning", 
   await assert.rejects(
     plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: src/app.js\n*** End Patch" } }),
     /Blocked apply_patch: there is no formal task yet\./,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: getReflectionGateState helper
+// ---------------------------------------------------------------------------
+test("getReflectionGateState returns null when task directory missing", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  assert.equal(getReflectionGateState(root, "nonexistent-task"), null)
+})
+
+test("getReflectionGateState returns null with no follow-ups and no reflection", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
+  assert.equal(getReflectionGateState(root, "task-a"), null)
+})
+
+test("getReflectionGateState returns null with exactly one follow-up and no reflection", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
+  assert.equal(getReflectionGateState(root, "task-a"), null)
+})
+
+test("getReflectionGateState returns reflection_pending with 2+ follow-ups and no reflection.md", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: 2")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
+  assert.equal(getReflectionGateState(root, "task-a"), "reflection_pending")
+})
+
+test("getReflectionGateState returns reflection_active with debugging status and reflection.md", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\nRoot cause found.")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "debugging" }))
+  assert.equal(getReflectionGateState(root, "task-a"), "reflection_active")
+})
+
+test("getReflectionGateState returns null with debugging status but no reflection.md", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "debugging" }))
+  assert.equal(getReflectionGateState(root, "task-a"), null)
+})
+
+test("getReflectionGateState returns null with reflection.md but non-debugging status", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\nSome content.")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
+  assert.equal(getReflectionGateState(root, "task-a"), null)
+})
+
+test("getReflectionGateState scopes to current task, does not fire from another task's files", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  // task-a has 2 follow-ups and no reflection (would be pending)
+  const taskADir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskADir, { recursive: true })
+  mkdirSync(join(taskADir, "followups"), { recursive: true })
+  writeFileSync(join(taskADir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskADir, "followups", "followup-002.md"), "# Follow-Up: 2")
+  writeFileSync(join(taskADir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
+  // task-b has no follow-ups (clean)
+  const taskBDir = join(root, ".just-demand", "state", "active", "task-b")
+  mkdirSync(taskBDir, { recursive: true })
+  writeFileSync(join(taskBDir, "task.json"), JSON.stringify({ id: "task-b", status: "planning" }))
+
+  // Should be null for task-b (clean) even though task-a triggers pending
+  assert.equal(getReflectionGateState(root, "task-b"), null)
+  // Should be pending for task-a
+  assert.equal(getReflectionGateState(root, "task-a"), "reflection_pending")
+})
+
+// ---------------------------------------------------------------------------
+// buildReflectionGateError
+// ---------------------------------------------------------------------------
+test("buildReflectionGateError produces correct messages", () => {
+  const pendingError = buildReflectionGateError("Task", "task-a", "reflection_pending")
+  assert.match(pendingError, /reflection is pending/)
+  assert.match(pendingError, /task-a/)
+  assert.match(pendingError, /start-reflection/)
+
+  const activeError = buildReflectionGateError("apply_patch", "task-a", "reflection_active")
+  assert.match(activeError, /reflection is active/)
+  assert.match(activeError, /task-a/)
+  assert.match(activeError, /just-demand-advisor/)
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: isWorkflowControlCommand detects start-reflection
+// ---------------------------------------------------------------------------
+test("isWorkflowControlCommand detects start-reflection CLI command", () => {
+  assert.equal(isWorkflowControlCommand("just-demand . start-reflection task-a"), true)
+  assert.equal(isWorkflowControlCommand("just-demand . start-reflection"), true)
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: pending blocks coder dispatch
+// ---------------------------------------------------------------------------
+test("reflection pending blocks coder task dispatch", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: 2")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "executing",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-coder", prompt: "Do work" } }),
+    /Blocked Task: reflection is pending for task task-a.*start-reflection/,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: pending blocks apply_patch
+// ---------------------------------------------------------------------------
+test("reflection pending blocks apply_patch", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: 2")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "executing",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: src/app.js\n*** End Patch" } }),
+    /Blocked apply_patch: reflection is pending for task task-a/,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: pending blocks write-like bash
+// ---------------------------------------------------------------------------
+test("reflection pending blocks write-like bash", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: 2")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "executing",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+    /Blocked bash: reflection is pending for task task-a/,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: pending allows workflow-control (start-reflection)
+// ---------------------------------------------------------------------------
+test("reflection pending allows start-reflection workflow-control command", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: 2")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "executing",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "just-demand . start-reflection task-a" } }),
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: active blocks coder dispatch
+// ---------------------------------------------------------------------------
+test("reflection active blocks coder task dispatch", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\nRoot cause found.")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "debugging",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-coder", prompt: "Do work" } }),
+    /Blocked Task: reflection is active for task task-a.*just-demand-advisor/,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: active blocks apply_patch
+// ---------------------------------------------------------------------------
+test("reflection active blocks apply_patch", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\nRoot cause found.")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "debugging",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: src/app.js\n*** End Patch" } }),
+    /Blocked apply_patch: reflection is active for task task-a/,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: active blocks write-like bash
+// ---------------------------------------------------------------------------
+test("reflection active blocks write-like bash", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\nRoot cause found.")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "debugging",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+    /Blocked bash: reflection is active for task task-a/,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: active allows advisor dispatch
+// ---------------------------------------------------------------------------
+test("reflection active allows advisor dispatch", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\nRoot cause found.")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "debugging",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  // Advisor dispatch passes through because it does not match the write gate
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-advisor", prompt: "Analyze" } }),
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Reflection gate: active allows tester dispatch
+// ---------------------------------------------------------------------------
+test("reflection gate does not block tester dispatch for pending state", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: 2")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "executing",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-tester", prompt: "Test" } }),
+  )
+})
+
+test("reflection gate does not block tester dispatch for active state", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "reflection.md"), "# Reflection\nRoot cause found.")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "debugging",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-tester", prompt: "Test" } }),
   )
 })
