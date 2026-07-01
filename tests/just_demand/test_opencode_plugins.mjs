@@ -957,6 +957,34 @@ test("injectWorkflowStateBanner deduplicates when marker already present", () =>
 })
 
 // ---------------------------------------------------------------------------
+// P1-1: impact-overlap conflict warning in workflow-state banner
+// ---------------------------------------------------------------------------
+test("injectWorkflowStateBanner includes overlap warning when overlap exists", () => {
+  const text = "Hello."
+  const result = injectWorkflowStateBanner(text, "task-a", { id: "task-a", status: "executing", title: "My Task" }, { reason: "ready", overlappingTaskIds: ["task-b", "task-c"] })
+  assert.match(result, /Hello\./)
+  assert.match(result, /\[workflow-state\]/)
+  assert.match(result, /task=task-a \(executing\)/)
+  assert.match(result, /overlap: task-b, task-c/)
+})
+
+test("injectWorkflowStateBanner does not include overlap warning when no overlap exists", () => {
+  const text = "Hello."
+  const result = injectWorkflowStateBanner(text, "task-a", { id: "task-a", status: "executing", title: "My Task" }, { reason: "ready", overlappingTaskIds: [] })
+  assert.match(result, /Hello\./)
+  assert.match(result, /\[workflow-state\]/)
+  assert.doesNotMatch(result, /overlap/)
+})
+
+test("injectWorkflowStateBanner does not include overlap warning when overlappingTaskIds is absent", () => {
+  const text = "Hello."
+  const result = injectWorkflowStateBanner(text, "task-a", { id: "task-a", status: "executing", title: "My Task" }, { reason: "ready" })
+  assert.match(result, /Hello\./)
+  assert.match(result, /\[workflow-state\]/)
+  assert.doesNotMatch(result, /overlap/)
+})
+
+// ---------------------------------------------------------------------------
 // controller decision: explicit workflow skip override
 // ---------------------------------------------------------------------------
 test("controller decision allows explicit workflow skip override when no active task", () => {
@@ -2114,6 +2142,138 @@ test("controller decision still blocks execution intent after workflow subagents
   assert.equal(decision.action, CONTROLLER_ACTION.block)
   assert.equal(decision.reason_code, "execution_needed")
   assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true })
+})
+
+// ---------------------------------------------------------------------------
+// P1-2: Soften execution gate for clarify/design steps
+// ---------------------------------------------------------------------------
+test("controller decision reminds (not blocks) execution intent when current_step is clarify", () => {
+  const decision = buildControllerDecision("I will implement the fix now.", {
+    activeTask: {
+      id: "task-a",
+      status: "executing",
+      current_step: "clarify",
+      verification_status: "not_started",
+      assigned_subagents: [],
+    },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+
+  assert.equal(decision.phase, CONTROLLER_PHASE.execute)
+  assert.equal(decision.action, CONTROLLER_ACTION.remind)
+  assert.equal(decision.reason_code, "soft_execution_hint")
+  assert.deepEqual(decision.rewrite, { mode: "append" })
+})
+
+test("controller decision reminds (not blocks) execution intent when current_step is design", () => {
+  const decision = buildControllerDecision("Let me build the new feature.", {
+    activeTask: {
+      id: "task-a",
+      status: "executing",
+      current_step: "design",
+      verification_status: "not_started",
+      assigned_subagents: [],
+    },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+
+  assert.equal(decision.phase, CONTROLLER_PHASE.execute)
+  assert.equal(decision.action, CONTROLLER_ACTION.remind)
+  assert.equal(decision.reason_code, "soft_execution_hint")
+  assert.deepEqual(decision.rewrite, { mode: "append" })
+})
+
+test("controller decision reminds (not blocks) code investigation intent when current_step is clarify", () => {
+  const decision = buildControllerDecision("Let me inspect the codebase first.", {
+    activeTask: {
+      id: "task-a",
+      status: "executing",
+      current_step: "clarify",
+      verification_status: "not_started",
+      assigned_subagents: [],
+    },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+
+  assert.equal(decision.phase, CONTROLLER_PHASE.execute)
+  assert.equal(decision.action, CONTROLLER_ACTION.remind)
+  assert.equal(decision.reason_code, "soft_execution_hint")
+  assert.deepEqual(decision.rewrite, { mode: "append" })
+})
+
+test("controller decision still blocks execution intent when current_step is execute (no soften)", () => {
+  const decision = buildControllerDecision("I will implement the feature inline.", {
+    activeTask: {
+      id: "task-a",
+      status: "executing",
+      current_step: "execute",
+      verification_status: "not_started",
+      assigned_subagents: [],
+    },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+
+  assert.equal(decision.phase, CONTROLLER_PHASE.execute)
+  assert.equal(decision.action, CONTROLLER_ACTION.block)
+  assert.equal(decision.reason_code, "execution_needed")
+  assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true })
+})
+
+test("controller decision still blocks code investigation intent when current_step is execute (no soften)", () => {
+  const decision = buildControllerDecision("Let me inspect the codebase to find the bug.", {
+    activeTask: {
+      id: "task-a",
+      status: "executing",
+      current_step: "execute",
+      verification_status: "not_started",
+      assigned_subagents: [],
+    },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+
+  assert.equal(decision.phase, CONTROLLER_PHASE.execute)
+  assert.equal(decision.action, CONTROLLER_ACTION.block)
+  assert.equal(decision.reason_code, "execution_needed")
+  assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true })
+})
+
+test("state reminds (not blocks) execution intent in clarify step", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "clarify", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "I will implement the feature now." }] }
+
+  await plugin["chat.message"]({ sessionID: "clarify-reminder" }, output)
+
+  assert.match(output.parts[0].text, /\[just-demand reminder\]/)
+  assert.match(output.parts[0].text, /clarify\/design phase/)
+  assert.match(output.parts[0].text, /\[workflow-state\]/)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
+})
+
+test("state still blocks execution intent in execute step (P0 safety preserved)", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "I will implement the feature now." }] }
+
+  await plugin["chat.message"]({ sessionID: "execute-block" }, output)
+
+  assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
 })
 
 test("state blocks obvious verification closeout claims until complete-verification", async () => {

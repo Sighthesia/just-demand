@@ -321,6 +321,10 @@ const formatWorkflowStateLines = (activeTaskId, activeTask, gateState) => {
     lines.push(`    title: ${shortTitle}`)
   }
 
+  if (gateState?.overlappingTaskIds?.length > 0) {
+    lines.push(`    overlap: ${gateState.overlappingTaskIds.join(", ")}`)
+  }
+
   if (!activeTaskId && gateState?.reason === "no_current_task_selected") {
     lines.push("    next: select-task/resume before execution; direct answer only for non-work")
   } else if (!activeTaskId) {
@@ -372,6 +376,8 @@ const reminderTypeFromReasonCode = (reasonCode) => {
       return reasonCode
     case "clarify_hint":
       return "clarify"
+    case "soft_execution_hint":
+      return "soft_execution_hint"
     case "select_task_hint":
       return "select_task_hint"
     default:
@@ -436,6 +442,31 @@ const buildControllerDecision = (text, reminderState) => {
         action: CONTROLLER_ACTION.block,
         reason_code: "verification_closeout",
         rewrite: { mode: "replace", preserve_original: true },
+      }
+    }
+
+    // P1-2: Soften execution gate for clarify/design steps.
+    // When status=executing but current_step is clarify or design,
+    // produce a reminder instead of a hard block.
+    const _taskStatus = String(activeTask.status || "").toLowerCase()
+    const _currentStep = String(activeTask.current_step || "").toLowerCase()
+    const _isSoftStep = _currentStep === "clarify" || _currentStep === "design"
+    if (_taskStatus === "executing" && _isSoftStep) {
+      if (taskLooksLikeLongContextExecutionCandidate(activeTask, text)) {
+        return {
+          phase: CONTROLLER_PHASE.execute,
+          action: CONTROLLER_ACTION.remind,
+          reason_code: "soft_execution_hint",
+          rewrite: { mode: "append" },
+        }
+      }
+      if (textLooksLikeCodeInvestigationIntent(text) && !textLooksLikeNeutralAnalysis(text)) {
+        return {
+          phase: CONTROLLER_PHASE.execute,
+          action: CONTROLLER_ACTION.remind,
+          reason_code: "soft_execution_hint",
+          rewrite: { mode: "append" },
+        }
       }
     }
 
@@ -563,6 +594,11 @@ const buildReminderLines = (type) => {
       return [
         "- Check whether the current frame is the right problem model before narrowing further.",
         "- Do not keep tuning a weak premise without re-testing it.",
+      ]
+    case "soft_execution_hint":
+      return [
+        "- This reads like execution work, but the active task is still in clarify/design phase.",
+        "- Continue clarification/design work, or update the task step when ready for execution.",
       ]
     case "execution_needed":
       return [
