@@ -909,10 +909,19 @@ test("injectWorkflowStateBanner appends active task banner", () => {
   const result = injectWorkflowStateBanner(text, "task-a", { id: "task-a", status: "executing", title: "My Task" }, { reason: "ready" })
   assert.match(result, /Hello\./)
   assert.match(result, /\[workflow-state\]/)
-  assert.match(result, /task=task-a/)
+  assert.match(result, /task=task-a \(executing\)/)
   assert.match(result, /phase=execution/)
-  assert.match(result, /next=continue execution, dispatch subagent/)
-  assert.match(result, /blocked=start, complete, skip workflow/)
+  assert.match(result, /title: My Task/)
+  assert.match(result, /next: continue execution, dispatch subagent/)
+  assert.match(result, /blocked: start, complete, skip workflow/)
+})
+
+test("injectWorkflowStateBanner keeps active task title compact", () => {
+  const text = "Hello."
+  const longTitle = "A".repeat(100)
+  const result = injectWorkflowStateBanner(text, "task-a", { id: "task-a", status: "executing", title: longTitle }, { reason: "ready" })
+  assert.match(result, /title: A{77}\.\.\./)
+  assert.doesNotMatch(result, /A{100}/)
 })
 
 test("injectWorkflowStateBanner appends no-task breadcrumb with allowed and blocked next actions", () => {
@@ -922,8 +931,8 @@ test("injectWorkflowStateBanner appends no-task breadcrumb with allowed and bloc
   assert.match(result, /\[workflow-state\]/)
   assert.match(result, /task=none/)
   assert.match(result, /phase=no-task/)
-  assert.match(result, /next=enter workflow, direct answer, skip workflow/)
-  assert.match(result, /blocked=start, continue, complete/)
+  assert.match(result, /next: enter workflow via clarification\/intake, answer simple questions, or explicit skip workflow/)
+  assert.match(result, /blocked: start, continue, complete/)
 })
 
 test("injectWorkflowStateBanner appends select-task banner when unfinished tasks exist", () => {
@@ -933,8 +942,8 @@ test("injectWorkflowStateBanner appends select-task banner when unfinished tasks
   assert.match(result, /\[workflow-state\]/)
   assert.match(result, /task=selection pending/)
   assert.match(result, /phase=no-task/)
-  assert.match(result, /next=select-task, resume, direct answer/)
-  assert.match(result, /blocked=start, continue, complete/)
+  assert.match(result, /next: select-task\/resume before execution; direct answer only for non-work/)
+  assert.match(result, /blocked: start, continue, complete/)
 })
 
 test("injectWorkflowStateBanner deduplicates when marker already present", () => {

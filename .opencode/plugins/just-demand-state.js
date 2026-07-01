@@ -309,11 +309,29 @@ const formatWorkflowStateLines = (activeTaskId, activeTask, gateState) => {
   const actions = workflowStateActions(phase)
   const taskLabel = activeTaskId || (gateState?.reason === "no_current_task_selected" ? "selection pending" : "none")
   const status = activeTask ? String(activeTask.status || "unknown") : null
+  const title = String(activeTask?.title || activeTask?.goal || "").trim()
   const nextActions = actions.allowed.join(", ")
   const blockedActions = actions.blocked.join(", ")
-  const prefix = `${WORKFLOW_STATE_MARKER} task=${taskLabel}; phase=${phase}`
-  const details = status ? `; status=${status}; next=${nextActions}; blocked=${blockedActions}` : `; next=${nextActions}; blocked=${blockedActions}`
-  return `${prefix}${details}`
+
+  const statusSuffix = status ? ` (${status})` : ""
+  const lines = [`${WORKFLOW_STATE_MARKER} task=${taskLabel}${statusSuffix}; phase=${phase}`]
+  if (activeTaskId && activeTask && title) {
+    const shortTitle = title.length > 80 ? `${title.slice(0, 77)}...` : title
+    lines.push(`    title: ${shortTitle}`)
+  }
+
+  if (!activeTaskId && gateState?.reason === "no_current_task_selected") {
+    lines.push("    next: select-task/resume before execution; direct answer only for non-work")
+  } else if (!activeTaskId) {
+    lines.push("    next: enter workflow via clarification/intake, answer simple questions, or explicit skip workflow")
+  } else {
+    lines.push(`    next: ${nextActions}`)
+  }
+
+  if (blockedActions) {
+    lines.push(`    blocked: ${blockedActions}`)
+  }
+  return lines.join("\n")
 }
 
 const topicMemory = new Map()
@@ -692,14 +710,7 @@ const WORKFLOW_STATE_MARKER = "[workflow-state]"
 const injectWorkflowStateBanner = (text, activeTaskId, activeTask, gateState) => {
   if (typeof text !== "string") return text
   if (text.includes(WORKFLOW_STATE_MARKER)) return text
-
-  const banner = activeTaskId && activeTask
-    ? `\n\n${formatWorkflowStateLines(activeTaskId, activeTask, gateState)}`
-    : gateState?.reason === "no_current_task_selected"
-      ? `\n\n${WORKFLOW_STATE_MARKER} task=selection pending; phase=no-task; next=select-task, resume, direct answer; blocked=start, continue, complete`
-      : `\n\n${WORKFLOW_STATE_MARKER} task=none; phase=no-task; next=enter workflow, direct answer, skip workflow; blocked=start, continue, complete`
-
-  return text + banner
+  return `${text}\n\n${formatWorkflowStateLines(activeTaskId, activeTask, gateState)}`
 }
 
 export default async ({ directory } = {}) => {
