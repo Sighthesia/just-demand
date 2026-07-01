@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { join, resolve } from "node:path"
+import { join, relative, resolve } from "node:path"
 
 const REMINDER_STATE = new Map()
 const PLUGIN_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)))
@@ -160,6 +160,34 @@ const BASH_WRITE_PATTERNS = [
   /(^|[;&|])\s*truncate\b/i,
   /(^|[;&|])\s*apply_patch\b/i,
 ]
+
+// Git subcommand patterns that are read-only or low-risk (branch switching).
+// These git commands look like write patterns above but are actually safe.
+const GIT_READONLY_SUBCOMMAND_PATTERNS = [
+  // Purely read-only: status, log, diff, show, help, version, blame, grep, etc.
+  /^git\s+(?:status|log|diff|show|help|version|blame|grep|describe|rev-parse|rev-list|ls-files|ls-tree|cat-file|shortlog|config)\b/i,
+  // Stash list/show (read-only forms)
+  /^git\s+stash\s+(?:list|show)\b/i,
+  // Branch listing
+  /^git\s+branch\s+(?:--list|-a|-r|--remotes|--all)\b/i,
+]
+
+// Low-risk git write commands: branch switching without destructive path arguments.
+// Checkout branch switching is safe; checkout -- <path> and checkout . are not.
+const GIT_LOW_RISK_PATTERNS = [
+  // Checkout creating new branch: git checkout -b <name> or -B <name>
+  /^git\s+checkout\s+-[bB]\s+\S+(\s|$)/i,
+  // Checkout existing branch: branch name starts with alphanumeric
+  /^git\s+checkout\s+[a-zA-Z0-9][\w.\/-]*(\s|$)/i,
+  // Switch branch (always safe)
+  /^git\s+switch\s+(?:-c\s+)?\S+/i,
+]
+
+const GIT_WRITE_PATTERN = /(?:^|[;&|])\s*git\s+(?:add|commit|amend|reset|clean|stash|checkout|switch|merge|rebase)\b/i
+
+// One-shot skip-workflow override flag: set by chat.message on skip, cleared
+// by the next tool gate invocation.
+const _toolGateSkipOverride = new Map()
 const COMPLETION_CLAIM_PATTERNS = [
   /\b(done|finished|complete(?:d)?|implemented|shipped|resolved|wrapped up)\b/i,
   /\b(all set|good to go|ready to close|ready to ship|that'?s it|we'?re done)\b/i,
@@ -544,7 +572,12 @@ export const impactsOverlap = (impactsA, impactsB) => {
 export const looksLikeBashWriteCommand = (command) => {
   const trimmed = String(command || "").trim()
   if (!trimmed) return false
-   return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed)) || hasUnquotedShellRedirection(trimmed)
+
+  // Git commands that look write-like but are actually safe should not
+  // trigger the write gate. Check this before raw pattern matching.
+  if (looksLikeGitWriteCommand(trimmed) && isProbablySafeGitCommand(trimmed)) return false
+
+  return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed)) || hasUnquotedShellRedirection(trimmed)
 }
 
 export const hasUnquotedShellRedirection = (command) => {
@@ -573,6 +606,103 @@ export const hasUnquotedShellRedirection = (command) => {
   }
 
   return false
+}
+
+// ---------------------------------------------------------------------------
+// Git safety helpers: prevent false-positive write-gate triggers for
+// read-only or low-risk git commands.
+// ---------------------------------------------------------------------------
+
+// Check if a command contains a git subcommand that BASH_WRITE_PATTERNS would
+// flag as write-like.
+const looksLikeGitWriteCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+  return GIT_WRITE_PATTERN.test(trimmed)
+}
+
+// Determine if a git command that looks write-like is actually read-only or
+// low-risk (e.g. branch switching). Returns true for safe commands.
+export const isProbablySafeGitCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+
+  // Extract the git invocation — strip leading prefix like "cmd1 && "
+  const gitMatch = trimmed.match(/(?:^|[;&|])\s*(git\s+.+)/i)
+  if (!gitMatch) return false
+  const gitCmd = gitMatch[1].trim()
+
+  // Check read-only subcommand patterns
+  if (GIT_READONLY_SUBCOMMAND_PATTERNS.some((pattern) => pattern.test(gitCmd))) return true
+
+  // For checkout, check destructive forms BEFORE low-risk patterns.
+  // The low-risk branch-switching patterns would otherwise match
+  // something like "git checkout HEAD -- src/app.js" because HEAD
+  // starts with an alphanumeric character, incorrectly treating a
+  // file-restore as safe.
+  if (/^git\s+checkout\b/i.test(gitCmd)) {
+    // -- <path> overwrites working tree files (destructive)
+    if (/\s--\s/.test(gitCmd)) return false
+    // checkout . or .. restores all files from index (destructive)
+    if (/^git\s+checkout\s+(\.\.?)(\s|$)/i.test(gitCmd)) return false
+  }
+
+  // Check low-risk patterns (branch switching, etc.)
+  if (GIT_LOW_RISK_PATTERNS.some((pattern) => pattern.test(gitCmd))) return true
+
+  // For remaining checkout commands that did not match low-risk
+  // patterns (e.g. bare `git checkout`, or `git checkout --track`),
+  // assume they are branch-related and safe.
+  if (/^git\s+checkout\b/i.test(gitCmd)) {
+    return true
+  }
+
+  // For stash, bare `git stash` or `git stash push/pop/drop/apply` is destructive
+  if (/^git\s+stash\b/i.test(gitCmd)) {
+    const afterStash = gitCmd.replace(/^git\s+stash\s*/i, "").trim()
+    // Only stash list/show are safe
+    if (/^(list|show)(\s|$)/i.test(afterStash)) return true
+    return false
+  }
+
+  return false
+}
+
+// Detect git commands that target a repository outside the workflow root
+// (e.g. `git -C /other/repo ...`). When true, the command should not be
+// subject to this repo's active-task write gate.
+export const isExternalGitRepoCommand = (command, directory) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed || !directory) return false
+
+  // Match git -C <path> commands
+  const match = trimmed.match(/(?:^|[;&|])\s*git\s+-C\s+(\S+)\b/i)
+  if (!match) return false
+
+  try {
+    const targetPath = resolve(directory, match[1])
+    const repoRoot = resolve(directory)
+    const rel = relative(repoRoot, targetPath)
+    // External if the resolved path is outside the repo root
+    return rel.startsWith("..")
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Skip-workflow tool gate override: one-shot per directory, set by
+// chat.message on explicit skip, consumed by next tool gate invocation.
+// ---------------------------------------------------------------------------
+
+export const setToolGateSkipOverride = (directory) => {
+  if (!directory) return
+  _toolGateSkipOverride.set(workflowRoot(directory), true)
+}
+
+export const clearToolGateSkipOverride = (directory) => {
+  if (!directory) return
+  _toolGateSkipOverride.delete(workflowRoot(directory))
 }
 
 export const isIntakeFilePath = (filePath) => {
@@ -643,6 +773,22 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
     // concise one-time preference reminder pointing to update-intake-section.
     _intakeFallbackRecentlyUsed.set(workflowRoot(directory), true)
     return rule
+  }
+
+  // Transient skip-workflow override: if the model explicitly stated skip
+  // workflow on this turn, allow the tool through without gates.
+  const skipKey = workflowRoot(directory)
+  if (_toolGateSkipOverride.has(skipKey)) {
+    _toolGateSkipOverride.delete(skipKey)
+    debugLog(`${logPrefix}.allow`, { reason: "skip_workflow_override", rule: rule.name, tool: normalizedToolName }, directory)
+    return rule
+  }
+
+  // External repository git commands (git -C <outside-path>) bypass the
+  // gate because they operate on a repo outside this workflow's scope.
+  if (normalizedToolName === "bash" && isExternalGitRepoCommand(String(args?.command || ""), directory)) {
+    debugLog(`${logPrefix}.allow`, { reason: "external_git_repo", rule: rule.name, tool: normalizedToolName }, directory)
+    return null
   }
 
   // Gate 1: Is there a selected active task?

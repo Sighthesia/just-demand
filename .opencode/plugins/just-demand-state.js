@@ -7,6 +7,7 @@ import {
   getExecutionGateState,
   getReminderState,
   readTaskJson,
+  setToolGateSkipOverride,
   taskLooksLikeLongContextExecutionCandidate,
   taskNeedsCheckpointFollowUp,
   taskNeedsVerificationCloseout,
@@ -758,6 +759,14 @@ export default async ({ directory } = {}) => {
         action: controllerDecision.action,
         reason_code: controllerDecision.reason_code,
       }, workflowDirectory)
+
+      // Set one-shot tool gate skip override when the model explicitly
+      // bypasses the workflow. The next tool call within this turn will be
+      // allowed through the write gate without blocking.
+      if (controllerDecision.reason_code === "workflow_skip_override") {
+        setToolGateSkipOverride(workflowDirectory)
+      }
+
       textPart.text = applyControllerDecision(textPart.text, reminderState, controllerDecision)
 
       // One-time per-session intake fallback warning: if the tool execution gate

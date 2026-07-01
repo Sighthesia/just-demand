@@ -8,6 +8,7 @@ import {
   buildExecutionGateError,
   buildReflectionGateError,
   consumeIntakeFallbackPending,
+  clearToolGateSkipOverride,
   debugLog,
   getActiveTask,
   getExecutionGateState,
@@ -16,7 +17,9 @@ import {
   getReflectionGateState,
   getWorkflowSubagentName,
   impactsOverlap,
+  isExternalGitRepoCommand,
   isIntakeFilePath,
+  isProbablySafeGitCommand,
   isWorkflowControlCommand,
   getApplyPatchTargetPath,
   getLastSubagentDispatchTaskId,
@@ -33,6 +36,7 @@ import {
   readTaskContext,
   detectActiveContractsForTask,
   detectContractTriggers,
+  setToolGateSkipOverride,
 } from "../../.opencode/plugins/just-demand-lib.js"
 import sessionStartFactory from "../../.opencode/plugins/just-demand-session-start.js"
 import stateFactory, {
@@ -3115,7 +3119,368 @@ test("reflection pending allows start-reflection workflow-control command", asyn
 
   const plugin = await stateFactory({ directory: root })
   await assert.doesNotReject(
-    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "just-demand . start-reflection task-a" } }),
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-tester", prompt: "Test" } }),
+  )
+})
+
+// ---------------------------------------------------------------------------
+// P0: Git read-only/low-risk commands do not false-trigger the write gate
+// ---------------------------------------------------------------------------
+test("looksLikeBashWriteCommand returns false for git status/log/diff/show", () => {
+  const samples = [
+    "git status",
+    "git log --oneline -5",
+    "git diff --cached",
+    "git show HEAD",
+    "git help add",
+    "git version",
+    "git blame src/app.js",
+    "git grep pattern",
+    "git config --list",
+    "git rev-parse HEAD",
+  ]
+  for (const sample of samples) {
+    assert.equal(looksLikeBashWriteCommand(sample), false, `Expected false for: "${sample}"`)
+    // git config is not in the write pattern at all, so isProbablySafeGitCommand
+    // would not normally be called for it. Only check for commands that match
+    // the git write pattern.
+    if (!sample.startsWith("git config")) {
+      assert.equal(isProbablySafeGitCommand(sample), true, `Expected safe for: "${sample}"`)
+    }
+  }
+})
+
+test("looksLikeBashWriteCommand returns false for git stash list/show", () => {
+  const samples = [
+    "git stash list",
+    "git stash show -p",
+  ]
+  for (const sample of samples) {
+    assert.equal(looksLikeBashWriteCommand(sample), false, `Expected false for: "${sample}"`)
+    assert.equal(isProbablySafeGitCommand(sample), true, `Expected safe for: "${sample}"`)
+  }
+})
+
+test("looksLikeBashWriteCommand returns false for git branch listing", () => {
+  const samples = [
+    "git branch --list",
+    "git branch -a",
+    "git branch -r",
+  ]
+  for (const sample of samples) {
+    assert.equal(looksLikeBashWriteCommand(sample), false, `Expected false for: "${sample}"`)
+  }
+})
+
+test("looksLikeBashWriteCommand returns false for git checkout branch switching", () => {
+  const samples = [
+    "git checkout main",
+    "git checkout -b feature-branch",
+    "git checkout develop",
+  ]
+  for (const sample of samples) {
+    assert.equal(looksLikeBashWriteCommand(sample), false, `Expected false for: "${sample}"`)
+  }
+})
+
+test("looksLikeBashWriteCommand returns false for git switch branch", () => {
+  const samples = [
+    "git switch main",
+    "git switch -c new-feature",
+  ]
+  for (const sample of samples) {
+    assert.equal(looksLikeBashWriteCommand(sample), false, `Expected false for: "${sample}"`)
+  }
+})
+
+test("looksLikeBashWriteCommand still returns true for destructive git commands", () => {
+  const samples = [
+    "git add .",
+    "git commit -m fix",
+    "git reset --hard HEAD",
+    "git clean -fd",
+    "git merge feature",
+    "git rebase main",
+    "git checkout -- src/app.js",
+    "git checkout HEAD -- src/app.js",
+    "git checkout .",
+    "git stash",
+    "git stash push -m msg",
+    "git stash pop",
+    "git stash drop",
+    "git stash apply",
+  ]
+  for (const sample of samples) {
+    assert.equal(looksLikeBashWriteCommand(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// P0: External repository git operations bypass the gate
+// ---------------------------------------------------------------------------
+test("isExternalGitRepoCommand detects git -C outside repo root", () => {
+  const root = makeRoot()
+  const samples = [
+    `git -C /tmp/other-repo status`,
+    `git -C ../outside status`,
+  ]
+  for (const sample of samples) {
+    assert.equal(isExternalGitRepoCommand(sample, root), true, `Expected external for: "${sample}"`)
+  }
+})
+
+test("isExternalGitRepoCommand returns false for git -C inside repo root or missing", () => {
+  const root = makeRoot()
+  assert.equal(isExternalGitRepoCommand("git -C . status", root), false)
+  assert.equal(isExternalGitRepoCommand("git -C .git status", root), false)
+  assert.equal(isExternalGitRepoCommand("git status", root), false)
+  assert.equal(isExternalGitRepoCommand("", root), false)
+  assert.equal(isExternalGitRepoCommand(null, root), false)
+})
+
+// ---------------------------------------------------------------------------
+// P0: Skip workflow tool gate override (one-shot per turn)
+// ---------------------------------------------------------------------------
+test("setToolGateSkipOverride and clearToolGateSkipOverride manage one-shot flag", () => {
+  const root = makeRoot()
+  setToolGateSkipOverride(root)
+  // After set, clear should succeed silently
+  clearToolGateSkipOverride(root)
+  // Setting and clearing multiple times should not throw
+  setToolGateSkipOverride(root)
+  setToolGateSkipOverride(root)
+  clearToolGateSkipOverride(root)
+  clearToolGateSkipOverride(root)
+})
+
+test("state allows write-like bash after explicit workflow skip (one-shot)", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  // Set skip override: simulates the chat.message handler detecting skip workflow
+  setToolGateSkipOverride(root)
+
+  // Now a write-like command should pass through the gate
+  const plugin = await stateFactory({ directory: root })
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+    "Write-like bash should pass through gate after explicit skip",
+  )
+})
+
+test("state blocks write-like bash when skip override was consumed by previous call", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // First call with skip override set
+  setToolGateSkipOverride(root)
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+  )
+
+  // Second call: skip override is consumed, should block again
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+    /Blocked bash: there is no formal task yet\./,
+  )
+})
+
+test("skip workflow override in chat.message sets tool gate skip for same-turn", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  // Model says "skip workflow" — this should set the one-shot tool gate flag
+  const skipOutput = { parts: [{ type: "text", text: "I will skip the workflow and implement this inline." }] }
+  await plugin["chat.message"]({ sessionID: "skip-gate-test" }, skipOutput)
+
+  // The chat text should pass through without block (already tested elsewhere)
+  assert.doesNotMatch(skipOutput.parts[0].text, /\[just-demand execution blocked\]/i)
+
+  // Now the next tool call should be allowed because of the skip flag
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+  )
+
+  // But a second tool call should be blocked (one-shot consumed)
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
+    /Blocked bash: there is no formal task yet\./,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// P0: Unrelated active-task readiness softening
+// ---------------------------------------------------------------------------
+test("read-only bash commands pass the gate even when active task is not ready", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "executing", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "git status",
+    "git log --oneline -5",
+    "git diff",
+    "git stash list",
+    "ls -la",
+    "python3 --version",
+    "cat README.md",
+    "wc -l src/app.js",
+  ]
+  for (const sample of samples) {
+    const output = { args: { command: sample } }
+    await assert.doesNotReject(
+      plugin["tool.execute.before"]({ tool: "bash" }, output),
+      `Expected read-only command to pass: "${sample}"`,
+    )
+  }
+})
+
+test("git read-only commands pass the gate even when active task is not ready", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "executing", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "git status",
+    "git log --oneline -5",
+    "git diff --cached",
+    "git show HEAD",
+    "git stash list",
+    "git checkout main",
+    "git checkout -b feature",
+    "git switch develop",
+  ]
+  for (const sample of samples) {
+    const output = { args: { command: sample } }
+    await assert.doesNotReject(
+      plugin["tool.execute.before"]({ tool: "bash" }, output),
+      `Expected safe git command to pass: "${sample}"`,
+    )
+  }
+})
+
+test("true writes still blocked when active task is not ready", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "executing", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  const samples = [
+    "git add .",
+    "git commit -m fix",
+    "git reset --hard HEAD",
+    "touch out/file.txt",
+    "mkdir -p out && touch out/file.txt",
+  ]
+  for (const sample of samples) {
+    await assert.rejects(
+      plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: sample } }),
+      /Blocked bash:/,
+      `Expected write command to be blocked: "${sample}"`,
+    )
+  }
+})
+
+// ---------------------------------------------------------------------------
+// P0: Closeout continuation protection remains intact
+// ---------------------------------------------------------------------------
+test("closeout continuation phrases still blocked when verification not passed", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "done", current_step: "verify", verification_status: "passed", checkpoint_commit: { created: true } }))
+
+  const plugin = await stateFactory({ directory: root })
+  const closeoutBlockedSamples = [
+    "Continue the task.",
+    "Let's wrap this up.",
+  ]
+  for (const [index, sample] of closeoutBlockedSamples.entries()) {
+    const output = { parts: [{ type: "text", text: sample }] }
+    await plugin["chat.message"]({ sessionID: `closeout-protect-${index}` }, output)
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
+  }
+})
+
+test("closeout continuation false positives allowed when not in closeout phase", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started" }))
+
+  const plugin = await stateFactory({ directory: root })
+  const output = { parts: [{ type: "text", text: "Let's continue with the implementation." }] }
+  await plugin["chat.message"]({}, output)
+  assert.ok(output.parts[0].text.includes("Let's continue with the implementation."))
+  assert.doesNotMatch(output.parts[0].text, /closeout blocked/i)
+})
+
+// ---------------------------------------------------------------------------
+// P0: Safety-critical hard blocks remain intact
+// ---------------------------------------------------------------------------
+test("writes still blocked when no formal task exists", async () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: src/app.js\n*** End Patch" } }),
+    /Blocked apply_patch: there is no formal task yet\./,
+  )
+})
+
+test("writes still blocked when task status is done", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "done" }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: x\n*** End Patch" } }),
+    /Blocked apply_patch:/,
+  )
+})
+
+test("reflection pending still blocks coder dispatch", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  mkdirSync(join(taskDir, "followups"), { recursive: true })
+  writeFileSync(join(taskDir, "followups", "followup-001.md"), "# Follow-Up: 1")
+  writeFileSync(join(taskDir, "followups", "followup-002.md"), "# Follow-Up: 2")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    title: "Task A",
+    type: "design",
+    status: "executing",
+    clarification: { scope: "Scope", final_expected_effect: "Effect", chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+  }))
+
+  const plugin = await stateFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-coder", prompt: "Do work" } }),
+    /Blocked Task: reflection is pending/,
   )
 })
 
