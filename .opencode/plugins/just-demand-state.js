@@ -7,6 +7,8 @@ import {
   getExecutionGateState,
   getReminderState,
   appendDebugSessionTranscript,
+  currentWorkflowPhase,
+  formatWorkflowStateLines,
   isDebugPromptFullEnabled,
   logPluginBootstrap,
   readTaskJson,
@@ -17,6 +19,7 @@ import {
   textLooksLikeCompletionClaim,
   textLooksLikeExplicitWorkflowSkip,
   updateReminderState,
+  WORKFLOW_PHASE,
   writeDebugChatTurnDump,
   workflowRoot,
 } from "./just-demand-lib.js"
@@ -25,37 +28,6 @@ const REMINDER_HEADER = "[just-demand reminder]"
 const CLOSEOUT_BLOCKED_HEADER = "[just-demand closeout blocked]"
 const EXECUTION_BLOCKED_HEADER = "[just-demand execution blocked]"
 const WORKFLOW_ENTRY_BLOCKED_HEADER = "[just-demand workflow entry required]"
-
-const WORKFLOW_PHASE = Object.freeze({
-  noTask: "no-task",
-  clarification: "clarification/intake",
-  execution: "execution",
-  verification: "verification",
-  closeout: "closeout",
-})
-
-const WORKFLOW_PHASE_ACTIONS = Object.freeze({
-  [WORKFLOW_PHASE.noTask]: {
-    allowed: ["enter workflow", "direct answer", "skip workflow"],
-    blocked: ["start", "continue", "complete"],
-  },
-  [WORKFLOW_PHASE.clarification]: {
-    allowed: ["continue clarification", "start execution"],
-    blocked: ["complete", "skip workflow"],
-  },
-  [WORKFLOW_PHASE.execution]: {
-    allowed: ["continue execution", "dispatch subagent"],
-    blocked: ["start", "complete", "skip workflow"],
-  },
-  [WORKFLOW_PHASE.verification]: {
-    allowed: ["complete-verification", "continue verification"],
-    blocked: ["start", "continue", "skip workflow"],
-  },
-  [WORKFLOW_PHASE.closeout]: {
-    allowed: ["checkpoint-commit", "archive"],
-    blocked: ["start", "continue", "complete-verification"],
-  },
-})
 
 const WORKFLOW_LIFECYCLE_INTENTS = [
   {
@@ -237,24 +209,6 @@ const argsKeys = (args) => args && typeof args === "object" ? Object.keys(args).
 
 const normalizeWorkflowText = (text) => String(text || "").trim()
 
-const currentWorkflowPhase = (activeTask, gateState) => {
-  if (!activeTask) return WORKFLOW_PHASE.noTask
-
-  const status = String(activeTask.status || "").toLowerCase()
-  const step = String(activeTask.current_step || "").toLowerCase()
-  const verification = String(activeTask.verification_status || "").toLowerCase()
-
-  if (verification === "passed") return WORKFLOW_PHASE.closeout
-  if (step.includes("verify") || status.includes("verify")) return WORKFLOW_PHASE.verification
-  if (["execut", "implement", "changes_requested", "tweak", "debug"].some((fragment) => status.includes(fragment) || step.includes(fragment))) {
-    return WORKFLOW_PHASE.execution
-  }
-
-  return gateState?.reason === "no_current_task_selected" ? WORKFLOW_PHASE.noTask : WORKFLOW_PHASE.clarification
-}
-
-const workflowStateActions = (phase) => WORKFLOW_PHASE_ACTIONS[phase] || WORKFLOW_PHASE_ACTIONS[WORKFLOW_PHASE.noTask]
-
 const detectWorkflowLifecycleIntent = (text) => {
   const body = normalizeWorkflowText(text)
   if (!body) return null
@@ -307,40 +261,6 @@ const lifecycleTransitionBlocked = (intent, activeTask, gateState) => {
   }
 
   return null
-}
-
-const formatWorkflowStateLines = (activeTaskId, activeTask, gateState) => {
-  const phase = currentWorkflowPhase(activeTask, gateState)
-  const actions = workflowStateActions(phase)
-  const taskLabel = activeTaskId || (gateState?.reason === "no_current_task_selected" ? "selection pending" : "none")
-  const status = activeTask ? String(activeTask.status || "unknown") : null
-  const title = String(activeTask?.title || activeTask?.goal || "").trim()
-  const nextActions = actions.allowed.join(", ")
-  const blockedActions = actions.blocked.join(", ")
-
-  const statusSuffix = status ? ` (${status})` : ""
-  const lines = [`${WORKFLOW_STATE_MARKER} task=${taskLabel}${statusSuffix}; phase=${phase}`]
-  if (activeTaskId && activeTask && title) {
-    const shortTitle = title.length > 80 ? `${title.slice(0, 77)}...` : title
-    lines.push(`    title: ${shortTitle}`)
-  }
-
-  if (gateState?.overlappingTaskIds?.length > 0) {
-    lines.push(`    overlap: ${gateState.overlappingTaskIds.join(", ")}`)
-  }
-
-  if (!activeTaskId && gateState?.reason === "no_current_task_selected") {
-    lines.push("    next: select-task/resume before execution; direct answer only for non-work")
-  } else if (!activeTaskId) {
-    lines.push("    next: enter workflow via clarification/intake, answer simple questions, or explicit skip workflow")
-  } else {
-    lines.push(`    next: ${nextActions}`)
-  }
-
-  if (blockedActions) {
-    lines.push(`    blocked: ${blockedActions}`)
-  }
-  return lines.join("\n")
 }
 
 const topicMemory = new Map()
@@ -746,11 +666,9 @@ const blockWorkflowEntryRequired = (text, reminderState) => {
   ].join("\n")
 }
 
-const WORKFLOW_STATE_MARKER = "[workflow-state]"
-
 const injectWorkflowStateBanner = (text, activeTaskId, activeTask, gateState) => {
   if (typeof text !== "string") return text
-  if (text.includes(WORKFLOW_STATE_MARKER)) return text
+  if (text.includes("[workflow-state]")) return text
   return `${text}\n\n${formatWorkflowStateLines(activeTaskId, activeTask, gateState)}`
 }
 

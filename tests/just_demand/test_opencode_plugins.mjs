@@ -1264,13 +1264,14 @@ test("session-start does not inject workflow bootstrap into system prompt", asyn
   const output = { system: ["You are a helpful assistant."] }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
   assert.equal(output.system[0], "You are a helpful assistant.")
-  assert.equal(output.system.length, 2)
+  assert.equal(output.system.length, 3)
   assert.match(output.system[1], /<JUST_DEMAND_REMINDER>/)
   assert.match(output.system[1], /Load using-just-demand first/i)
   assert.match(output.system[1], /socratic-clarification second/i)
   assert.match(output.system[1], /Use just-demand subagents proactively/i)
   assert.match(output.system[1], /Long-context work means broad code reading, 3\+ files/i)
-  assert.doesNotMatch(output.system[1], /<workflow-state>/i)
+  assert.match(output.system[2], /<JUST_DEMAND_WORKFLOW_STATE>/)
+  assert.match(output.system[2], /\[workflow-state\]/)
 })
 
 test("session-start leaves existing workflow marker text untouched", async () => {
@@ -1279,9 +1280,10 @@ test("session-start leaves existing workflow marker text untouched", async () =>
   const plugin = await sessionStartFactory({ directory: root })
   const output = { system: ["Existing <JUST_DEMAND_WORKFLOW>content</JUST_DEMAND_WORKFLOW>"] }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.equal(output.system.length, 2)
+  assert.equal(output.system.length, 3)
   assert.match(output.system[0], /<JUST_DEMAND_WORKFLOW>content<\/JUST_DEMAND_WORKFLOW>/)
   assert.match(output.system[1], /<JUST_DEMAND_REMINDER>/)
+  assert.match(output.system[2], /<JUST_DEMAND_WORKFLOW_STATE>/)
 })
 
 test("session-start preserves existing system prompt content", async () => {
@@ -1292,6 +1294,7 @@ test("session-start preserves existing system prompt content", async () => {
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
   assert.equal(output.system[0], "Original system prompt.")
   assert.match(output.system[1], /retry now or skip one turn/i)
+  assert.match(output.system[2], /<JUST_DEMAND_WORKFLOW_STATE>/)
 })
 
 test("session-start avoids duplicate reminder injection", async () => {
@@ -1300,7 +1303,50 @@ test("session-start avoids duplicate reminder injection", async () => {
   const plugin = await sessionStartFactory({ directory: root })
   const output = { system: ["Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>"] }
   await plugin["experimental.chat.system.transform"]({ sessionID: "s1" }, output)
-  assert.deepEqual(output.system, ["Base prompt.\n\n<JUST_DEMAND_REMINDER>already there</JUST_DEMAND_REMINDER>"])
+  assert.equal(output.system.length, 2)
+  assert.match(output.system[0], /<JUST_DEMAND_REMINDER>already there<\/JUST_DEMAND_REMINDER>/)
+  assert.match(output.system[1], /<JUST_DEMAND_WORKFLOW_STATE>/)
+})
+
+test("session-start writes fallback system prompt dump when JUST_DEMAND_DEBUG_PROMPT_FULL is enabled", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "executing", current_step: "execute" }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  const originalDebugFull = process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
+  process.env.JUST_DEMAND_DEBUG = "1"
+  process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = "1"
+
+  try {
+    const plugin = await sessionStartFactory({ directory: root })
+    const output = { system: ["You are a helpful assistant."] }
+    await plugin["experimental.chat.system.transform"]({ sessionID: "sys-session" }, output)
+
+    const debugPromptDir = join(root, ".just-demand", "debug-prompts")
+    const files = readdirSync(debugPromptDir).filter((name) => name.includes("chat-sys-session-task-a"))
+    assert.equal(files.length, 1)
+    const dump = readFileSync(join(debugPromptDir, files[0]), "utf8")
+    assert.match(dump, /reason_code: session_start_fallback/)
+    assert.match(dump, /<JUST_DEMAND_WORKFLOW_STATE>/)
+    assert.match(dump, /\[workflow-state\]/)
+
+    const transcript = readFileSync(join(debugPromptDir, "session-sys-session.md"), "utf8")
+    assert.match(transcript, /# Main Session System Prompt/)
+    assert.match(transcript, /session_start_fallback/)
+    assert.match(transcript, /<JUST_DEMAND_WORKFLOW_STATE>/)
+
+    const log = readFileSync(join(root, ".just-demand", "debug.log"), "utf8")
+    assert.match(log, /"event":"session-start\.dump"/)
+    assert.match(log, /"dump_path":"\.just-demand\/debug-prompts\//)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+    if (originalDebugFull === undefined) delete process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
+    else process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = originalDebugFull
+  }
 })
 
 test("skill docs expose Question Strategy Layer and final-card guidance", () => {

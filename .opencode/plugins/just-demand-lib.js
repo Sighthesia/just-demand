@@ -13,6 +13,36 @@ const WORKFLOW_SUBAGENTS = new Set(["just-demand-researcher", "just-demand-coder
 const EXECUTION_GATED_SUBAGENTS = new Set(["just-demand-coder", "just-demand-tester"])
 const LAST_SUBAGENT_DISPATCH_FILE = "last_subagent_dispatch.json"
 const DEBUG_ENV_VALUES = new Set(["1", "true", "yes", "on"])
+const WORKFLOW_STATE_MARKER = "[workflow-state]"
+export const WORKFLOW_PHASE = Object.freeze({
+  noTask: "no-task",
+  clarification: "clarification/intake",
+  execution: "execution",
+  verification: "verification",
+  closeout: "closeout",
+})
+const WORKFLOW_PHASE_ACTIONS = Object.freeze({
+  [WORKFLOW_PHASE.noTask]: {
+    allowed: ["enter workflow", "direct answer", "skip workflow"],
+    blocked: ["start", "continue", "complete"],
+  },
+  [WORKFLOW_PHASE.clarification]: {
+    allowed: ["continue clarification", "start execution"],
+    blocked: ["complete", "skip workflow"],
+  },
+  [WORKFLOW_PHASE.execution]: {
+    allowed: ["continue execution", "dispatch subagent"],
+    blocked: ["start", "complete", "skip workflow"],
+  },
+  [WORKFLOW_PHASE.verification]: {
+    allowed: ["complete-verification", "continue verification"],
+    blocked: ["start", "continue", "skip workflow"],
+  },
+  [WORKFLOW_PHASE.closeout]: {
+    allowed: ["checkpoint-commit", "archive"],
+    blocked: ["start", "continue", "complete-verification"],
+  },
+})
 const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
   "design",
   "implementation",
@@ -902,6 +932,54 @@ export const getExecutionGateState = (directory) => {
     }
   }
   return { reason: "no_formal_task", taskId: null, activeTaskCount: 0, activeTaskIds: [], overlappingTaskIds: [], nonOverlappingActiveTaskCount: 0 }
+}
+
+export const currentWorkflowPhase = (activeTask, gateState) => {
+  if (!activeTask) return WORKFLOW_PHASE.noTask
+  const verificationStatus = String(activeTask?.verification_status || "").toLowerCase()
+  if (verificationStatus === "passed") return WORKFLOW_PHASE.closeout
+  const currentStep = String(activeTask?.current_step || "").toLowerCase()
+  const status = String(activeTask?.status || "").toLowerCase()
+  if (status === "verifying" || currentStep.includes("verify")) return WORKFLOW_PHASE.verification
+  if (currentStep.includes("clarif") || currentStep.includes("design") || status === "planning") return WORKFLOW_PHASE.clarification
+  if (gateState?.reason === "no_current_task_selected") return WORKFLOW_PHASE.noTask
+  return WORKFLOW_PHASE.execution
+}
+
+const workflowStateActions = (phase) => WORKFLOW_PHASE_ACTIONS[phase] || WORKFLOW_PHASE_ACTIONS[WORKFLOW_PHASE.noTask]
+
+export const formatWorkflowStateLines = (activeTaskId, activeTask, gateState) => {
+  const phase = currentWorkflowPhase(activeTask, gateState)
+  const actions = workflowStateActions(phase)
+  const taskLabel = activeTaskId || (gateState?.reason === "no_current_task_selected" ? "selection pending" : "none")
+  const status = activeTask ? String(activeTask.status || "unknown") : null
+  const title = String(activeTask?.title || activeTask?.goal || "").trim()
+  const nextActions = actions.allowed.join(", ")
+  const blockedActions = actions.blocked.join(", ")
+
+  const statusSuffix = status ? ` (${status})` : ""
+  const lines = [`${WORKFLOW_STATE_MARKER} task=${taskLabel}${statusSuffix}; phase=${phase}`]
+  if (activeTaskId && activeTask && title) {
+    const shortTitle = title.length > 80 ? `${title.slice(0, 77)}...` : title
+    lines.push(`    title: ${shortTitle}`)
+  }
+
+  if (gateState?.overlappingTaskIds?.length > 0) {
+    lines.push(`    overlap: ${gateState.overlappingTaskIds.join(", ")}`)
+  }
+
+  if (!activeTaskId && gateState?.reason === "no_current_task_selected") {
+    lines.push("    next: select-task/resume before execution; direct answer only for non-work")
+  } else if (!activeTaskId) {
+    lines.push("    next: enter workflow via clarification/intake, answer simple questions, or explicit skip workflow")
+  } else {
+    lines.push(`    next: ${nextActions}`)
+  }
+
+  if (blockedActions) {
+    lines.push(`    blocked: ${blockedActions}`)
+  }
+  return lines.join("\n")
 }
 
 const _buildContractHints = (task) => {
