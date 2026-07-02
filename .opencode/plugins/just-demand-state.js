@@ -6,6 +6,8 @@ import {
   enforceExecutionGate,
   getExecutionGateState,
   getReminderState,
+  appendDebugSessionTranscript,
+  isDebugPromptFullEnabled,
   readTaskJson,
   setToolGateSkipOverride,
   taskLooksLikeLongContextExecutionCandidate,
@@ -14,6 +16,7 @@ import {
   textLooksLikeCompletionClaim,
   textLooksLikeExplicitWorkflowSkip,
   updateReminderState,
+  writeDebugChatTurnDump,
   workflowRoot,
 } from "./just-demand-lib.js"
 
@@ -788,13 +791,14 @@ export default async ({ directory } = {}) => {
       updateTopicTurns(`${workflowDirectory}::${sessionID}`, currentText, reminderState)
 
       const controllerDecision = buildControllerDecision(currentText, reminderState)
-      debugLog("state.chat.message.decision", {
+      const decisionLog = {
         session_id: sessionID,
         active_task_id: activeTaskId || null,
         phase: controllerDecision.phase,
         action: controllerDecision.action,
         reason_code: controllerDecision.reason_code,
-      }, workflowDirectory)
+      }
+      debugLog("state.chat.message.decision", decisionLog, workflowDirectory)
 
       // Set one-shot tool gate skip override when the model explicitly
       // bypasses the workflow. The next tool call within this turn will be
@@ -803,7 +807,9 @@ export default async ({ directory } = {}) => {
         setToolGateSkipOverride(workflowDirectory)
       }
 
-      textPart.text = applyControllerDecision(textPart.text, reminderState, controllerDecision)
+      const originalText = textPart.text
+      const afterControllerText = applyControllerDecision(textPart.text, reminderState, controllerDecision)
+      textPart.text = afterControllerText
 
       // One-time per-session intake fallback warning: if the tool execution gate
       // detected an intake fallback on the previous tool call, surface a concise
@@ -823,6 +829,42 @@ export default async ({ directory } = {}) => {
 
       // Unconditional workflow-state injection: visible every turn.
       textPart.text = injectWorkflowStateBanner(textPart.text, activeTaskId, activeTask, gateState)
+
+      if (isDebugPromptFullEnabled()) {
+        const dumpPath = writeDebugChatTurnDump(workflowDirectory, {
+          session_id: sessionID,
+          task_id: activeTaskId || "",
+          phase: controllerDecision.phase,
+          action: controllerDecision.action,
+          reason_code: controllerDecision.reason_code,
+          original_text: originalText,
+          after_controller_text: afterControllerText,
+          final_text: textPart.text,
+        })
+        const transcriptPath = appendDebugSessionTranscript(workflowDirectory, {
+          entry_type: "Main Session Chat Turn",
+          session_id: sessionID,
+          task_id: activeTaskId || "",
+          source: "main-session-system-layer",
+          phase: controllerDecision.phase,
+          action: controllerDecision.action,
+          reason_code: controllerDecision.reason_code,
+          trigger_summary: [
+            `just-demand controller decision: phase=${controllerDecision.phase} action=${controllerDecision.action} reason=${controllerDecision.reason_code}`,
+            `workflow-state banner injected for task ${activeTaskId || "(none)"}`,
+          ],
+          original_text: originalText,
+          after_controller_text: afterControllerText,
+          final_text: textPart.text,
+        })
+        debugLog("state.chat.message.dump", {
+          session_id: sessionID,
+          active_task_id: activeTaskId || null,
+          reason_code: controllerDecision.reason_code,
+          dump_path: dumpPath,
+          transcript_path: transcriptPath,
+        }, workflowDirectory)
+      }
     },
   }
 }

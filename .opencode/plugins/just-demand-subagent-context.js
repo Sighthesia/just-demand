@@ -8,10 +8,14 @@ import {
   getRecoveredSubagentTaskId,
   getReminderState,
   getWorkflowSubagentName,
+  appendDebugSessionTranscript,
+  isDebugPromptFullEnabled,
   markSubagentUnavailablePending,
   recordLastSubagentDispatchTaskId,
   readTaskContext,
   readTaskJson,
+  summarizeInjectedContextParts,
+  writeDebugPromptDump,
   workflowRoot,
 } from "./just-demand-lib.js"
 
@@ -102,8 +106,42 @@ export default async ({ directory }) => {
         debugLog("subagent.tool.before.skip", { reason: "empty_context", task_id: taskId, workflow_subagent: subagentName }, directory)
         return
       }
-      args.prompt = `Active task: ${taskId}\n\n# Just Demand Workflow\n\n${context}\n\n---\n\n# Execution Rules\n\nComplete the requested work in this subagent.\nDo not call the Task tool.\nDo not dispatch another subagent.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
-      debugLog("subagent.tool.before.inject", { task_id: taskId, workflow_subagent: subagentName }, directory)
+      const requestedWork = args.prompt || ""
+      args.prompt = `Active task: ${taskId}\n\n# Just Demand Workflow\n\n${context}\n\n---\n\n# Execution Rules\n\nComplete the requested work in this subagent.\nDo not call the Task tool.\nDo not dispatch another subagent.\n\n---\n\n# Requested Work\n\n${requestedWork}`
+      const contextParts = summarizeInjectedContextParts(directory, taskId, subagentName)
+      const injectLog = {
+        task_id: taskId,
+        workflow_subagent: subagentName,
+        prompt_length: args.prompt.length,
+        context_parts: contextParts,
+      }
+      if (isDebugPromptFullEnabled()) {
+        injectLog.prompt_dump_path = writeDebugPromptDump(directory, {
+          task_id: taskId,
+          workflow_subagent: subagentName,
+          prompt_length: args.prompt.length,
+          context_parts: contextParts,
+          requested_work: requestedWork,
+          injected_context: context,
+          prompt: args.prompt,
+        })
+        injectLog.transcript_path = appendDebugSessionTranscript(directory, {
+          entry_type: "Subagent Prompt Injection",
+          session_id: input?.sessionID || "main",
+          task_id: taskId,
+          source: "subagent-prompt-injection",
+          workflow_subagent: subagentName,
+          trigger_summary: [
+            `just-demand subagent injection for ${subagentName}`,
+            `active task ${taskId} context injected before Task dispatch`,
+          ],
+          requested_work: requestedWork,
+          context_parts: contextParts,
+          injected_context: context,
+          prompt: args.prompt,
+        })
+      }
+      debugLog("subagent.tool.before.inject", injectLog, directory)
     },
   }
 }

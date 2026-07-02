@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -2544,6 +2544,141 @@ test("subagent-context injects context for supported subagent type", async () =>
   assert.match(output.args.prompt, /Remaining Open Questions/)
   assert.match(output.args.prompt, /# Requested Work/)
   assert.match(output.args.prompt, /Do the work/)
+})
+
+test("subagent-context debug log records injected context parts summary", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  process.env.JUST_DEMAND_DEBUG = "1"
+
+  try {
+    const plugin = await subagentContextFactory({ directory: root })
+    const input = { tool: "Task" }
+    const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+    await plugin["tool.execute.before"](input, output)
+
+    const log = readFileSync(join(root, ".just-demand", "debug.log"), "utf8")
+    assert.match(log, /"event":"subagent\.tool\.before\.inject"/)
+    assert.match(log, /"context_parts":\[/)
+    assert.match(log, /"name":"context\.md"/)
+    assert.match(log, /"name":"implement\.md"/)
+    assert.match(log, /"prompt_length":/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+  }
+})
+
+test("subagent-context writes full prompt dump when JUST_DEMAND_DEBUG_PROMPT_FULL is enabled", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  const originalDebugFull = process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
+  process.env.JUST_DEMAND_DEBUG = "1"
+  process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = "1"
+
+  try {
+    const plugin = await subagentContextFactory({ directory: root })
+    const input = { tool: "Task" }
+    const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+    await plugin["tool.execute.before"](input, output)
+
+    const debugPromptDir = join(root, ".just-demand", "debug-prompts")
+    const files = readdirSync(debugPromptDir)
+    const promptDumpFile = files.find((name) => name.includes("task-a-just-demand-coder"))
+    assert.equal(typeof promptDumpFile, "string")
+    const dump = readFileSync(join(debugPromptDir, promptDumpFile), "utf8")
+    assert.match(dump, /# Prompt Debug Dump/)
+    assert.match(dump, /## Original Requested Work/)
+    assert.match(dump, /Do the work/)
+    assert.match(dump, /workflow_subagent: just-demand-coder/)
+    assert.match(dump, /context\.md: length=/)
+    assert.match(dump, /## Injected Workflow Context/)
+    assert.match(dump, /# Context/)
+    assert.match(dump, /## Prompt/)
+    assert.match(dump, /# Just Demand Workflow/)
+
+    const log = readFileSync(join(root, ".just-demand", "debug.log"), "utf8")
+    assert.match(log, /"prompt_dump_path":"\.just-demand\/debug-prompts\//)
+
+    const transcript = readFileSync(join(debugPromptDir, "session-main.md"), "utf8")
+    assert.match(transcript, /# Subagent Prompt Injection/)
+    assert.match(transcript, /source: subagent-prompt-injection/)
+    assert.match(transcript, /## Original Requested Work/)
+    assert.match(transcript, /Do the work/)
+    assert.match(transcript, /## Injected Workflow Context/)
+    assert.match(transcript, /# Context/)
+    assert.match(transcript, /## Final Prompt/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+    if (originalDebugFull === undefined) delete process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
+    else process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = originalDebugFull
+  }
+})
+
+test("state writes full chat turn dump when JUST_DEMAND_DEBUG_PROMPT_FULL is enabled", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  const originalDebugFull = process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
+  process.env.JUST_DEMAND_DEBUG = "1"
+  process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = "1"
+
+  try {
+    const plugin = await stateFactory({ directory: root })
+    const output = { parts: [{ type: "text", text: "I will implement the feature inline." }] }
+    await plugin["chat.message"]({ sessionID: "dump-session" }, output)
+
+    const debugPromptDir = join(root, ".just-demand", "debug-prompts")
+    const files = readdirSync(debugPromptDir).filter((name) => name.includes("chat-dump-session-task-a"))
+    assert.equal(files.length, 1)
+    const dump = readFileSync(join(debugPromptDir, files[0]), "utf8")
+    assert.match(dump, /# Chat Turn Debug Dump/)
+    assert.match(dump, /reason_code: execution_needed/)
+    assert.match(dump, /## Original Text/)
+    assert.match(dump, /I will implement the feature inline\./)
+    assert.match(dump, /## After Controller/)
+    assert.match(dump, /\[just-demand execution blocked\]/)
+    assert.match(dump, /## Final Text/)
+    assert.match(dump, /\[workflow-state\]/)
+
+    const log = readFileSync(join(root, ".just-demand", "debug.log"), "utf8")
+    assert.match(log, /"event":"state\.chat\.message\.dump"/)
+    assert.match(log, /"dump_path":"\.just-demand\/debug-prompts\//)
+
+    const transcript = readFileSync(join(debugPromptDir, "session-dump-session.md"), "utf8")
+    assert.match(transcript, /# Main Session Chat Turn/)
+    assert.match(transcript, /source: main-session-system-layer/)
+    assert.match(transcript, /## Original Text/)
+    assert.match(transcript, /I will implement the feature inline\./)
+    assert.match(transcript, /## After Controller/)
+    assert.match(transcript, /\[just-demand execution blocked\]/)
+    assert.match(transcript, /## Final Text/)
+    assert.match(transcript, /\[workflow-state\]/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+    if (originalDebugFull === undefined) delete process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
+    else process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = originalDebugFull
+  }
 })
 
 test("subagent-context resumes prior subagent session after unavailable retry", async () => {

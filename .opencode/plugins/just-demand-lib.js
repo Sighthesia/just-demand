@@ -1325,3 +1325,200 @@ export const getMissingRequiredContextFiles = (directory, taskId, agentName) => 
   const taskDir = join(workflowRoot(directory), "state", "active", taskId)
   return getRequiredContextFiles(agentName).filter((file) => !existsSync(join(taskDir, file)))
 }
+
+const DEBUG_PREVIEW_LIMIT = 200
+
+const debugEnvEnabled = (name) => DEBUG_ENV_VALUES.has(String(globalThis.process?.env?.[name] || "").toLowerCase())
+
+const previewText = (value, limit = DEBUG_PREVIEW_LIMIT) => {
+  const text = String(value || "").replace(/\s+/g, " ").trim()
+  if (!text) return ""
+  return text.length > limit ? `${text.slice(0, limit)}...` : text
+}
+
+export const isDebugPromptFullEnabled = () => debugEnvEnabled("JUST_DEMAND_DEBUG_PROMPT_FULL")
+
+export const summarizeInjectedContextParts = (directory, taskId, agentName) => {
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
+  const parts = []
+  const pushPart = (name, content) => {
+    const text = String(content || "")
+    if (!text.trim()) return
+    parts.push({ name, length: text.length, preview: previewText(text) })
+  }
+
+  const renderedContext = readRenderedTaskContext(directory, taskId, agentName)
+  if (renderedContext) {
+    pushPart("rendered-context", renderedContext)
+    const lintWarnings = readPacketLintWarnings(directory, taskId, agentName, readTaskJson(directory, taskId))
+    if (lintWarnings.length > 0) pushPart("packet-warnings", lintWarnings.join("\n"))
+  } else {
+    pushPart("context.md", readTextIfExists(join(taskDir, "context.md")))
+    if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+      const clarificationContext = renderClarificationContext(readTaskJson(directory, taskId))
+      pushPart("clarification-context", clarificationContext)
+    }
+    pushPart("decisions.md", readTextIfExists(join(taskDir, "decisions.md")))
+
+    const task = readTaskJson(directory, taskId)
+    const openQuestions = readTextIfExists(join(taskDir, "open_questions.md"))
+    const clarificationQuestions = task?.clarification?.non_blocking_questions || []
+    const hasRemainingOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, "")) || clarificationQuestions.length > 0
+    if (hasRemainingOpenQuestions && ["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+      const renderedOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, ""))
+        ? openQuestions
+        : `# Open Questions\n\n## Remaining Open Questions\n\n${clarificationQuestions.map((question) => `- ${question}`).join("\n")}\n`
+      pushPart("open-questions", renderedOpenQuestions)
+    }
+
+    if (agentName === "just-demand-coder") pushPart("implement.md", readTextIfExists(join(taskDir, "implement.md")))
+    if (agentName === "just-demand-tester") pushPart("verify.md", readTextIfExists(join(taskDir, "verify.md")))
+    if (agentName === "just-demand-researcher" && existsSync(join(taskDir, "research"))) {
+      pushPart("research-note", "Research outputs: write any artifacts under this task's local research/ directory.")
+    }
+    if (agentName === "just-demand-advisor" && existsSync(join(taskDir, "advisor"))) {
+      pushPart("advisor-note", "Advisory outputs: write any analysis artifacts under this task's local advisor/ directory.")
+    }
+  }
+
+  if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+    pushPart("latest-follow-up", readLatestFollowup(directory, taskId))
+  }
+  if (agentName === "just-demand-advisor") {
+    pushPart("reflection", readReflectionContext(directory, taskId))
+  }
+
+  return parts
+}
+
+export const writeDebugPromptDump = (directory, payload) => {
+  const debugDir = join(workflowRoot(directory), "debug-prompts")
+  mkdirSync(debugDir, { recursive: true })
+  const safeTaskId = String(payload?.task_id || "no-task").replace(/[^A-Za-z0-9._-]+/g, "-")
+  const safeSubagent = String(payload?.workflow_subagent || "unknown").replace(/[^A-Za-z0-9._-]+/g, "-")
+  const timestamp = new Date().toISOString().replace(/[:]/g, "-")
+  const filePath = join(debugDir, `${timestamp}-${safeTaskId}-${safeSubagent}.md`)
+  const body = [
+    `# Prompt Debug Dump`,
+    ``,
+    `- task_id: ${payload?.task_id || ""}`,
+    `- workflow_subagent: ${payload?.workflow_subagent || ""}`,
+    `- prompt_length: ${payload?.prompt_length || 0}`,
+    ``,
+    `## Plugin Trigger Summary`,
+    ``,
+    `- just-demand subagent injection: task=${payload?.task_id || ""} subagent=${payload?.workflow_subagent || ""}`,
+    `- prompt_length: ${payload?.prompt_length || 0}`,
+    ``,
+    `## Original Requested Work`,
+    ``,
+    payload?.requested_work || "",
+    ``,
+    `## Context Parts`,
+    ``,
+    ...(Array.isArray(payload?.context_parts)
+      ? payload.context_parts.map((part) => `- ${part.name}: length=${part.length} preview=${part.preview || ""}`)
+      : []),
+    ``,
+    `## Injected Workflow Context`,
+    ``,
+    payload?.injected_context || "",
+    ``,
+    `## Prompt`,
+    ``,
+    payload?.prompt || "",
+    ``,
+  ].join("\n")
+  writeFileSync(filePath, body, "utf8")
+  return relative(directory, filePath)
+}
+
+export const writeDebugChatTurnDump = (directory, payload) => {
+  const debugDir = join(workflowRoot(directory), "debug-prompts")
+  mkdirSync(debugDir, { recursive: true })
+  const safeSessionId = String(payload?.session_id || "main").replace(/[^A-Za-z0-9._-]+/g, "-")
+  const safeTaskId = String(payload?.task_id || "no-task").replace(/[^A-Za-z0-9._-]+/g, "-")
+  const timestamp = new Date().toISOString().replace(/[:]/g, "-")
+  const filePath = join(debugDir, `${timestamp}-chat-${safeSessionId}-${safeTaskId}.md`)
+  const body = [
+    `# Chat Turn Debug Dump`,
+    ``,
+    `- session_id: ${payload?.session_id || ""}`,
+    `- task_id: ${payload?.task_id || ""}`,
+    `- phase: ${payload?.phase || ""}`,
+    `- action: ${payload?.action || ""}`,
+    `- reason_code: ${payload?.reason_code || ""}`,
+    ``,
+    `## Plugin Trigger Summary`,
+    ``,
+    `- just-demand controller decision: phase=${payload?.phase || ""} action=${payload?.action || ""} reason=${payload?.reason_code || ""}`,
+    `- active task: ${payload?.task_id || "(none)"}`,
+    ``,
+    `## Original Text`,
+    ``,
+    payload?.original_text || "",
+    ``,
+    `## After Controller`,
+    ``,
+    payload?.after_controller_text || "",
+    ``,
+    `## Final Text`,
+    ``,
+    payload?.final_text || "",
+    ``,
+  ].join("\n")
+  writeFileSync(filePath, body, "utf8")
+  return relative(directory, filePath)
+}
+
+const ensureDebugPromptDir = (directory) => {
+  const debugDir = join(workflowRoot(directory), "debug-prompts")
+  mkdirSync(debugDir, { recursive: true })
+  return debugDir
+}
+
+const sanitizeDebugName = (value, fallback = "unknown") => {
+  const text = String(value || fallback).replace(/[^A-Za-z0-9._-]+/g, "-")
+  return text || fallback
+}
+
+export const appendDebugSessionTranscript = (directory, payload) => {
+  const debugDir = ensureDebugPromptDir(directory)
+  const safeSessionId = sanitizeDebugName(payload?.session_id, "main")
+  const filePath = join(debugDir, `session-${safeSessionId}.md`)
+  const section = [
+    `\n---\n`,
+    `# ${payload?.entry_type || "Debug Entry"}`,
+    ``,
+    `- timestamp: ${new Date().toISOString()}`,
+    `- session_id: ${payload?.session_id || ""}`,
+    `- task_id: ${payload?.task_id || ""}`,
+    `- source: ${payload?.source || ""}`,
+    ...(payload?.workflow_subagent ? [`- workflow_subagent: ${payload.workflow_subagent}`] : []),
+    ...(payload?.phase ? [`- phase: ${payload.phase}`] : []),
+    ...(payload?.action ? [`- action: ${payload.action}`] : []),
+    ...(payload?.reason_code ? [`- reason_code: ${payload.reason_code}`] : []),
+    ``,
+    `## Plugin Trigger Summary`,
+    ``,
+    ...(Array.isArray(payload?.trigger_summary) ? payload.trigger_summary.map((line) => `- ${line}`) : []),
+    ``,
+    ...(payload?.original_text !== undefined ? [`## Original Text`, ``, payload.original_text, ``] : []),
+    ...(payload?.after_controller_text !== undefined ? [`## After Controller`, ``, payload.after_controller_text, ``] : []),
+    ...(payload?.final_text !== undefined ? [`## Final Text`, ``, payload.final_text, ``] : []),
+    ...(payload?.requested_work !== undefined ? [`## Original Requested Work`, ``, payload.requested_work, ``] : []),
+    ...(Array.isArray(payload?.context_parts)
+      ? [
+          `## Context Parts`,
+          ``,
+          ...payload.context_parts.map((part) => `- ${part.name}: length=${part.length} preview=${part.preview || ""}`),
+          ``,
+        ]
+      : []),
+    ...(payload?.injected_context !== undefined ? [`## Injected Workflow Context`, ``, payload.injected_context, ``] : []),
+    ...(payload?.prompt !== undefined ? [`## Final Prompt`, ``, payload.prompt, ``] : []),
+  ].join("\n")
+
+  appendFileSync(filePath, section, "utf8")
+  return relative(directory, filePath)
+}
