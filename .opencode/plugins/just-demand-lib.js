@@ -581,14 +581,15 @@ export const looksLikeBashWriteCommand = (command) => {
 }
 
 export const hasUnquotedShellRedirection = (command) => {
+  const shellText = stripHeredocBodies(command)
   let inSingleQuote = false
   let inDoubleQuote = false
 
-  for (let index = 0; index < command.length; index += 1) {
-    const char = command[index]
+  for (let index = 0; index < shellText.length; index += 1) {
+    const char = shellText[index]
 
     if (char === "\\") {
-      if (!inSingleQuote && index + 1 < command.length) index += 1
+      if (!inSingleQuote && index + 1 < shellText.length) index += 1
       continue
     }
 
@@ -606,6 +607,30 @@ export const hasUnquotedShellRedirection = (command) => {
   }
 
   return false
+}
+
+const stripHeredocBodies = (command) => {
+  const lines = String(command || "").split(/\r?\n/)
+  const kept = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    kept.push(line)
+
+    const marker = extractHeredocMarker(line)
+    if (!marker) continue
+
+    index += 1
+    while (index < lines.length && lines[index].trim() !== marker) index += 1
+    if (index < lines.length) kept.push(lines[index])
+  }
+
+  return kept.join("\n")
+}
+
+const extractHeredocMarker = (line) => {
+  const match = String(line || "").match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1(?:\s|$)/)
+  return match ? match[2] : null
 }
 
 // ---------------------------------------------------------------------------

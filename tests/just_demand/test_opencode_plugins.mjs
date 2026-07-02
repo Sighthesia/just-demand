@@ -568,11 +568,14 @@ test("write tool rule table identifies write-like tools and ignores read-only ba
   assert.equal(getWriteToolRule("task", { subagent_type: "just-demand-researcher" })?.needsExecutionGate({ subagent_type: "just-demand-researcher" }), false)
   assert.equal(getWriteToolRule("bash", { command: "mkdir -p out && touch out/file.txt" })?.label, "bash")
   assert.equal(getWriteToolRule("bash", { command: "python3 -m unittest tests.just_demand.test_workflow_core -v" }), null)
+  assert.equal(getWriteToolRule("bash", { command: "python3 - <<'PY'\nif raw > 0:\n    print(raw)\nPY" }), null)
   assert.equal(looksLikeBashWriteCommand("mkdir -p out && touch out/file.txt"), true)
   assert.equal(looksLikeBashWriteCommand("python3 -m unittest tests.just_demand.test_workflow_core -v"), false)
+  assert.equal(looksLikeBashWriteCommand("python3 - <<'PY'\nif raw > 0:\n    print(raw)\nPY"), false)
   assert.equal(looksLikeBashWriteCommand("just-demand . create-intake \"Threshold\" \"greater-than > 100ms\" --session abc"), false)
   assert.equal(looksLikeBashWriteCommand("just-demand . list-active > /tmp/tasks.txt"), true)
   assert.equal(hasUnquotedShellRedirection("just-demand . create-intake \"Threshold\" \"greater-than > 100ms\" --session abc"), false)
+  assert.equal(hasUnquotedShellRedirection("python3 - <<'PY'\nif raw > 0:\n    print(raw)\nPY"), false)
   assert.equal(hasUnquotedShellRedirection("just-demand . list-active > /tmp/tasks.txt"), true)
   assert.equal(buildExecutionGateError("bash", { reason: "no_formal_task" }), "Blocked bash: there is no formal task yet.")
   assert.equal(
@@ -1668,6 +1671,21 @@ test("state allows read-only bash commands through the write gate", async () => 
   const output = { args: { command: "python3 -m unittest tests.just_demand.test_workflow_core -v" } }
   await plugin["tool.execute.before"]({ tool: "bash" }, output)
   assert.equal(output.args.command, "python3 -m unittest tests.just_demand.test_workflow_core -v")
+})
+
+test("state allows read-only bash heredoc analysis through the write gate", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", type: "design", status: "paused", clarification: { scope: "" } }))
+
+  const plugin = await stateFactory({ directory: root })
+  const command = "python3 - <<'PY'\nif raw > 0:\n    print(raw)\nPY"
+  const output = { args: { command } }
+
+  await plugin["tool.execute.before"]({ tool: "bash" }, output)
+  assert.equal(output.args.command, command)
 })
 
 test("state allows quoted greater-than inside create-intake arguments", async () => {
