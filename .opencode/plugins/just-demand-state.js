@@ -8,6 +8,7 @@ import {
   getReminderState,
   appendDebugSessionTranscript,
   isDebugPromptFullEnabled,
+  logPluginBootstrap,
   readTaskJson,
   setToolGateSkipOverride,
   taskLooksLikeLongContextExecutionCandidate,
@@ -754,6 +755,7 @@ const injectWorkflowStateBanner = (text, activeTaskId, activeTask, gateState) =>
 }
 
 export default async ({ directory } = {}) => {
+  logPluginBootstrap(directory || ".", "just-demand-state")
   return {
     "tool.execute.before": async (input, output) => {
       const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."

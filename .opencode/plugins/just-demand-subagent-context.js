@@ -10,6 +10,7 @@ import {
   getWorkflowSubagentName,
   appendDebugSessionTranscript,
   isDebugPromptFullEnabled,
+  logPluginBootstrap,
   markSubagentUnavailablePending,
   recordLastSubagentDispatchTaskId,
   readTaskContext,
@@ -29,6 +30,7 @@ const INJECTION_MARKERS = ["# Just Demand Workflow", "# Injected Workflow Contex
 const argsKeys = (args) => args && typeof args === "object" ? Object.keys(args).sort() : []
 
 export default async ({ directory }) => {
+  logPluginBootstrap(directory || ".", "just-demand-subagent-context")
   return {
     "tool.execute.after": async (input, output) => {
       if (!existsSync(workflowRoot(directory))) return

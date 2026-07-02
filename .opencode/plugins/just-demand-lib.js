@@ -1522,3 +1522,13 @@ export const appendDebugSessionTranscript = (directory, payload) => {
   appendFileSync(filePath, section, "utf8")
   return relative(directory, filePath)
 }
+
+export const logPluginBootstrap = (directory, pluginName) => {
+  debugLog("plugin.bootstrap", {
+    plugin: pluginName,
+    workflow_directory: directory,
+    debug_enabled: String(globalThis.process?.env?.JUST_DEMAND_DEBUG || ""),
+    debug_prompt_full_enabled: String(globalThis.process?.env?.JUST_DEMAND_DEBUG_PROMPT_FULL || ""),
+    debug_prompts_dir: relative(directory, join(workflowRoot(directory), "debug-prompts")),
+  }, directory)
+}

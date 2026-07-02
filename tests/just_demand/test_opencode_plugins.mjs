@@ -138,6 +138,35 @@ test("debugLog is quiet by default, emits to stderr when enabled, and writes to 
   }
 })
 
+test("plugin bootstrap logs debug env and target directory when debug is enabled", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  const originalDebugFull = process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
+  process.env.JUST_DEMAND_DEBUG = "1"
+  process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = "1"
+
+  try {
+    await stateFactory({ directory: root })
+    await subagentContextFactory({ directory: root })
+    await sessionStartFactory({ directory: root })
+
+    const log = readFileSync(join(root, ".just-demand", "debug.log"), "utf8")
+    assert.match(log, /"event":"plugin\.bootstrap"/)
+    assert.match(log, /"plugin":"just-demand-state"/)
+    assert.match(log, /"plugin":"just-demand-subagent-context"/)
+    assert.match(log, /"plugin":"just-demand-session-start"/)
+    assert.match(log, /"debug_enabled":"1"/)
+    assert.match(log, /"debug_prompt_full_enabled":"1"/)
+    assert.match(log, /"debug_prompts_dir":"\.just-demand\/debug-prompts"/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+    if (originalDebugFull === undefined) delete process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
+    else process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = originalDebugFull
+  }
+})
+
 // ---------------------------------------------------------------------------
 // lib: listUnfinishedTasks
 // ---------------------------------------------------------------------------

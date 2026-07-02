@@ -1,3 +1,5 @@
+import { logPluginBootstrap } from "./just-demand-lib.js"
+
 const SESSION_REMINDER = [
   "<JUST_DEMAND_REMINDER>",
   "Load using-just-demand first for repo workflow turns.",
@@ -9,7 +11,8 @@ const SESSION_REMINDER = [
   "</JUST_DEMAND_REMINDER>",
 ].join("\n")
 
-export default async () => {
+export default async ({ directory } = {}) => {
+  logPluginBootstrap(directory || ".", "just-demand-session-start")
   return {
     "experimental.chat.system.transform": async (_input, output) => {
       if (!output || !Array.isArray(output.system)) return
