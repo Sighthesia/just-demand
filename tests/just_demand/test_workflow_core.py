@@ -1309,6 +1309,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue((tasks_dir(root) / "archive" / task_id).is_dir())
             self.assertIn("Completion report:", result.stderr)
             self.assertIn("Verification: passed — All done", result.stderr)
+            self.assertIn("Checkpoint commit: yes", result.stderr)
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
             self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint cli checkpoint")
@@ -1969,8 +1970,8 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(task["clarification"]["approval"], "Approved by user.")
 
 
-    def test_checkpoint_commit_skips_without_impact_scope(self):
-        """Checkpoint commit should require explicit impact scope."""
+    def test_checkpoint_commit_succeeds_without_impact_scope(self):
+        """Checkpoint commit should fall back to all changed files when impact scope is not set."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             init_git_repo(root)
@@ -1984,17 +1985,20 @@ class WorkflowCoreTests(unittest.TestCase):
             create_validation_revision(root, task_id, "No impact.", ["C1"], ["E1"])
             start_execution(root, task_id, ["just-demand-coder"])
 
-            # Do NOT set impact — checkpoint should skip to avoid unrelated changes.
+            # Do NOT set impact — checkpoint should fall back to all changed files.
             (root / "tracked.txt").write_text("updated content\n", encoding="utf-8")
 
             result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
-            self.assertFalse(result["checkpoint_commit"]["created"])
-            self.assertEqual(result["checkpoint_commit"]["reason"], "missing_impact_scope")
-            self.assertEqual(result["checkpoint_commit"]["paths"], [])
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"]["paths"], ["tracked.txt"])
+            self.assertEqual(
+                result["checkpoint_commit"]["fallback_note"],
+                "all changed files (no explicit impact scope)",
+            )
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ chore: seed repo")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint no impact")
 
     def test_multiple_checkpoint_commits_per_task(self):
         """Same task should support multiple checkpoint commits over its lifecycle."""
@@ -2079,8 +2083,9 @@ class WorkflowCoreTests(unittest.TestCase):
             latest_log = git_stdout(root, "log", "--oneline", "-1")
             self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint standalone cp")
 
-    def test_checkpoint_commit_missing_impact_reason_present_in_events(self):
-        """When no impact scope is set, the skip reason should be recorded in events."""
+    def test_checkpoint_commit_fallback_note_in_events(self):
+        """When no impact scope is set but changes exist, the commit should be created
+        and the fallback note should be recorded in events."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             init_git_repo(root)
@@ -2094,17 +2099,51 @@ class WorkflowCoreTests(unittest.TestCase):
             create_validation_revision(root, task_id, "Fallback.", ["C1"], ["E1"])
             start_execution(root, task_id, ["just-demand-coder"])
 
-            # No impact set
+            # No impact set — commit should fall back to all changed files
             (root / "tracked.txt").write_text("fallback change\n", encoding="utf-8")
 
             result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
-            self.assertFalse(result["checkpoint_commit"]["created"])
-            self.assertEqual(result["checkpoint_commit"].get("reason"), "missing_impact_scope")
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"].get("fallback_note"), "all changed files (no explicit impact scope)")
             task_events = [json.loads(line) for line in task_event_path(root, task_id).read_text(encoding="utf-8").splitlines() if line]
-            skipped = [event for event in task_events if event["type"] == "checkpoint_commit_skipped"]
-            self.assertEqual(len(skipped), 1)
-            self.assertIn("missing_impact_scope", skipped[0]["summary"])
+            created = [event for event in task_events if event["type"] == "checkpoint_commit_created"]
+            self.assertGreaterEqual(len(created), 1)
+            self.assertIn("fallback", created[0]["summary"].lower())
+
+    def test_completion_report_includes_checkpoint_info_in_cli_output(self):
+        """CLI completion report should show checkpoint commit status even when
+        the commit uses the fallback path (no explicit impact scope)."""
+        import subprocess as std_subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "Report checkpoint", "Test report includes checkpoint info", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Report checkpoint", "Test", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Report cp.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+
+            # No impact set — fallback path
+            (root / "tracked.txt").write_text("report test\n", encoding="utf-8")
+
+            script = REPO_ROOT / "just-demand"
+            cp_result = std_subprocess.run(
+                [sys.executable, str(script), str(root), "complete-verification", task_id, "passed", "All done"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("Completion report:", cp_result.stderr)
+            self.assertIn("Verification: passed", cp_result.stderr)
+            self.assertIn("Checkpoint commit: yes", cp_result.stderr)
+            self.assertIn("all changed files (no explicit impact scope)", cp_result.stderr)
 
     def test_where_cli_prints_script_path_and_repo_root(self):
         import subprocess

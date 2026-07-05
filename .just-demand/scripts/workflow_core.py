@@ -837,11 +837,26 @@ def build_completion_report(task: dict[str, Any], result: str, summary: str) -> 
     if not remaining_risks:
         remaining_risks = ["None noted."]
 
+    # Include checkpoint commit summary in the completion report so the CLI
+    # can display whether a commit was created, skipped, or not attempted.
+    checkpoint = task.get("checkpoint_commit")
+    checkpoint_info: dict[str, Any] = {"attempted": checkpoint is not None}
+    if checkpoint:
+        checkpoint_info["created"] = checkpoint.get("created", False)
+        if not checkpoint.get("created"):
+            checkpoint_info["reason"] = checkpoint.get("reason", "unknown")
+        else:
+            checkpoint_info["hash"] = checkpoint.get("commit_hash")
+            checkpoint_info["message"] = checkpoint.get("message")
+            if checkpoint.get("fallback_note"):
+                checkpoint_info["note"] = checkpoint["fallback_note"]
+
     return {
         "completed_items": completed_items,
         "verification_result": result,
         "verification_summary": summary,
         "remaining_risks": remaining_risks,
+        "checkpoint": checkpoint_info,
     }
 
 
@@ -1777,11 +1792,14 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         ]
         fallback_note = None
     else:
-        return _record_checkpoint_commit_result(
-            root,
-            task_id,
-            {"created": False, "reason": "missing_impact_scope", "paths": []},
-        )
+        # No explicit impact scope: fall back to all non-disallowed changed files.
+        # This matches the documented policy: impact scoping is recommended but not required.
+        candidate_paths = [
+            path
+            for path in all_changed
+            if not _is_disallowed_checkpoint_path(path)
+        ]
+        fallback_note = "all changed files (no explicit impact scope)" if candidate_paths else None
 
     candidate_paths = list(dict.fromkeys(candidate_paths))
     if not candidate_paths:

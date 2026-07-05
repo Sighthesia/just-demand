@@ -479,6 +479,20 @@ def print_completion_report(report: dict[str, Any]) -> None:
         f"  Verification: {verification_result}{f' — {verification_summary}' if verification_summary else ''}",
         file=sys.stderr,
     )
+
+    checkpoint = report.get("checkpoint", {})
+    if checkpoint.get("attempted"):
+        if checkpoint.get("created"):
+            commit_hash = checkpoint.get("hash", "unknown")[:12]
+            note = checkpoint.get("note", "")
+            note_suffix = f" ({note})" if note else ""
+            print(f"  Checkpoint commit: yes — {commit_hash}{note_suffix}", file=sys.stderr)
+        else:
+            reason = checkpoint.get("reason", "unknown")
+            print(f"  Checkpoint commit: skipped ({reason})", file=sys.stderr)
+    else:
+        print("  Checkpoint commit: not attempted", file=sys.stderr)
+
     print(
         f"  Remaining risks: {', '.join(risks) if risks else 'none noted'}",
         file=sys.stderr,
