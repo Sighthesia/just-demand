@@ -275,6 +275,7 @@ def default_task_json(
         "locks": [],
         "progress": None,
         "impact": [],
+        "checkpoint_pass_completed": False,
         "last_note": None,
         "last_event_seq": 0,
         "created_at": now,
@@ -1607,6 +1608,11 @@ def mark_task(
     before_status = task.get("status")
 
     updates: dict[str, Any] = {"status": status}
+    # Reset checkpoint-pass marker when task transitions to a pre-verification
+    # status, indicating new work or a new verification pass has begun.
+    pre_verification_statuses = {"planning", "executing", "verifying", "changes_requested", "tweaking", "debugging"}
+    if status in pre_verification_statuses:
+        updates["checkpoint_pass_completed"] = False
     if progress is not None:
         updates["progress"] = progress
     if impact is not None:
@@ -2439,7 +2445,19 @@ def complete_verification(
 
     checkpoint_result = None
     if result == "passed" and checkpoint_commit:
-        checkpoint_result = create_checkpoint_commit(root, task_id)
+        # Guard: skip duplicate checkpoint commit if this verification pass
+        # already completed checkpoint closeout for this task.
+        existing_pass_marker = task.get("checkpoint_pass_completed", False)
+        if existing_pass_marker:
+            append_task_event(
+                root, task_id, "checkpoint_commit_skipped",
+                "Duplicate checkpoint commit prevented: already completed for this verification pass"
+            )
+            checkpoint_result = task.get("checkpoint_commit")
+        else:
+            checkpoint_result = create_checkpoint_commit(root, task_id)
+            if checkpoint_result and checkpoint_result.get("created"):
+                update_task(root, task_id, {"checkpoint_pass_completed": True})
 
     if result == "passed":
         task = sync_implementation_plan_context(root, task_id, task=task, mark_done=True)

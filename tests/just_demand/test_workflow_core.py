@@ -2111,6 +2111,96 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertGreaterEqual(len(created), 1)
             self.assertIn("fallback", created[0]["summary"].lower())
 
+    def test_checkpoint_pass_marker_prevents_duplicate_commit_same_pass(self):
+        """Same verification pass should not create a duplicate checkpoint commit
+        when the pass marker is already set."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "Dup guard", "Test duplicate guard", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Dup guard", "Test", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Dup guard.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            mark_task(root, task_id, "executing", impact=["tracked.txt"])
+
+            # First verification pass: creates checkpoint commit and sets marker
+            (root / "tracked.txt").write_text("first pass\n", encoding="utf-8")
+            result1 = complete_verification(root, task_id, "passed", "First pass", auto_archive=False)
+
+            self.assertTrue(result1["checkpoint_commit"]["created"])
+            task1 = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertTrue(task1.get("checkpoint_pass_completed", False))
+
+            # Simulate re-opening: directly set status back to an allowed
+            # before-status WITHOUT going through mark_task (which would
+            # reset the marker). This tests the guard, not the normal flow.
+            task_path = tasks_dir(root) / "active" / task_id / "task.json"
+            task_data = read_json(task_path)
+            task_data["status"] = "changes_requested"
+            write_json_atomic(task_path, task_data)
+
+            # Second verification call: guard should skip the checkpoint commit
+            result2 = complete_verification(root, task_id, "passed", "Second pass (guard should skip)", auto_archive=False)
+
+            task2 = read_json(task_path)
+            self.assertTrue(task2["checkpoint_pass_completed"])
+            # Commit hash should match original — not a new commit
+            self.assertEqual(
+                result1["checkpoint_commit"].get("commit_hash"),
+                result2["checkpoint_commit"].get("commit_hash"),
+            )
+
+            # Verify a checkpoint_commit_skipped event was recorded
+            task_events = [json.loads(line) for line in task_event_path(root, task_id).read_text(encoding="utf-8").splitlines() if line]
+            skipped_events = [e for e in task_events if e["type"] == "checkpoint_commit_skipped" and "already completed" in e["summary"]]
+            self.assertGreaterEqual(len(skipped_events), 1)
+
+    def test_checkpoint_pass_marker_allows_new_pass_after_mark_reset(self):
+        """After the pass marker is reset by mark_task, a new verification pass
+        should still create a checkpoint commit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "New pass", "Test new pass commit", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "New pass", "Test", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "New pass.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            mark_task(root, task_id, "executing", impact=["tracked.txt"])
+
+            # First verification pass
+            (root / "tracked.txt").write_text("first pass\n", encoding="utf-8")
+            result1 = complete_verification(root, task_id, "passed", "First pass", auto_archive=False)
+            self.assertTrue(result1["checkpoint_commit"]["created"])
+            self.assertTrue(result1["checkpoint_commit"].get("created"))
+
+            # Reset through mark_task — this resets the pass marker
+            mark_task(root, task_id, "executing", impact=["tracked.txt"])
+
+            # Make new changes
+            (root / "tracked.txt").write_text("second pass changes\n", encoding="utf-8")
+
+            # Second verification pass — should create a new checkpoint commit
+            result2 = complete_verification(root, task_id, "passed", "Second pass (new pass)", auto_archive=False)
+            self.assertTrue(result2["checkpoint_commit"]["created"])
+            self.assertNotEqual(
+                result1["checkpoint_commit"].get("commit_hash"),
+                result2["checkpoint_commit"].get("commit_hash"),
+            )
+
+            # Both commits should be in git log
+            log_lines = git_stdout(root, "log", "--oneline", "-3").splitlines()
+            self.assertGreaterEqual(len(log_lines), 2)
+
     def test_completion_report_includes_checkpoint_info_in_cli_output(self):
         """CLI completion report should show checkpoint commit status even when
         the commit uses the fallback path (no explicit impact scope)."""
