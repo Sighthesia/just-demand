@@ -20,7 +20,13 @@ This skill implements the **default ambiguity** and **effect-first communication
 This skill is the required second step after `using-just-demand`. When a turn pivots from Q&A into a request, bug, correction, or mismatch, reset here before intake, execution, or verification. In skill-only fallback mode, self-enforce the same rule: approval enters intake/formal-task flow, not inline editing, and codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) is also execution work that must wait for a formal task.
 
 <HARD-GATE>
-Do NOT promote a task, dispatch a subagent, edit files, or finalize an implementation plan until you have presented a final expected effect, compared 2-3 approaches, captured the chosen approach and final implementation plan, and received explicit user approval. This applies to EVERY request regardless of perceived simplicity. Keep that surface compact: lead with the user-visible effect, then one recommended default, then a small option set or decision card when needed.
+Do NOT promote a task, dispatch a subagent, edit files, or finalize an implementation plan until you have presented the required decision surface and received explicit user approval. The required surface depends on **risk level**, not universality.
+
+**Low-risk work** (read-only investigation, standard verification, evidence gathering, subagent routing with clear direction, routine summarization) does not require the full approval cycle. State what you will do in one sentence and proceed — no permission request, no approach comparison, no "can I proceed / approve / 批准" language.
+
+**High-risk work** (code modification, scope expansion, architecture changes, compatibility/security/cost/maintenance impact) requires: final expected effect, 2-3 approaches compared with your recommendation, chosen approach, and explicit user approval. Keep that surface compact: lead with the user-visible effect, then one recommended default, then a small option set or decision card when needed.
+
+When uncertain whether work is low-risk or high-risk, default to the high-risk path (ask) rather than guessing wrong.
 </HARD-GATE>
 
 ## Anti-Pattern: "This Is Too Simple To Need Clarification"
@@ -29,15 +35,17 @@ Every request goes through this process. "Simple" requests still need a short fi
 
 ## Anti-Rationalization Rules
 
-Do NOT rationalize skipping any of these:
+Do NOT rationalize skipping the hard gate for high-risk work:
 
-- "I already know what the user wants" -- you still present the final artifact and get approval.
-- "The user said to just do it" -- you still present the final expected effect and get explicit approval before code changes.
+- "I already know what the user wants" -- for high-risk work, you still present the final artifact and get approval.
+- "The user said to just do it" -- for high-risk work, you still present the final expected effect and get explicit approval before code changes.
 - Approval words like `批准`, `继续`, `同意`, `approved`, and `go ahead` only authorize workflow entry and readiness checks; they do not authorize code changes on their own.
-- "This is a small change" -- small changes cause mismatches too. Present the artifact.
+- "This is a small change" -- small changes cause mismatches too. Evaluate risk level first, then follow the appropriate path.
 - "I can fix this while clarifying" -- no. Clarify first, then implement.
-- "The user is in a hurry" -- a short artifact is faster than a mismatched implementation.
+- "The user is in a hurry" -- for low-risk work, proceed directly without asking; for high-risk work, a short artifact is faster than a mismatched implementation.
 - "I'll clarify as I go" -- no. Blocking questions are promotion blockers.
+- "Low-risk work still needs approval" -- no. Read-only investigation, standard verification, evidence gathering, and subagent routing with explicit direction proceed without permission. Only high-risk work requires the full approval cycle.
+- "I'll ask anyway to be safe" -- for clearly low-risk work, unnecessary permission requests violate the risk-triggered principle. State what you will do and proceed.
 
 ## Anti-Sycophancy And Premise Check
 

@@ -61,9 +61,11 @@ Reusable lesson or recurring workflow pattern appears -> use capture-lessons.
 Task-specific decisions or open questions remain -> keep them in the task archive.
 ```
 
-## Clarification Is A Hard Gate
+## Clarification Is A Risk-Triggered Gate
 
-When material uncertainty exists, clarification is not optional and not a nice-to-have. STOP before substantive execution and use `socratic-clarification` when any of the following are true:
+Clarification is mandatory for **high-risk work** where uncertainty exists. For **low-risk work** (read-only investigation, standard verification, evidence gathering, subagent routing with clear direction), clarification may be minimal or skipped — state what you will do and proceed without asking for permission.
+
+STOP before substantive high-risk execution and use `socratic-clarification` when any of the following are true:
 
 - the request is new and direction is still unclear
 - the user reports a bug, regression, mismatch, or "expected X but got Y"

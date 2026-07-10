@@ -242,6 +242,19 @@ const EXPLICIT_WORKFLOW_SKIP_PATTERNS = [
   /(?:跳过工作流|绕过工作流|不经过工作流)/,
 ]
 
+const LOW_RISK_ANALYSIS_PATTERNS = [
+  // Read-only investigation: analyze, investigate, inspect, trace (without "implement/fix")
+  // Includes code, source, and common analysis targets
+  /\b(analy[sz]e|investigate|trace|inspect|examine|review)\s+(the\s+)?(debug\s+)?(?:\w+\s+)?(log|logs|pattern|structure|behavior|issue|problem|code|source|implementation|flow|data|test|tests)\b/i,
+  /\b(run|execute)\s+(the\s+)?(test|tests|check|verification|suite)\b/i,
+  /\b(compile|gather|collect|summarize)\s+(the\s+)?(evidence|information|data|result|findings)\b/i,
+  /\b(just\s+)?(read|look|check)\s+(?:(?:through|at|over)\s+)?(?:the\s+)?(?:\w+\s+)*(?:code|source|reports?|tests?|logs?|lint)\b/i,
+  /\bsearch\s+(?:through\s+)?(?:the\s+)?(?:\w+\s+)*(?:codebase|source|code|logs?|files?|repo|documentation)\b/i,
+  /\bgrep\s+(?:the\s+)?(?:\w+\s+)*(?:source|code|logs?|files?)\b/i,
+  /\b(standard|routine)\s+(verification|check|audit|review)\b/i,
+  /(只读|只检查|只看|只分析|只跑|只收集)\s*(?:一下|一遍|一次)?\s*(?:代码|测试|日志|报告|审计|验证|结构|流程|行为|情况|问题|调试)/i,
+]
+
 const EXECUTION_CANDIDATE_PATTERNS = [
   /\b(i|we)\s+(am|'m|are|will|can|should|need to|need)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
   /\b(i|we)\s+(should|will|can|need to)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
@@ -549,6 +562,21 @@ export const textLooksLikeExplicitWorkflowSkip = (text) => {
   const body = String(text || "")
   if (!body.trim()) return false
   return EXPLICIT_WORKFLOW_SKIP_PATTERNS.some((pattern) => pattern.test(body))
+}
+
+export const textLooksLikeReadOnlyWork = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  // Must match a low-risk analysis pattern
+  if (!LOW_RISK_ANALYSIS_PATTERNS.some((pattern) => pattern.test(body))) return false
+  // Must NOT contain high-risk modification intent
+  // Check for "implement/build/fix/change/add/remove/refactor" verbs (not in analysis context)
+  const HIGH_RISK_PATTERNS = [
+    /\b(implement|build|fix|change|edit|modify|patch|refactor|rework|add|remove|delete|create|update|rewrite)\b/i,
+    /(实现|修复|修改|重构|更改|添加|删除|创建|更新)/,
+  ]
+  if (HIGH_RISK_PATTERNS.some((pattern) => pattern.test(body))) return false
+  return true
 }
 
 export const taskLooksLikeLongContextExecutionCandidate = (task, text) => {

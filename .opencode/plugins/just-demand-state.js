@@ -18,6 +18,7 @@ import {
   taskNeedsVerificationCloseout,
   textLooksLikeCompletionClaim,
   textLooksLikeExplicitWorkflowSkip,
+  textLooksLikeReadOnlyWork,
   updateReminderState,
   WORKFLOW_PHASE,
   writeDebugChatTurnDump,
@@ -471,7 +472,9 @@ const buildControllerDecision = (text, reminderState) => {
     }
   }
 
-  if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text))) {
+  // Low-risk read-only work (analysis, investigation, verification) does not
+  // trigger the clarification hint — the agent should proceed without permission.
+  if (CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) && !textLooksLikeReadOnlyWork(text)) {
     return {
       phase: CONTROLLER_PHASE.clarify,
       action: CONTROLLER_ACTION.remind,

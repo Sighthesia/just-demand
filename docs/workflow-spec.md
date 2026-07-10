@@ -31,7 +31,28 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
 
 8. **Mismatch feedback is optionized before re-implementation.** When the user reports a deviation (vague or precise), the agent does not guess the root cause and patch blindly. Instead it leads with options: locate the deviation dimension, then pin the target state via contrastive choices. The user click-selects rather than writing prose.
 
-9. **Repeated mismatch triggers reflection.** If the same issue fails twice consecutively, the workflow stops blind patching, enters reflection, and routes to the `advisor` subagent for fresh-context analysis before any more implementation.
+9.  **Repeated mismatch triggers reflection.** If the same issue fails twice consecutively, the workflow stops blind patching, enters reflection, and routes to the `advisor` subagent for fresh-context analysis before any more implementation.
+
+10. **Risk-triggered confirmation.** Confirmation is not universal — it is proportional to risk. Low-risk work that does not change user-visible behavior, architecture, compatibility, security, cost, or long-term maintenance proceeds by default with a concise description and no permission request. Only decisions that affect those dimensions require explicit user choice with a recommended default.
+
+    Low-risk (auto-proceed):
+    - Read-only investigation: inspecting, reading, tracing, searching the codebase without modification.
+    - Standard verification: running existing tests, lint, or archive checks.
+    - Evidence gathering: searching docs, grepping, collecting reproduction data.
+    - Subagent routing: dispatching a supported subagent when direction is already explicit.
+    - Routine summarization: reporting status, narrating findings, or compiling evidence.
+
+    High-risk (must ask / recommend):
+    - Code modification: any edit that changes source, tests, configuration, or runtime files.
+    - Scope expansion: changing or extending the current task boundary without explicit approval.
+    - Architecture decisions: module boundaries, dependency direction, data ownership.
+    - Compatibility impact: changes that affect interoperability with existing systems or formats.
+    - Security or data-handling: destructive operations, privilege changes, data migration.
+    - Cost impact: adding paid dependencies, cloud services, or paid API usage.
+    - Long-term maintenance: introducing new long-lived abstractions, public APIs, or conventions.
+    - Irreversible actions: destructive git operations, file deletion, data destruction.
+
+    The main agent applies this classification before each user interaction. When the work falls entirely under low-risk, the agent states what it will do and proceeds without asking for approval. When any dimension is high-risk, the agent presents a clear decision request with a recommended default.
 
 ## System Model
 

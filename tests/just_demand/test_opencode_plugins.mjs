@@ -37,6 +37,7 @@ import {
   readTaskContext,
   detectActiveContractsForTask,
   detectContractTriggers,
+  textLooksLikeReadOnlyWork,
   setToolGateSkipOverride,
 } from "../../.opencode/plugins/just-demand-lib.js"
 import sessionStartFactory from "../../.opencode/plugins/just-demand-session-start.js"
@@ -1046,6 +1047,113 @@ test("textLooksLikeExplicitWorkflowSkip does not fire on ordinary work phrases",
   for (const sample of samples) {
     assert.equal(textLooksLikeExplicitWorkflowSkip(sample), false, `Expected false for: "${sample}"`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// risk-triggered confirmation: textLooksLikeReadOnlyWork
+// ---------------------------------------------------------------------------
+test("textLooksLikeReadOnlyWork detects English read-only analysis phrases", () => {
+  const samples = [
+    "I will analyze the debug log to understand the issue.",
+    "Let me investigate the code structure first.",
+    "I need to trace the implementation flow.",
+    "Let me review the existing tests.",
+    "I will inspect the source code.",
+    "Run the standard verification suite.",
+    "Let me gather evidence from the logs.",
+    "Compile the findings from the investigation.",
+    // read/look/check without preposition (pattern improvement)
+    "Read the code carefully.",
+    "Look at the test output.",
+    "Check the logs for errors.",
+    "Read through the report.",
+    "Check over the test results.",
+    // search pattern
+    "Search the codebase for references.",
+    "Search through the source code.",
+    "Search the documentation.",
+    // grep pattern
+    "Grep the source for the pattern.",
+    "Grep the log file.",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeReadOnlyWork(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeReadOnlyWork detects Chinese read-only analysis phrases", () => {
+  const samples = [
+    "我只检查一下代码结构。",
+    "只分析一下调试日志。",
+    "只跑一下测试看看结果。",
+    "只看一下报告。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeReadOnlyWork(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeReadOnlyWork returns false for modification intent", () => {
+  const samples = [
+    "I will implement the fix now.",
+    "Let me build the new feature.",
+    "I need to refactor the component.",
+    "Let me fix the bug in the API.",
+    "I'm going to add a new endpoint.",
+    "我要实现这个修复。",
+    "我来修改一下这个 bug。",
+    "我需要重构这个组件。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeReadOnlyWork(sample), false, `Expected false for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeReadOnlyWork returns false for mixed analysis+modification intent", () => {
+  const samples = [
+    "I will analyze the logs and then implement the fix.",
+    "Investigate the issue and then build the solution.",
+    "分析日志后修改代码。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeReadOnlyWork(sample), false, `Expected false for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeReadOnlyWork returns false for empty or non-analysis text", () => {
+  assert.equal(textLooksLikeReadOnlyWork(""), false)
+  assert.equal(textLooksLikeReadOnlyWork("Hello world."), false)
+  assert.equal(textLooksLikeReadOnlyWork(null), false)
+})
+
+test("risk-triggered controller decision does not add clarify_hint for read-only work with active task", () => {
+  // When the agent's output describes read-only analysis work with a planning task,
+  // the clarify_hint reminder should not fire.
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning" }))
+
+  const decision = buildControllerDecision("I will analyze the debug log to understand the root cause.", {
+    activeTask: { id: "task-a", status: "planning" },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+
+  assert.notEqual(decision.reason_code, "clarify_hint", "Read-only work should not trigger clarify_hint")
+})
+
+test("risk-triggered controller decision still blocks concrete modification work with active task", () => {
+  // When the agent's output describes modification work with a planning task,
+  // the clarify_hint reminder should still fire.
+  const decision = buildControllerDecision("I will fix the bug in the API.", {
+    activeTask: { id: "task-a", status: "planning" },
+    same_topic_turns: 0,
+    subagent_unavailable_pending: false,
+  })
+
+  assert.equal(decision.reason_code, "clarify_hint", "Modification work should still trigger clarify_hint")
 })
 
 // ---------------------------------------------------------------------------
