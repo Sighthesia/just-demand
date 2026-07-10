@@ -3,6 +3,14 @@ name: socratic-clarification
 description: Use when the user proposes a need, request, feature, design/refactor, bug report, symptom, phenomenon, vague correction, or expected-vs-actual mismatch before implementation. This is the second-priority skill after using-just-demand, including when a conversation pivots from ordinary Q&A to a concrete request, bug, or correction.
 ---
 
+# Core Interaction Contract
+
+- **Effect first**: lead with the expected user-visible result, not implementation steps.
+- **Defaults first**: recommend before asking; options only when the choice changes behavior, architecture, compatibility, security, cost, or maintenance.
+- **Clarify before execute**: no edits or dispatch until the final effect, approach, and plan are approved.
+- **Subagents for long work**: route to a subagent, do not stay inline.
+- **Closeout is a real step**: wording does not replace `complete-verification`.
+
 # Socratic Clarification
 
 Force progressive clarification and design approval before implementation. This is a hard gate, not optional guidance, but it should feel like a short decision surface: default to options, defaults, and the smallest sufficient artifact before asking for prose.

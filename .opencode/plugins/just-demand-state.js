@@ -302,6 +302,8 @@ const reminderTypeFromReasonCode = (reasonCode) => {
       return "clarify"
     case "soft_execution_hint":
       return "soft_execution_hint"
+    case "first_screen":
+      return "first_screen"
     case "select_task_hint":
       return "select_task_hint"
     default:
@@ -524,6 +526,11 @@ const buildReminderLines = (type) => {
         "- This reads like execution work, but the active task is still in clarify/design phase.",
         "- Continue clarification/design work, or update the task step when ready for execution.",
       ]
+    case "first_screen":
+      return [
+        "- Lead with the result, conclusion, or recommendation before deep detail.",
+        "- The user should get the point from the first line. Move analysis below the fold.",
+      ]
     case "execution_needed":
       return [
         "- This looks like execution work that should run through a just-demand-* workflow subagent.",
@@ -730,6 +737,18 @@ export default async ({ directory } = {}) => {
       const originalText = textPart.text
       const afterControllerText = applyControllerDecision(textPart.text, reminderState, controllerDecision)
       textPart.text = afterControllerText
+
+      // First-screen output gate: gentle reminder when the model's response is long
+      // but does not lead with a conclusion, recommendation, or result.
+      // Only fires when the controller did not already block or replace the text.
+      if (controllerDecision.action !== CONTROLLER_ACTION.block && controllerDecision.reason_code !== "workflow_skip_override") {
+        const firstLine = originalText.trim().split("\n")[0] || ""
+        const isLong = originalText.length > 400
+        const hasConclusionFirst = /^(Result|结论|Status|状态|推荐|Recommendation|建议|Decision|Approach|方案|Done|完成):/im.test(firstLine)
+        if (isLong && !hasConclusionFirst) {
+          textPart.text = appendReminder(textPart.text, reminderState, "first_screen")
+        }
+      }
 
       // One-time per-session intake fallback warning: if the tool execution gate
       // detected an intake fallback on the previous tool call, surface a concise

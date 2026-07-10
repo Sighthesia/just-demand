@@ -10,6 +10,7 @@ import {
   consumeIntakeFallbackPending,
   clearToolGateSkipOverride,
   debugLog,
+  enforceExecutionGate,
   getActiveTask,
   getExecutionGateState,
   getMissingRequiredContextFiles,
@@ -892,6 +893,116 @@ test("workflow-entry narration detector allows command narration but not inline 
   assert.equal(textLooksLikeWorkflowEntryNarration("I am creating the workflow entry now: create-intake first, then promote, then list-active."), true)
   assert.equal(textLooksLikeWorkflowEntryNarration("Run just-demand . --help so we can verify the help path."), true)
   assert.equal(textLooksLikeWorkflowEntryNarration("I will implement the fix inline in the main session, then maybe run create-intake."), false)
+})
+
+// ---------------------------------------------------------------------------
+// skill tool validation
+// ---------------------------------------------------------------------------
+test("enforceExecutionGate blocks skill tool call without name", () => {
+  const root = makeRoot()
+  assert.throws(
+    () => enforceExecutionGate(root, "skill", {}),
+    /Blocked skill: no skill name provided/,
+  )
+})
+
+test("enforceExecutionGate blocks skill tool call with empty name", () => {
+  const root = makeRoot()
+  assert.throws(
+    () => enforceExecutionGate(root, "skill", { name: "" }),
+    /Blocked skill: no skill name provided/,
+  )
+})
+
+test("enforceExecutionGate allows valid skill tool call with name", () => {
+  const root = makeRoot()
+  const result = enforceExecutionGate(root, "skill", { name: "using-just-demand" })
+  assert.equal(result, null)
+})
+
+test("enforceExecutionGate skill validation does not block non-skill tools", () => {
+  const root = makeRoot()
+  const result = enforceExecutionGate(root, "bash", { command: "echo hello" })
+  assert.equal(result, null)
+})
+
+// ---------------------------------------------------------------------------
+// first-screen output gate
+// ---------------------------------------------------------------------------
+test("state appends first-screen reminder when response is long without upfront conclusion", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", current_step: "clarify" }))
+  const plugin = await stateFactory({ directory: root })
+  const longBody = "Here is some deep analysis that goes into detail without first stating a clear result. ".repeat(8)
+  assert.ok(longBody.length > 400)
+  const output = { parts: [{ type: "text", text: longBody }] }
+  await plugin["chat.message"]({ sessionID: "first-screen-test" }, output)
+  assert.match(output.parts[0].text, /\[just-demand reminder\]/)
+  assert.match(output.parts[0].text, /Lead with the result/)
+})
+
+test("state does not append first-screen reminder when response has upfront Result line", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", current_step: "clarify" }))
+  const plugin = await stateFactory({ directory: root })
+  const body = "Result: the fix is complete and verified.\n\n" + "Detail:. ".repeat(60)
+  assert.ok(body.length > 400)
+  const output = { parts: [{ type: "text", text: body }] }
+  await plugin["chat.message"]({ sessionID: "first-screen-ok" }, output)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
+})
+
+test("state does not append first-screen reminder when response is short", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", current_step: "clarify" }))
+  const plugin = await stateFactory({ directory: root })
+  const body = "Done. Ready for the next step."
+  assert.ok(body.length < 400)
+  const output = { parts: [{ type: "text", text: body }] }
+  await plugin["chat.message"]({ sessionID: "first-screen-short" }, output)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
+})
+
+test("state does not append first-screen reminder when controller has already blocked the text", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
+  const plugin = await stateFactory({ directory: root })
+  // Long execution intent text should be blocked by the controller, not the first-screen gate
+  const body = "I will implement the feature and debug the bug inline. " + "Analysis:. ".repeat(40)
+  assert.ok(body.length > 400)
+  const output = { parts: [{ type: "text", text: body }] }
+  await plugin["chat.message"]({ sessionID: "first-screen-blocked" }, output)
+  assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.doesNotMatch(output.parts[0].text, /Lead with the result/)
+})
+
+test("state does not append first-screen reminder on consecutive long-context turns (dedup)", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", current_step: "clarify" }))
+  const plugin = await stateFactory({ directory: root })
+  const longBody = "Here is some deep analysis that goes into detail without first stating a clear result. ".repeat(8)
+  const first = { parts: [{ type: "text", text: longBody }] }
+  const second = { parts: [{ type: "text", text: longBody }] }
+  await plugin["chat.message"]({ sessionID: "first-screen-dedup" }, first)
+  await plugin["chat.message"]({ sessionID: "first-screen-dedup" }, second)
+  assert.match(first.parts[0].text, /\[just-demand reminder\]/)
+  assert.match(first.parts[0].text, /Lead with the result/)
+  assert.doesNotMatch(second.parts[0].text, /\[just-demand reminder\]/)
 })
 
 // ---------------------------------------------------------------------------

@@ -9,6 +9,14 @@ Canonical workflow specification: `docs/workflow-spec.md` — the authoritative 
 
 Just Demand is a workflow runtime, not a one-shot prompt bundle.
 
+### Core Interaction Contract
+
+- **Effect first**: lead every reply with the user-visible result or conclusion, not implementation detail.
+- **Defaults first**: recommend a path before asking; options only when the choice affects visible behavior, architecture, compatibility, security, cost, or maintenance.
+- **Clarify before execute**: no code edits or subagent dispatch until the final expected effect, chosen approach, and plan are explicitly approved.
+- **Subagents for long work**: broad code reading, 3+ files, multi-step research, or extended verification routes through a `just-demand-*` subagent, not inline.
+- **Closeout is a real step**: verification closeout via `complete-verification` is required; completion wording does not replace it.
+
 ### Guiding Principle
 
 The system is designed to keep durable workflow truth in explicit state and scripts, while keeping prompt-layer guidance light, readable, and role-specific.

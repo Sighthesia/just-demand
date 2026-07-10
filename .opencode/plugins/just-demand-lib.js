@@ -812,6 +812,19 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
     workflow_subagent: getWorkflowSubagentName(args),
   }, directory)
 
+  // Lightweight skill tool validation: malformed usage (missing name) is caught
+  // before the write-rule gate, since the skill tool does not need execution gating.
+  if (normalizedToolName === "skill") {
+    const skillName = String(args?.name || "").trim()
+    if (!skillName) {
+      throw new Error(
+        "Blocked skill: no skill name provided. Use the skill tool with a valid 'name' parameter.",
+      )
+    }
+    debugLog(`${logPrefix}.allow`, { reason: "skill_tool_allowed", tool: normalizedToolName, skill: skillName }, directory)
+    return null
+  }
+
   const rule = getWriteToolRule(normalizedToolName, args)
   if (!rule) {
     debugLog(`${logPrefix}.allow`, { reason: "no_write_rule", tool: normalizedToolName }, directory)

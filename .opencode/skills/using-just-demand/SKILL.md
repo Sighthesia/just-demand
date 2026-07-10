@@ -3,6 +3,14 @@ name: using-just-demand
 description: "Load this skill first for repo work so the correct just-demand routing rules are applied before other workflow skills."
 ---
 
+# Core Interaction Contract
+
+- **Effect first**: lead every reply with the result, conclusion, or recommendation.
+- **Defaults first**: recommend the path before asking; options only when the choice matters.
+- **Clarify before execute**: no edits or subagent dispatch until the final effect, approach, and plan are approved.
+- **Subagents for long work**: route broad reading, 3+ files, or extended verification through a subagent, not inline.
+- **Closeout is a real step**: completion wording does not replace `complete-verification`.
+
 # Skill Priority
 
 1. `using-just-demand` - always loaded first for repo work.
