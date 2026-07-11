@@ -1,10 +1,12 @@
 # Plan-Ledger Boundary
 
-## Status — Stage 1 Complete
+## Status — Stages 1 & 3 Complete
 
-This document records the explicit boundary between the implemented Stage 1 (plan-ledger core schema and CLI) and the remaining stages that are deferred to follow-up work.
+This document records the explicit boundary between the implemented stages (plan-ledger core schema and CLI, plan-context injection into task files) and the remaining stages that are deferred to follow-up work.
 
-## What Stage 1 Implements
+## What Is Implemented
+
+### Stage 1 — Plan-Ledger Core
 
 - **Plan schema**: atomic JSON storage under `.just-demand/state/plans/<plan_id>/plan.json`
 - **Plan stages**: ordered stage definitions within a plan (`id`, `title`, `order`)
@@ -16,21 +18,28 @@ This document records the explicit boundary between the implemented Stage 1 (pla
 - **Workspace events**: every plan mutation emits structured events into `events.jsonl`
 - **Task compatibility**: tasks without a `plan_id` remain fully unchanged; the field is `None` by default
 
+### Stage 3 — Plan-Context Injection (Snapshot)
+
+- Render suggestion statuses, stages, and dependencies into agent context
+- Wire plan data into `context.md`, `implement.md`, and `verify.md` sections for subagent consumption
+- Make plan evidence visible during verification
+- Idempotent refresh via stable `<!-- plan-snapshot -->` / `<!-- /plan-snapshot -->` markers that never replace unrelated content
+- Atomic write with rollback on failure (all three files always stay consistent)
+- Explicit `refresh-plan-context` CLI command
+- Automatic snapshot refresh after: `add-task-to-plan`, `update-suggestion-status`, `add-plan-evidence`, `add-plan-stage`, `add-plan-suggestion`
+- Active-archived distinction: refresh works for both active and archived plan-linked tasks
+- Bad references (missing plan, missing stage, missing suggestion) produce clear actionable errors
+- Tasks without `plan_id` are never touched
+
 ## Remaining Stages (Not Implemented)
 
 The following are explicitly deferred; no hooks, imports, or code pathways reach them yet.
 
 ### Stage 2 — Plugin Integration
 
-- Inject plan context into subagent `context.md` when the active task has a `plan_id`
 - Provide plan-aware guardrails in OpenCode plugins (e.g., `just-demand-state.js`)
 - Surface plan summary in task state banner
-
-### Stage 3 — Context Injection
-
-- Render suggestion statuses, stages, and dependencies into agent context
-- Wire plan data into `context.md` sections for subagent consumption
-- Make plan evidence visible during verification
+- Inject enhanced plan context via plugin (Stage 3 provides the context-file path; plugin integration builds on it)
 
 ### Stage 4 — Closeout Auto-Continuation
 
@@ -40,10 +49,9 @@ The following are explicitly deferred; no hooks, imports, or code pathways reach
 
 ## Plugin Boundary
 
-The current plan-ledger is a pure data + CLI layer. It does **not**:
+The current plan-ledger + snapshot layers do **not**:
 
 - Import, depend on, or modify any `.opencode/plugins/*.js` file
-- Inject data into `context.md`, `implement.md`, or `verify.md`
 - Modify `package.json` or any OpenCode package metadata
 - Create or modify subagent definitions
 - Touch the session start, state, or subagent-context plugins

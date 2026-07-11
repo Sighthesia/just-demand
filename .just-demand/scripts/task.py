@@ -27,6 +27,7 @@ from workflow_core import (
     parse_markdown_clarification_fields,
     promote_to_task,
     read_plan,
+    refresh_plan_context,
     select_task,
     show_task_readiness,
     start_reflection,
@@ -63,6 +64,7 @@ COMMANDS = {
     "mark",
     "promote",
     "record-followup",
+    "refresh-plan-context",
     "resume",
     "select-task",
     "show-plan",
@@ -268,6 +270,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_evidence_parser.add_argument("plan_id", help="Plan ID")
     add_evidence_parser.add_argument("suggestion_id", help="Suggestion ID within the plan")
     add_evidence_parser.add_argument("evidence", help="Evidence text")
+
+    refresh_plan = sub.add_parser("refresh-plan-context", help="Refresh plan snapshot sections in task context files")
+    refresh_plan.add_argument("task_id", help="Task ID to refresh plan context for")
 
     sub.add_parser("where", help="Print the global CLI path and invocation example")
 
@@ -487,6 +492,8 @@ def execute_command(root: Path, args: list[str]) -> int:
             result = add_task_to_plan(root, parsed.plan_id, parsed.suggestion_id, parsed.task_id)
         elif parsed.command == "add-evidence":
             result = add_plan_evidence(root, parsed.plan_id, parsed.suggestion_id, parsed.evidence)
+        elif parsed.command == "refresh-plan-context":
+            result = refresh_plan_context(root, parsed.task_id)
         else:
             raise RuntimeError(f"Unsupported command: {parsed.command}")
     except Exception as exc:

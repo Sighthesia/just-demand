@@ -2711,6 +2711,9 @@ def add_plan_stage(
         })
         _save_plan(root, plan)
 
+        # Auto-refresh all active tasks (stage change affects current/pending/next)
+        failed = _refresh_all_active_tasks_for_plan_unlocked(root, plan_id)
+
     append_workspace_event(
         root,
         "plan_stage_added",
@@ -2718,6 +2721,13 @@ def add_plan_stage(
         plan_id,
         f"Added stage '{stage_id}' to plan '{plan_id}'",
     )
+
+    if failed:
+        raise RuntimeError(
+            f"Stage '{stage_id}' added to plan '{plan_id}', "
+            f"but snapshot refresh failed for task(s): {', '.join(failed)}. "
+            f"Use refresh-plan-context to retry."
+        )
 
     return plan
 
@@ -2790,6 +2800,9 @@ def add_plan_suggestion(
         suggestion_order.append(suggestion_id)
         _save_plan(root, plan)
 
+        # Auto-refresh all active tasks (new suggestion changes remaining-in-stage)
+        failed = _refresh_all_active_tasks_for_plan_unlocked(root, plan_id)
+
     append_workspace_event(
         root,
         "plan_suggestion_added",
@@ -2797,6 +2810,13 @@ def add_plan_suggestion(
         plan_id,
         f"Added suggestion '{suggestion_id}' to stage '{stage_id}'",
     )
+
+    if failed:
+        raise RuntimeError(
+            f"Suggestion '{suggestion_id}' added to plan '{plan_id}', "
+            f"but snapshot refresh failed for task(s): {', '.join(failed)}. "
+            f"Use refresh-plan-context to retry."
+        )
 
     return {
         "suggestion_id": suggestion_id,
@@ -2861,6 +2881,9 @@ def update_suggestion_status(
         sug["updated_at"] = now
         suggestions[suggestion_id] = sug
         _save_plan(root, plan)
+
+        # Auto-refresh plan context for all active tasks associated with this suggestion
+        _refresh_active_tasks_for_suggestion(root, plan_id, suggestion_id)
 
     append_workspace_event(
         root,
@@ -2945,6 +2968,13 @@ def add_task_to_plan(
                 write_json_atomic(active_path, task_data)
             raise
 
+        # Auto-refresh plan context for the associated task (only if active).
+        # Plan is already committed — if refresh fails, task files are
+        # restored by _refresh_plan_context_unlocked's rollback but the
+        # plan association is preserved for retry via refresh-plan-context.
+        if active_path.is_file():
+            _refresh_plan_context_unlocked(root, task_id)
+
     append_workspace_event(
         root,
         "plan_task_added",
@@ -2993,6 +3023,9 @@ def add_plan_evidence(
         suggestions[suggestion_id] = sug
         _save_plan(root, plan)
 
+        # Auto-refresh plan context for all active tasks associated with this suggestion
+        _refresh_active_tasks_for_suggestion(root, plan_id, suggestion_id)
+
     append_workspace_event(
         root,
         "plan_evidence_added",
@@ -3002,3 +3035,465 @@ def add_plan_evidence(
     )
 
     return plan
+
+
+# ---------------------------------------------------------------------------
+# Plan snapshot — context file injection
+# ---------------------------------------------------------------------------
+
+PLAN_SECTION_MARKER_START = "<!-- plan-snapshot -->"
+PLAN_SECTION_MARKER_END = "<!-- /plan-snapshot -->"
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write a text file atomically using temp-file + rename (POSIX atomic)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+    temp_path.replace(path)
+
+
+def _refresh_plan_context_unlocked(root: Path, task_id: str) -> dict[str, Any]:
+    """Generate or refresh plan snapshot sections — no lock, for internal use.
+
+    Plan data is read fresh from disk.  Task context files are pre-computed
+    in memory and written atomically.  If any write fails, already-updated
+    files are restored from in-memory backup.
+
+    NOTE: Does NOT emit ``plan_context_refreshed`` events because callers
+    may already hold ``workflow_mutation_lock`` (and ``append_task_event``
+    acquires the same lock via ``next_event_seq``).  The public wrapper
+    ``refresh_plan_context`` emits the event after releasing the lock.
+
+    Raises:
+        FileNotFoundError: Task or plan not found.
+        ValueError: Task has no plan_id, or plan references are damaged.
+        RuntimeError: Any write failure (original content restored).
+    """
+    ensure_workspace(root)
+
+    # Find task (active or archived)
+    tpath = find_task_json_path(root, task_id)
+    if tpath is None:
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(tpath)
+    plan_id = task.get("plan_id")
+    if not plan_id:
+        raise ValueError(f"Task {task_id} has no plan_id set")
+
+    # Build the snapshot (validates plan, stages, suggestions)
+    snapshot = _build_plan_snapshot(root, task)
+
+    # Render sections
+    context_section = _render_plan_context_section(snapshot)
+    implement_section = _render_plan_implement_section(snapshot)
+    verify_section = _render_plan_verify_section(snapshot)
+
+    task_dir = tpath.parent
+
+    # Read or create each file
+    context_path = task_dir / "context.md"
+    implement_path = task_dir / "implement.md"
+    verify_path = task_dir / "verify.md"
+
+    # Base content: read existing or render default
+    if context_path.is_file():
+        context_content = context_path.read_text(encoding="utf-8")
+    else:
+        context_content = render_context_markdown(task)
+
+    if implement_path.is_file():
+        implement_content = implement_path.read_text(encoding="utf-8")
+    else:
+        subtasks = task.get("subtasks", [])
+        implement_content = render_implementation_plan_markdown(task, subtasks)
+
+    if verify_path.is_file():
+        verify_content = verify_path.read_text(encoding="utf-8")
+    else:
+        verify_content = render_verify_markdown(task)
+
+    # Merge plan sections (pure computation, no I/O)
+    context_content = _replace_or_append_plan_section(context_content, context_section)
+    implement_content = _replace_or_append_plan_section(implement_content, implement_section)
+    verify_content = _replace_or_append_plan_section(verify_content, verify_section)
+
+    # --- Atomic write with rollback ---
+    files_to_write = {
+        context_path: context_content,
+        implement_path: implement_content,
+        verify_path: verify_content,
+    }
+    originals: dict[Path, str] = {}
+    for path in files_to_write:
+        if path.is_file():
+            originals[path] = path.read_text(encoding="utf-8")
+
+    written: list[Path] = []
+    try:
+        for path, content in files_to_write.items():
+            _atomic_write_text(path, content)
+            written.append(path)
+    except Exception as write_err:
+        # Restore already-written files from in-memory backup
+        for path in written:
+            try:
+                if path in originals:
+                    _atomic_write_text(path, originals[path])
+                else:
+                    path.unlink(missing_ok=True)
+            except Exception:
+                pass  # Best-effort restore
+        raise RuntimeError(
+            f"Plan snapshot write failed for task {task_id}: {write_err}. "
+            f"Original content restored for {len(written)} file(s). "
+            f"Use refresh-plan-context to retry."
+        ) from write_err
+
+    updated_files = ["context.md", "implement.md", "verify.md"]
+
+    return {
+        "task_id": task_id,
+        "plan_id": plan_id,
+        "updated_files": updated_files,
+        "is_active": (tasks_dir(root) / "active" / task_id / "task.json").is_file(),
+    }
+
+
+def refresh_plan_context(root: Path, task_id: str) -> dict[str, Any]:
+    """Generate or refresh plan snapshot sections in a task's context files.
+
+    Public API — acquires the workflow mutation lock before writing, so it
+    is safe to call directly (e.g. from the CLI or tests).  Internal callers
+    that already hold the lock must use ``_refresh_plan_context_unlocked``.
+
+    Reads the plan data and generates plan context sections for context.md,
+    implement.md, and verify.md.  Uses stable markers to only replace the
+    generated content, preserving unrelated markdown.  Writes are atomic
+    with rollback on failure.
+
+    Args:
+        root: Project root.
+        task_id: Task id (must have a plan_id set).
+
+    Returns:
+        Dict with task_id, plan_id, and the updated files list.
+
+    Raises:
+        FileNotFoundError: Task or plan not found.
+        ValueError: Task has no plan_id, or plan references are damaged.
+        RuntimeError: Write failure (original content restored).
+    """
+    with workflow_mutation_lock(root):
+        result = _refresh_plan_context_unlocked(root, task_id)
+
+    # Emit event outside the lock (append_task_event acquires the same lock)
+    if result.get("is_active"):
+        append_task_event(
+            root, task_id, "plan_context_refreshed",
+            f"Refreshed plan context from plan '{result['plan_id']}' for task {task_id}",
+        )
+
+    return result
+
+
+def _refresh_all_active_tasks_for_plan_unlocked(root: Path, plan_id: str) -> list[str]:
+    """Refresh all active (non-archived) tasks associated with a plan.
+
+    This is an internal unlocked helper meant to be called from mutation
+    functions that already hold ``workflow_mutation_lock`` or have just
+    released it.  It collects all ``covered_tasks`` across every suggestion
+    in the plan and refreshes each one that is still active.
+
+    Args:
+        root: Project root.
+        plan_id: The plan whose active tasks should be refreshed.
+
+    Returns:
+        A list of task IDs that failed to refresh (empty on full success).
+    """
+    try:
+        plan = _load_plan(root, plan_id)
+    except Exception:
+        return [f"<cannot load plan {plan_id}>"]
+
+    suggestions = plan.get("suggestions", {})
+    active_tasks: set[str] = set()
+    for sug in suggestions.values():
+        for tid in sug.get("covered_tasks", []):
+            if (tasks_dir(root) / "active" / tid / "task.json").is_file():
+                active_tasks.add(tid)
+
+    failed: list[str] = []
+    for tid in sorted(active_tasks):
+        try:
+            _refresh_plan_context_unlocked(root, tid)
+        except Exception:
+            failed.append(tid)
+
+    return failed
+
+
+def _refresh_active_tasks_for_suggestion(root: Path, plan_id: str, suggestion_id: str) -> None:
+    """Refresh plan context for all active tasks covered by a suggestion.
+
+    Uses the unlocked variant to avoid lock contention when called from a
+    context that has already released ``workflow_mutation_lock``.
+
+    Best-effort: errors are silently caught so the caller's mutation is not
+    rolled back by a render failure.
+    """
+    try:
+        plan = _load_plan(root, plan_id)
+    except Exception:
+        return
+    sug = plan.get("suggestions", {}).get(suggestion_id)
+    if sug is None:
+        return
+    for tid in sug.get("covered_tasks", []):
+        if not (tasks_dir(root) / "active" / tid / "task.json").is_file():
+            continue
+        try:
+            _refresh_plan_context_unlocked(root, tid)
+        except Exception:
+            pass
+
+
+def _build_plan_snapshot(root: Path, task: dict[str, Any]) -> dict[str, Any]:
+    """Build structured plan snapshot data for a task.
+    
+    Returns a dict with plan context information, raising errors for
+    missing or damaged references.
+    
+    Raises:
+        FileNotFoundError: Plan not found.
+        ValueError: Task has no plan_id, no covered suggestions, or bad stage ref.
+    """
+    ensure_workspace(root)
+    plan_id = task.get("plan_id")
+    if not plan_id:
+        raise ValueError(f"Task {task.get('id', 'unknown')} has no plan_id")
+
+    plan = _load_plan(root, plan_id)
+    task_id = task.get("id", "")
+    suggestions = plan.get("suggestions", {})
+    stages = plan.get("stages", [])
+    suggestion_order = plan.get("suggestion_order", [])
+
+    # Find all suggestions that cover this task
+    task_suggestions: list[dict[str, Any]] = []
+    for sug_id in suggestion_order:
+        sug = suggestions.get(sug_id)
+        if sug is None:
+            continue
+        if task_id in sug.get("covered_tasks", []):
+            task_suggestions.append({**sug, "id": sug_id})
+
+    if not task_suggestions:
+        raise ValueError(
+            f"Task {task_id} is associated with plan {plan_id} "
+            f"but is not listed in any suggestion's covered_tasks"
+        )
+
+    # Get the stage for this task (use the first suggestion's stage)
+    current_stage_id = task_suggestions[0].get("stage_id", "")
+    current_stage = None
+    for st in stages:
+        if st["id"] == current_stage_id:
+            current_stage = st
+            break
+    if current_stage is None:
+        raise ValueError(
+            f"Stage '{current_stage_id}' referenced by suggestion "
+            f"'{task_suggestions[0]['id']}' not found in plan '{plan_id}'"
+        )
+
+    # Remaining suggestions in the same stage (not covered by this task)
+    remaining_suggestions: list[dict[str, Any]] = []
+    for sug_id in suggestion_order:
+        sug = suggestions.get(sug_id)
+        if sug is None:
+            continue
+        if sug.get("stage_id") == current_stage_id and task_id not in sug.get("covered_tasks", []):
+            remaining_suggestions.append({**sug, "id": sug_id})
+
+    # Dependencies: collect all dependencies from our task's suggestions
+    dep_ids: list[str] = []
+    for ts in task_suggestions:
+        for dep in ts.get("dependencies", []):
+            if dep not in dep_ids:
+                dep_ids.append(dep)
+
+    dep_suggestions: list[dict[str, Any]] = []
+    for dep_id in dep_ids:
+        dep_sug = suggestions.get(dep_id)
+        if dep_sug is not None:
+            dep_suggestions.append({**dep_sug, "id": dep_id})
+
+    # Next stage
+    next_stage = None
+    found_current = False
+    for st in stages:
+        if found_current:
+            next_stage = st
+            break
+        if st["id"] == current_stage_id:
+            found_current = True
+
+    return {
+        "plan_id": plan_id,
+        "plan_title": plan.get("title", ""),
+        "current_stage": current_stage,
+        "next_stage": next_stage,
+        "task_suggestions": task_suggestions,
+        "remaining_suggestions": remaining_suggestions,
+        "dependencies": dep_suggestions,
+        "stages": stages,
+    }
+
+
+def _render_suggestion_bullets(suggestions: list[dict[str, Any]], indent: str = "") -> list[str]:
+    """Render suggestions as markdown bullet items with status."""
+    if not suggestions:
+        return [f"{indent}_None._"]
+    lines = []
+    for sug in suggestions:
+        text = sug.get("verbatim_text", "").strip()
+        status = sug.get("status", "unknown")
+        lines.append(f"{indent}- {text} [{status}]")
+    return lines
+
+
+def _render_plan_context_section(snapshot: dict[str, Any]) -> str:
+    """Render the plan snapshot section for context.md."""
+    lines = [
+        "## Plan Context",
+        "",
+        f"**Plan:** {snapshot['plan_title']} ({snapshot['plan_id']})",
+        "",
+        f"**Current Stage:** {snapshot['current_stage']['title']}",
+        "",
+        "**This Task Covers:**",
+        "",
+    ]
+    lines.extend(_render_suggestion_bullets(snapshot["task_suggestions"]))
+    lines.append("")
+
+    if snapshot["remaining_suggestions"]:
+        lines.append("**Remaining In Stage:**")
+        lines.append("")
+        lines.extend(_render_suggestion_bullets(snapshot["remaining_suggestions"]))
+        lines.append("")
+
+    if snapshot["dependencies"]:
+        lines.append("**Dependencies:**")
+        lines.append("")
+        lines.extend(_render_suggestion_bullets(snapshot["dependencies"]))
+        lines.append("")
+
+    next_stage = snapshot.get("next_stage")
+    if next_stage:
+        lines.append(f"**Next Stage:** {next_stage['title']}")
+    else:
+        lines.append("**Next Stage:** _Final stage_")
+    lines.append("")
+
+    # Evidence requirements
+    lines.append("**Evidence Requirements:**")
+    lines.append("")
+    for sug in snapshot["task_suggestions"]:
+        text = sug.get("verbatim_text", "").strip()
+        short = (text[:60] + "...") if len(text) > 60 else text
+        ev_count = len(sug.get("evidence", []))
+        lines.append(f"- {short}: {ev_count} evidence item(s)")
+    if not snapshot["task_suggestions"]:
+        lines.append("_None._")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _render_plan_implement_section(snapshot: dict[str, Any]) -> str:
+    """Render the plan snapshot section for implement.md."""
+    lines = [
+        "## Plan Context",
+        "",
+        "**Task Suggestions:**",
+        "",
+    ]
+    lines.extend(_render_suggestion_bullets(snapshot["task_suggestions"]))
+    lines.append("")
+
+    if snapshot["dependencies"]:
+        lines.append("**Prerequisites:**")
+        lines.append("")
+        lines.extend(_render_suggestion_bullets(snapshot["dependencies"]))
+        lines.append("")
+
+    lines.append("**Required Evidence:**")
+    lines.append("")
+    for sug in snapshot["task_suggestions"]:
+        text = sug.get("verbatim_text", "").strip()
+        status = sug.get("status", "unknown")
+        lines.append(f"- [{status}] {text}")
+    if not snapshot["task_suggestions"]:
+        lines.append("_None._")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _render_plan_verify_section(snapshot: dict[str, Any]) -> str:
+    """Render the plan snapshot section for verify.md."""
+    lines = [
+        "## Plan Context",
+        "",
+        "| Suggestion | Status | Evidence | Verified |",
+        "|---|---|---|---|",
+    ]
+    for sug in snapshot["task_suggestions"]:
+        text = sug.get("verbatim_text", "").strip()
+        short = (text[:40] + "...") if len(text) > 40 else text
+        status = sug.get("status", "unknown")
+        ev_count = len(sug.get("evidence", []))
+        verified = "✓" if ev_count > 0 else "☐"
+        lines.append(f"| {short} | {status} | {ev_count} | {verified} |")
+
+    if snapshot["remaining_suggestions"]:
+        lines.append("")
+        lines.append("**Remaining Suggestions (not covered by this task):**")
+        lines.append("")
+        lines.extend(_render_suggestion_bullets(snapshot["remaining_suggestions"]))
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _replace_or_append_plan_section(content: str, section_body: str) -> str:
+    """Replace content between plan snapshot markers, or append at end.
+    
+    If the marker pair is found, content between them is replaced.
+    If no markers exist, the section is appended at the end.
+    If only one marker is found, RuntimeError is raised (corrupt state).
+    """
+    marker_start = PLAN_SECTION_MARKER_START
+    marker_end = PLAN_SECTION_MARKER_END
+
+    start_idx = content.find(marker_start)
+    end_idx = content.find(marker_end)
+
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        # Replace content between markers
+        before = content[:start_idx + len(marker_start)]
+        after = content[end_idx:]
+        return before + "\n" + section_body.strip() + "\n" + after
+    elif start_idx != -1 or end_idx != -1:
+        raise RuntimeError(
+            "Corrupt plan snapshot markers: found only one of the start/end pair"
+        )
+    else:
+        # No markers — append at end
+        stripped = content.rstrip()
+        return stripped + "\n\n" + marker_start + "\n" + section_body.strip() + "\n" + marker_end + "\n"

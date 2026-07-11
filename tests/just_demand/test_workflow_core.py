@@ -37,6 +37,7 @@ from workflow_core import (
     promote_to_task,
     read_json,
     read_plan,
+    refresh_plan_context,
     select_task,
     start_execution,
     start_reflection,
@@ -5250,6 +5251,691 @@ class PlanLedgerTests(unittest.TestCase):
             td2 = read_json(tasks_dir(root) / "active" / t2["task_id"] / "task.json")
             self.assertEqual(td1.get("plan_id"), pid)
             self.assertEqual(td2.get("plan_id"), pid)
+
+
+# ===========================================================================
+# Plan snapshot tests
+# ===========================================================================
+
+
+def _setup_plan_with_task(root, plan_title="Test Plan"):
+    """Helper: create a plan with two stages, suggestions, and a linked task."""
+    plan = create_plan(root, plan_title)
+    pid = plan["plan_id"]
+    add_plan_stage(root, pid, "stage-1", "Discovery")
+    add_plan_stage(root, pid, "stage-2", "Implementation")
+
+    # Stage 1 suggestions
+    r1 = add_plan_suggestion(root, pid, "stage-1",
+                              "Research existing solutions")
+    r2 = add_plan_suggestion(root, pid, "stage-1",
+                              "Define API contracts",
+                              dependencies=[r1["suggestion_id"]])
+
+    # Stage 2 suggestions
+    r3 = add_plan_suggestion(root, pid, "stage-2",
+                              "Build the backend service",
+                              dependencies=[r2["suggestion_id"]])
+    r4 = add_plan_suggestion(root, pid, "stage-2",
+                              "Write integration tests")
+
+    # Create a task linked to suggestion r3
+    intake = create_intake(root, "Plan task", "Task for plan", "s1")
+    update_intake_section(root, intake["intake_id"], "Scope", "Scope")
+    update_intake_section(root, intake["intake_id"], "Final Expected Effect", "Works")
+    update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+    update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. Do it")
+    update_intake_section(root, intake["intake_id"], "Approval", "Approved")
+    task = promote_to_task(root, intake["intake_id"], "Plan task", "Implement", "design",
+                            ["Works"])
+    tid = task["task_id"]
+
+    add_task_to_plan(root, pid, r3["suggestion_id"], tid)
+
+    return {
+        "root": root,
+        "plan_id": pid,
+        "task_id": tid,
+        "suggestion_ids": {
+            "r1": r1["suggestion_id"],
+            "r2": r2["suggestion_id"],
+            "r3": r3["suggestion_id"],
+            "r4": r4["suggestion_id"],
+        },
+    }
+
+
+class PlanSnapshotTests(unittest.TestCase):
+    """Tests for plan snapshot context injection."""
+
+    # ------------------------------------------------------------------
+    # refresh_plan_context — basic functionality
+    # ------------------------------------------------------------------
+
+    def test_refresh_creates_plan_sections(self):
+        """refresh_plan_context adds plan sections to context.md, implement.md, verify.md."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            result = refresh_plan_context(root, tid)
+
+            self.assertEqual(result["task_id"], tid)
+            self.assertIn("context.md", result["updated_files"])
+
+            # Check plan markers exist in all three files
+            for fname in ("context.md", "implement.md", "verify.md"):
+                content = (task_dir / fname).read_text(encoding="utf-8")
+                self.assertIn("<!-- plan-snapshot -->", content, f"Missing marker in {fname}")
+                self.assertIn("<!-- /plan-snapshot -->", content, f"Missing end marker in {fname}")
+
+            # Plan title should be visible in context.md (implement.md and verify.md omit it)
+            content = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn(ctx["plan_id"], content, "Plan id missing in context.md")
+
+    def test_refresh_context_section_content(self):
+        """context.md plan section includes stage, task suggestions, remaining, dependencies, next stage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            refresh_plan_context(root, tid)
+
+            context = (task_dir / "context.md").read_text(encoding="utf-8")
+            pid = ctx["plan_id"]
+
+            # Plan info
+            self.assertIn(pid, context)
+            self.assertIn("Test Plan", context)
+            self.assertIn("Implementation", context)  # current stage
+
+            # Task covers the suggestion
+            self.assertIn("Build the backend service", context)
+
+            # Remaining suggestions in same stage
+            self.assertIn("Write integration tests", context)
+
+            # Dependencies (direct, not transitive)
+            self.assertIn("Define API contracts", context)
+
+            # Next stage (there's no stage-3, so "Final stage")
+            self.assertIn("Final stage", context)
+
+            # Evidence requirements
+            self.assertIn("Evidence Requirements", context)
+
+    def test_refresh_implement_section_content(self):
+        """implement.md plan section includes task suggestions and prerequisites."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            refresh_plan_context(root, tid)
+
+            implement = (task_dir / "implement.md").read_text(encoding="utf-8")
+            self.assertIn("Build the backend service", implement)
+            self.assertIn("Define API contracts", implement)
+            self.assertIn("Required Evidence", implement)
+
+    def test_refresh_verify_section_content(self):
+        """verify.md plan section includes verification table."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            refresh_plan_context(root, tid)
+
+            verify = (task_dir / "verify.md").read_text(encoding="utf-8")
+            self.assertIn("Suggestion", verify)
+            self.assertIn("Status", verify)
+            self.assertIn("Evidence", verify)
+            self.assertIn("Verified", verify)
+            self.assertIn("Build the backend service", verify)
+
+    # ------------------------------------------------------------------
+    # Idempotency
+    # ------------------------------------------------------------------
+
+    def test_refresh_idempotent(self):
+        """Refreshing twice produces the same content."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            refresh_plan_context(root, tid)
+            content_a = {
+                "context.md": (task_dir / "context.md").read_text(encoding="utf-8"),
+                "implement.md": (task_dir / "implement.md").read_text(encoding="utf-8"),
+                "verify.md": (task_dir / "verify.md").read_text(encoding="utf-8"),
+            }
+
+            refresh_plan_context(root, tid)
+            content_b = {
+                "context.md": (task_dir / "context.md").read_text(encoding="utf-8"),
+                "implement.md": (task_dir / "implement.md").read_text(encoding="utf-8"),
+                "verify.md": (task_dir / "verify.md").read_text(encoding="utf-8"),
+            }
+
+            self.assertEqual(content_a, content_b)
+
+    # ------------------------------------------------------------------
+    # Preservation of unrelated content
+    # ------------------------------------------------------------------
+
+    def test_preserves_unrelated_markdown(self):
+        """Custom markdown outside the plan markers is preserved."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            # Add custom content to context.md
+            context_path = task_dir / "context.md"
+            original = context_path.read_text(encoding="utf-8")
+            original += "\n## Custom Section\n\nThis is my custom content.\n"
+            context_path.write_text(original, encoding="utf-8")
+
+            refresh_plan_context(root, tid)
+
+            refreshed = context_path.read_text(encoding="utf-8")
+            self.assertIn("## Custom Section", refreshed)
+            self.assertIn("This is my custom content.", refreshed)
+
+    # ------------------------------------------------------------------
+    # Plan section replaces old content
+    # ------------------------------------------------------------------
+
+    def test_refresh_replaces_old_plan_section(self):
+        """Refreshing replaces old plan section content with current plan data."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+
+            # First refresh
+            refresh_plan_context(root, tid)
+
+            # Update suggestion status
+            update_suggestion_status(
+                root, ctx["plan_id"], ctx["suggestion_ids"]["r3"],
+                "implemented", reason="Done"
+            )
+
+            # Refresh again
+            refresh_plan_context(root, tid)
+
+            task_dir = tasks_dir(root) / "active" / tid
+            context = (task_dir / "context.md").read_text(encoding="utf-8")
+            # Should show updated status
+            self.assertIn("implemented", context)
+
+    # ------------------------------------------------------------------
+    # Bad references
+    # ------------------------------------------------------------------
+
+    def test_refresh_no_plan_id_raises(self):
+        """Task without plan_id raises ValueError."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "No plan", "Task without plan", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "S")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "W")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. X")
+            update_intake_section(root, intake["intake_id"], "Approval", "Y")
+            task = promote_to_task(root, intake["intake_id"], "No plan", "T", "design", ["W"])
+
+            with self.assertRaisesRegex(ValueError, "no plan_id"):
+                refresh_plan_context(root, task["task_id"])
+
+    def test_refresh_missing_plan_raises(self):
+        """Task with plan_id pointing to non-existent plan raises FileNotFoundError."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Bad plan", "Task with bad plan", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "S")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "W")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. X")
+            update_intake_section(root, intake["intake_id"], "Approval", "Y")
+            task = promote_to_task(root, intake["intake_id"], "Bad plan", "T", "design", ["W"])
+            tid = task["task_id"]
+
+            # Set plan_id to non-existent plan
+            task_dir = tasks_dir(root) / "active" / tid
+            task_data = read_json(task_dir / "task.json")
+            task_data["plan_id"] = "nonexistent-plan"
+            write_json_atomic(task_dir / "task.json", task_data)
+
+            with self.assertRaises(FileNotFoundError):
+                refresh_plan_context(root, tid)
+
+    def test_refresh_missing_task_raises(self):
+        """refresh_plan_context on non-existent task raises FileNotFoundError."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            with self.assertRaises(FileNotFoundError):
+                refresh_plan_context(root, "nonexistent-task")
+
+    # ------------------------------------------------------------------
+    # Non-plan task unchanged
+    # ------------------------------------------------------------------
+
+    def test_no_plan_task_unchanged(self):
+        """Task without plan_id cannot be refreshed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Standalone", "No plan", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "S")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "W")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. X")
+            update_intake_section(root, intake["intake_id"], "Approval", "Y")
+            task = promote_to_task(root, intake["intake_id"], "Standalone", "T", "design", ["W"])
+            tid = task["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            # Snapshot before (should have no plan markers)
+            original_context = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertNotIn("<!-- plan-snapshot -->", original_context)
+
+            # Attempting refresh should fail
+            with self.assertRaisesRegex(ValueError, "no plan_id"):
+                refresh_plan_context(root, tid)
+
+            # Files must be byte-identical
+            after_context = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertEqual(original_context, after_context)
+
+    # ------------------------------------------------------------------
+    # Auto-refresh on add_task_to_plan
+    # ------------------------------------------------------------------
+
+    def test_add_task_to_plan_triggers_auto_refresh(self):
+        """Adding a task to a plan automatically refreshes context files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            # Second task not yet in plan
+            intake = create_intake(root, "Auto refresh", "Task for auto refresh", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "S")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "W")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. X")
+            update_intake_section(root, intake["intake_id"], "Approval", "Y")
+            task2 = promote_to_task(root, intake["intake_id"], "Auto refresh", "T", "design", ["W"])
+            tid2 = task2["task_id"]
+
+            # Before association: no plan markers
+            task2_dir = tasks_dir(root) / "active" / tid2
+            before = (task2_dir / "context.md").read_text(encoding="utf-8")
+            self.assertNotIn("<!-- plan-snapshot -->", before)
+
+            # Associate with plan
+            add_task_to_plan(root, ctx["plan_id"], ctx["suggestion_ids"]["r4"], tid2)
+
+            # After association: plan markers present
+            after = (task2_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn("<!-- plan-snapshot -->", after)
+            self.assertIn(ctx["plan_id"], after)
+
+    # ------------------------------------------------------------------
+    # Auto-refresh on update_suggestion_status
+    # ------------------------------------------------------------------
+
+    def test_update_suggestion_status_triggers_auto_refresh(self):
+        """Updating suggestion status refreshes all covered active tasks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            # Refresh first to establish markers
+            refresh_plan_context(root, tid)
+            before = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn("proposed", before)  # default status after add_plan_suggestion
+
+            # Update status
+            update_suggestion_status(
+                root, ctx["plan_id"], ctx["suggestion_ids"]["r3"],
+                "implemented", reason="Verified"
+            )
+
+            after = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn("implemented", after)
+
+    # ------------------------------------------------------------------
+    # Auto-refresh on add_plan_evidence
+    # ------------------------------------------------------------------
+
+    def test_add_evidence_triggers_auto_refresh(self):
+        """Adding evidence to a suggestion refreshes all covered active tasks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            refresh_plan_context(root, tid)
+            before = (task_dir / "verify.md").read_text(encoding="utf-8")
+            self.assertIn("☐", before)  # Evidence column initially unchecked
+
+            add_plan_evidence(root, ctx["plan_id"], ctx["suggestion_ids"]["r3"],
+                               "Backend service implemented in PR #100")
+
+            after = (task_dir / "verify.md").read_text(encoding="utf-8")
+            self.assertIn("✓", after)  # Evidence column now checked
+
+    # ------------------------------------------------------------------
+    # Archived task: explicit refresh works, no auto-refresh
+    # ------------------------------------------------------------------
+
+    def test_archived_task_explicit_refresh(self):
+        """Archived tasks can be refreshed explicitly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+
+            # Complete and archive
+            from workflow_core import start_execution
+            start_execution(root, tid, ["just-demand-coder"])
+            complete_verification(root, tid, "passed", "Done")
+
+            # Task should be archived
+            self.assertFalse((tasks_dir(root) / "active" / tid).is_dir())
+            self.assertTrue((tasks_dir(root) / "archive" / tid).is_dir())
+
+            # Explicit refresh should work on archived task
+            result = refresh_plan_context(root, tid)
+            self.assertEqual(result["task_id"], tid)
+
+            archive_dir = tasks_dir(root) / "archive" / tid
+            context = (archive_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn("<!-- plan-snapshot -->", context)
+
+    # ------------------------------------------------------------------
+    # CLI integration
+    # ------------------------------------------------------------------
+
+    def test_cli_refresh_plan_context(self):
+        """CLI refresh-plan-context works end-to-end."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "refresh-plan-context", tid],
+                text=True, capture_output=True, check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["task_id"], tid)
+            self.assertIn("context.md", payload["updated_files"])
+
+            task_dir = tasks_dir(root) / "active" / tid
+            context = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn("<!-- plan-snapshot -->", context)
+
+    def test_cli_refresh_no_plan_id_shows_error(self):
+        """CLI refresh-plan-context on task without plan_id shows error."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "CLI no plan", "Task", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "S")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "W")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. X")
+            update_intake_section(root, intake["intake_id"], "Approval", "Y")
+            task = promote_to_task(root, intake["intake_id"], "CLI no plan", "T", "design", ["W"])
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "refresh-plan-context", task["task_id"]],
+                text=True, capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("no plan_id", payload["message"])
+
+    def test_cli_refresh_missing_task_shows_error(self):
+        """CLI refresh-plan-context on non-existent task shows error."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "refresh-plan-context", "nonexistent-task"],
+                text=True, capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Task not found", payload["message"])
+
+    # ------------------------------------------------------------------
+    # Plan section marker repair
+    # ------------------------------------------------------------------
+
+    def test_corrupt_markers_raise_error(self):
+        """Partial markers cause RuntimeError."""
+        from workflow_core import _replace_or_append_plan_section, PLAN_SECTION_MARKER_START
+        content = "Some text\n" + PLAN_SECTION_MARKER_START + "\nUnclosed\n"
+        with self.assertRaisesRegex(RuntimeError, "Corrupt"):
+            _replace_or_append_plan_section(content, "body")
+
+    def test_marker_replacement(self):
+        """Content between markers is replaced correctly."""
+        from workflow_core import _replace_or_append_plan_section, PLAN_SECTION_MARKER_START, PLAN_SECTION_MARKER_END
+        content = "Before\n" + PLAN_SECTION_MARKER_START + "\nOld\n" + PLAN_SECTION_MARKER_END + "\nAfter"
+        result = _replace_or_append_plan_section(content, "New Body")
+        self.assertIn("Before", result)
+        self.assertIn("After", result)
+        self.assertIn("New Body", result)
+        self.assertNotIn("Old", result)
+
+    def test_marker_append_when_absent(self):
+        """Content without markers gets section appended."""
+        from workflow_core import _replace_or_append_plan_section, PLAN_SECTION_MARKER_START, PLAN_SECTION_MARKER_END
+        content = "Just this"
+        result = _replace_or_append_plan_section(content, "Section Body")
+        self.assertIn("Just this", result)
+        self.assertIn(PLAN_SECTION_MARKER_START, result)
+        self.assertIn(PLAN_SECTION_MARKER_END, result)
+        self.assertIn("Section Body", result)
+
+    # ------------------------------------------------------------------
+    # Auto-refresh on add_plan_stage and add_plan_suggestion
+    # ------------------------------------------------------------------
+
+    def test_add_plan_stage_triggers_auto_refresh(self):
+        """Adding a stage refreshes all active tasks associated with the plan."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            # Refresh first to establish initial markers
+            refresh_plan_context(root, tid)
+            before = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertNotIn("Verification", before)  # New stage not yet present
+
+            # Add a new stage
+            add_plan_stage(root, ctx["plan_id"], "stage-3", "Verification")
+
+            # The task's context should now show the new stage as "Next Stage: Final stage"
+            # Actually it would show "Verification" since it's after stage-2
+            after = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn("Verification", after)
+
+    def test_add_plan_suggestion_triggers_auto_refresh(self):
+        """Adding a suggestion to the same stage refreshes all associated active tasks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            # Refresh first to establish markers
+            refresh_plan_context(root, tid)
+            before = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertNotIn("Performance testing", before)
+
+            # Add a new suggestion to stage-2 (same stage as the task's suggestion)
+            add_plan_suggestion(root, ctx["plan_id"], "stage-2",
+                                "Run performance testing")
+
+            # The task's remaining suggestions should now include the new one
+            after = (task_dir / "context.md").read_text(encoding="utf-8")
+            self.assertIn("Run performance testing", after)
+
+    # ------------------------------------------------------------------
+    # Atomic write rollback — fault injection
+    # ------------------------------------------------------------------
+
+    def test_write_failure_rollback_restores_originals(self):
+        """When a write to the second or third file fails, already-written
+        files are restored from in-memory backup and a RuntimeError is raised."""
+        from workflow_core import _atomic_write_text
+
+        original_write = _atomic_write_text
+        call_count = [0]
+
+        def _faulty_write(path, content):
+            call_count[0] += 1
+            if call_count[0] == 2:  # Fail on the second write (implement.md)
+                raise OSError("Injected disk full error")
+            return original_write(path, content)
+
+        import workflow_core as wc
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+            task_dir = tasks_dir(root) / "active" / tid
+
+            # First successful refresh to establish markers and content
+            refresh_plan_context(root, tid)
+            context_before = (task_dir / "context.md").read_text(encoding="utf-8")
+            implement_before = (task_dir / "implement.md").read_text(encoding="utf-8")
+            verify_before = (task_dir / "verify.md").read_text(encoding="utf-8")
+
+            # Now modify the plan to trigger a different snapshot
+            wc.add_plan_suggestion(root, ctx["plan_id"], "stage-2", "Changed content")
+
+            # Apply patch AFTER setup (& refresh) succeeded
+            wc._atomic_write_text = _faulty_write
+            try:
+                # Capture the baseline content right before the failing call
+                baseline_context = (task_dir / "context.md").read_text(encoding="utf-8")
+                baseline_implement = (task_dir / "implement.md").read_text(encoding="utf-8")
+                baseline_verify = (task_dir / "verify.md").read_text(encoding="utf-8")
+
+                # Trigger refresh with injected fault
+                call_count[0] = 0
+                with self.assertRaises(RuntimeError):
+                    wc._refresh_plan_context_unlocked(root, tid)
+
+                # All three files must be restored to their pre-call content
+                context_after = (task_dir / "context.md").read_text(encoding="utf-8")
+                implement_after = (task_dir / "implement.md").read_text(encoding="utf-8")
+                verify_after = (task_dir / "verify.md").read_text(encoding="utf-8")
+
+                self.assertEqual(baseline_context, context_after,
+                                 "context.md was not restored after write failure")
+                self.assertEqual(baseline_implement, implement_after,
+                                 "implement.md was not restored after write failure")
+                self.assertEqual(baseline_verify, verify_after,
+                                 "verify.md was not restored after write failure")
+            finally:
+                wc._atomic_write_text = original_write
+
+    # ------------------------------------------------------------------
+    # Concurrent calls — no deadlock
+    # ------------------------------------------------------------------
+
+    def test_concurrent_refresh_no_deadlock(self):
+        """Calling refresh_plan_context concurrently does not deadlock."""
+        import threading
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            tid = ctx["task_id"]
+
+            errors = []
+
+            def refresh_thread():
+                try:
+                    for _ in range(5):
+                        refresh_plan_context(root, tid)
+                except Exception as e:
+                    errors.append(e)
+
+            threads = [threading.Thread(target=refresh_thread) for _ in range(3)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+                if t.is_alive():
+                    self.fail("Thread deadlocked during concurrent refresh")
+
+            self.assertEqual(errors, [], f"Concurrent refresh failed: {errors}")
+
+    def test_auto_refresh_mutation_propagates_error(self):
+        """Auto-refresh failure in add_plan_stage raises RuntimeError but
+        plan mutation is preserved (can retry with refresh-plan-context)."""
+        import workflow_core as wc
+
+        original_refresh = wc._refresh_plan_context_unlocked
+
+        def _failing_refresh(root, tid):
+            raise RuntimeError(f"Injected failure for task {tid}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = _setup_plan_with_task(root)
+            pid = ctx["plan_id"]
+
+            # Apply patch AFTER setup succeeded
+            wc._refresh_plan_context_unlocked = _failing_refresh
+            try:
+                # Adding a stage with injected fault should raise RuntimeError
+                with self.assertRaises(RuntimeError) as cm:
+                    wc.add_plan_stage(root, pid, "stage-3", "Failing stage")
+                self.assertIn("snapshot refresh failed for task(s)", str(cm.exception))
+
+                # BUT the plan should still have the new stage (mutation committed)
+                plan = wc.read_plan(root, pid)
+                stage_ids = [s["id"] for s in plan.get("stages", [])]
+                self.assertIn("stage-3", stage_ids,
+                              "Plan stage should be committed even when refresh fails")
+            finally:
+                wc._refresh_plan_context_unlocked = original_refresh
 
 
 if __name__ == "__main__":
