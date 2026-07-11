@@ -817,7 +817,12 @@ def sync_implementation_plan_context(
     return task
 
 
-def build_completion_report(task: dict[str, Any], result: str, summary: str) -> dict[str, Any]:
+def build_completion_report(
+    task: dict[str, Any],
+    result: str,
+    summary: str,
+    plan_continuation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     subtasks = task.get("subtasks", []) or []
     completed_items = [
         str(subtask.get("title", "")).strip()
@@ -854,13 +859,16 @@ def build_completion_report(task: dict[str, Any], result: str, summary: str) -> 
             if checkpoint.get("fallback_note"):
                 checkpoint_info["note"] = checkpoint["fallback_note"]
 
-    return {
+    report = {
         "completed_items": completed_items,
         "verification_result": result,
         "verification_summary": summary,
         "remaining_risks": remaining_risks,
         "checkpoint": checkpoint_info,
     }
+    if plan_continuation is not None:
+        report["plan_continuation"] = plan_continuation
+    return report
 
 
 def promote_to_task(
@@ -2402,6 +2410,14 @@ def complete_verification(
         )
     new_status = result_to_status[result]
 
+    # === Plan write-back for passed plan-linked tasks ===
+    # Must happen BEFORE marking the task done so that any failure prevents
+    # lifecycle progress (done/checkpoint/archive).
+    plan_continuation: dict[str, Any] | None = None
+    if result == "passed":
+        plan_continuation = _write_back_plan_closeout(root, task_id, summary)
+        # On failure, exception propagates — task is NOT marked done.
+
     task = update_task(
         root,
         task_id,
@@ -2464,6 +2480,12 @@ def complete_verification(
     if result == "passed":
         task = sync_implementation_plan_context(root, task_id, task=task, mark_done=True)
 
+    # Reload checkpoint/plan updates, then persist the completion report before
+    # archive so continuation survives in the archived task package.
+    task = read_json(task_path(root, task_id) / "task.json")
+    completion_report = build_completion_report(task, result, summary, plan_continuation)
+    task = update_task(root, task_id, {"completion_report": completion_report})
+
     # Auto-archive when verification passes
     archive_result = None
     archive_error = None
@@ -2494,7 +2516,9 @@ def complete_verification(
         if archive_error:
             result_data["archive_error"] = archive_error
 
-    result_data["completion_report"] = build_completion_report(result_data, result, summary)
+    result_data["completion_report"] = completion_report
+    if plan_continuation is not None:
+        result_data["plan_continuation"] = plan_continuation
 
     return result_data
 
@@ -3035,6 +3059,281 @@ def add_plan_evidence(
     )
 
     return plan
+
+
+def _write_back_plan_closeout(
+    root: Path,
+    task_id: str,
+    verification_summary: str,
+) -> dict[str, Any] | None:
+    """Write verification closeout evidence back to the plan ledger.
+
+    Called only for passed verification results on plan‑linked tasks.
+    Inside a mutation lock:
+      1. Validates the task is listed in at least one suggestion's
+         ``covered_tasks``.
+      2. Transitions covered suggestions (proposed/accepted) to implemented,
+         with terminal‑state safety (rejected/superseded untouched).
+      3. Appends structured closeout evidence (task_id, summary, timestamp,
+         revision, commit hash when available).
+      4. Saves the plan atomically.
+      5. Computes continuation data (remaining items, next stage, blockers).
+      6. Refreshes remaining active task snapshots.
+
+    Returns a continuation dict, or *None* if the task has no ``plan_id``.
+    Raises on any failure — the caller must NOT mark the task done.
+
+    Continuation dict shape::
+
+        {
+            "plan_id": str,
+            "plan_title": str,
+            "completed_suggestions": [{"id": str, "text": str, "status": str}],
+            "skipped_suggestions": [{"id": str, "text": str, "reason": str}],
+            "remaining_actionable": [{"id": str, "text": str, "status": str}],
+            "deferred": [{"id": str, "text": str, "status": str}],
+            "rejected": [{"id": str, "text": str, "status": str}],
+            "superseded": [{"id": str, "text": str, "status": str}],
+            "next_stage": {"id": str, "title": str} | None,
+            "is_plan_complete": bool,
+            "blockers": [{"id": str, "text": str, "status": str}],
+            "continue_action": str,
+        }
+    """
+    tpath = task_path(root, task_id) / "task.json"
+    if not tpath.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    task = read_json(tpath)
+    plan_id = task.get("plan_id")
+    if not plan_id:
+        return None
+
+    # Best‑effort HEAD commit hash
+    commit_hash: str | None = None
+    try:
+        head = _run_git(root, "rev-parse", "HEAD")
+        if head.returncode == 0:
+            commit_hash = head.stdout.strip()
+    except Exception:
+        pass
+
+    rev_tag = str(task.get("validation_revision") or "unknown")
+    now = utc_now()
+
+    # Identify covered suggestions and transition inside a single lock
+    with workflow_mutation_lock(root):
+        plan = _load_plan(root, plan_id)
+        suggestions = plan.setdefault("suggestions", {})
+        suggestion_order = plan.get("suggestion_order", [])
+
+        covered_ids: list[str] = []
+        for sug_id in suggestion_order:
+            sug = suggestions.get(sug_id)
+            if sug is None:
+                continue
+            if task_id in sug.get("covered_tasks", []):
+                covered_ids.append(sug_id)
+
+        if not covered_ids:
+            raise ValueError(
+                f"Task {task_id} is linked to plan {plan_id} "
+                f"but is not listed in any suggestion's covered_tasks"
+            )
+
+        completed: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+
+        for sug_id in covered_ids:
+            sug = suggestions[sug_id]
+            current_status = sug.get("status", "proposed")
+            verbatim = sug.get("verbatim_text", "")[:80]
+
+            # Idempotent recovery: a previous write-back may have committed the
+            # plan before a later task/checkpoint/archive step failed.
+            existing_evidence = next(
+                (
+                    entry for entry in sug.get("evidence", [])
+                    if isinstance(entry, dict)
+                    and entry.get("type") == "verification_closeout"
+                    and entry.get("task_id") == task_id
+                ),
+                None,
+            )
+            if current_status == "implemented" and existing_evidence is not None:
+                completed.append({"id": sug_id, "text": verbatim, "status": "implemented"})
+                continue
+
+            # Terminal / idempotent guards
+            if current_status == "implemented":
+                skipped.append({"id": sug_id, "text": verbatim, "reason": "already_implemented"})
+                continue
+            if current_status in ("rejected", "superseded"):
+                skipped.append({"id": sug_id, "text": verbatim, "reason": f"terminal_state_{current_status}"})
+                continue
+            if current_status not in ("proposed", "accepted"):
+                # Defensive: any other status we don't recognise — skip
+                skipped.append({"id": sug_id, "text": verbatim, "reason": f"not_transitionable_{current_status}"})
+                continue
+
+            # Transition to implemented
+            from_status = sug["status"]
+            sug["status"] = "implemented"
+            history = sug.setdefault("status_history", [])
+            history.append({
+                "from_status": from_status,
+                "to_status": "implemented",
+                "at": now,
+                "reason": f"Verification passed for task {task_id}",
+            })
+            evidence = sug.setdefault("evidence", [])
+            evidence.append({
+                "type": "verification_closeout",
+                "task_id": task_id,
+                "verification_summary": verification_summary,
+                "at": now,
+                "revision": rev_tag,
+                "commit_hash": commit_hash,
+            })
+            sug["updated_at"] = now
+            suggestions[sug_id] = sug
+            completed.append({"id": sug_id, "text": verbatim, "status": "implemented"})
+
+        _save_plan(root, plan)
+
+    # --- outside the lock: compute continuation, refresh snapshots, emit event ---
+
+    plan = _load_plan(root, plan_id)
+    suggestions_data = plan.get("suggestions", {})
+    stages = plan.get("stages", [])
+
+    # Determine current stage from the first covered suggestion
+    current_stage_id: str | None = None
+    for sug_id in covered_ids:
+        sug = suggestions_data.get(sug_id, {})
+        sid = sug.get("stage_id", "")
+        if sid:
+            current_stage_id = sid
+            break
+
+    # Find next stage
+    next_stage: dict[str, Any] | None = None
+    found = False
+    for st in stages:
+        if found:
+            next_stage = {"id": st["id"], "title": st["title"]}
+            break
+        if st["id"] == current_stage_id:
+            found = True
+
+    # Classify remaining suggestions
+    remaining_actionable: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    superseded: list[dict[str, Any]] = []
+    blockers: list[dict[str, Any]] = []
+
+    for sug_id in suggestion_order:
+        sug = suggestions_data.get(sug_id)
+        if sug is None:
+            continue
+        status = sug.get("status", "")
+        verbatim = sug.get("verbatim_text", "")[:80]
+
+        if status == "proposed":
+            remaining_actionable.append({"id": sug_id, "text": verbatim, "status": "proposed"})
+        elif status == "accepted":
+            remaining_actionable.append({"id": sug_id, "text": verbatim, "status": "accepted"})
+        elif status == "deferred":
+            deferred.append({"id": sug_id, "text": verbatim, "status": "deferred"})
+        elif status == "rejected":
+            rejected.append({"id": sug_id, "text": verbatim, "status": "rejected"})
+        elif status == "superseded":
+            superseded.append({"id": sug_id, "text": verbatim, "status": "superseded"})
+
+        # Blockers belong to remaining actionable suggestions, not to work that
+        # has just completed.
+        if status in ("proposed", "accepted"):
+            for dep_id in sug.get("dependencies", []):
+                dep_sug = suggestions_data.get(dep_id, {})
+                dep_status = dep_sug.get("status", "")
+                if dep_status != "implemented" and not any(b["id"] == dep_id for b in blockers):
+                    dep_text = dep_sug.get("verbatim_text", "")[:80]
+                    blockers.append({"id": dep_id, "text": dep_text, "status": dep_status})
+
+    is_plan_complete = (
+        len(remaining_actionable) == 0
+        and len(deferred) == 0
+        and len(blockers) == 0
+    )
+
+    # Build human‑readable continue action
+    continue_action: str
+    if is_plan_complete:
+        continue_action = (
+            "All plan suggestions are implemented. The plan is complete. "
+            "No further tasks required."
+        )
+    elif blockers:
+        block_names = [b["id"] for b in blockers]
+        continue_action = (
+            f"Blocked by unimplemented suggestion{'s' if len(block_names) > 1 else ''}: "
+            f"{', '.join(block_names)}. "
+            f"Resolve blockers before continuing."
+        )
+    elif remaining_actionable and next_stage:
+        continue_action = (
+            f"Next stage: '{next_stage['title']}'. "
+            f"Review the remaining suggestions, then create or select a formal task "
+            f"for the approved next stage. No task was started automatically."
+        )
+    elif remaining_actionable:
+        continue_action = (
+            f"{len(remaining_actionable)} actionable suggestion(s) remain in the current stage. "
+            f"Create additional tasks to cover remaining suggestions."
+        )
+    else:
+        continue_action = "No remaining actionable items."
+
+    # Refresh active task snapshots for this plan
+    failed = _refresh_all_active_tasks_for_plan_unlocked(root, plan_id)
+    if failed:
+        append_workspace_event(
+            root,
+            "plan_snapshot_refresh_failed",
+            "plan",
+            plan_id,
+            f"Snapshot refresh failed for task(s): {', '.join(failed)}",
+        )
+        raise RuntimeError(
+            f"Plan closeout snapshot refresh failed for task(s): {', '.join(failed)}. "
+            "The plan write-back is committed and idempotent; repair the task context "
+            "and retry complete-verification."
+        )
+
+    append_workspace_event(
+        root,
+        "plan_closeout_written",
+        "plan",
+        plan_id,
+        f"Closeout written for task {task_id} on plan {plan_id}: "
+        f"{len(completed)} implemented, {len(skipped)} skipped",
+    )
+
+    return {
+        "plan_id": plan_id,
+        "plan_title": plan.get("title", ""),
+        "completed_suggestions": completed,
+        "skipped_suggestions": skipped,
+        "remaining_actionable": remaining_actionable,
+        "deferred": deferred,
+        "rejected": rejected,
+        "superseded": superseded,
+        "next_stage": next_stage,
+        "is_plan_complete": is_plan_complete,
+        "blockers": blockers,
+        "continue_action": continue_action,
+    }
 
 
 # ---------------------------------------------------------------------------

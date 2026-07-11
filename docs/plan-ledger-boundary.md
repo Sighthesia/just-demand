@@ -1,6 +1,6 @@
 # Plan-Ledger Boundary
 
-## Status — Stages 1 & 3 Complete
+## Status — Core, Snapshots, And Closeout Complete
 
 This document records the explicit boundary between the implemented stages (plan-ledger core schema and CLI, plan-context injection into task files) and the remaining stages that are deferred to follow-up work.
 
@@ -31,6 +31,14 @@ This document records the explicit boundary between the implemented stages (plan
 - Bad references (missing plan, missing stage, missing suggestion) produce clear actionable errors
 - Tasks without `plan_id` are never touched
 
+### Stage 4 — Closeout Write-Back And Continuation
+
+- Passed verification writes structured evidence and status history to only the suggestions covered by that task.
+- Plan write-back happens before task completion; failures leave the task active and retryable.
+- Repeated recovery is idempotent by task ID and does not duplicate closeout evidence.
+- The completion report is stored in the task package before archive and includes completed, remaining, deferred, blocked, and next-stage information.
+- Continuation is advisory: it never creates, promotes, or executes another task automatically.
+
 ## Remaining Stages (Not Implemented)
 
 The following are explicitly deferred; no hooks, imports, or code pathways reach them yet.
@@ -41,12 +49,6 @@ The following are explicitly deferred; no hooks, imports, or code pathways reach
 - Surface plan summary in task state banner
 - Inject enhanced plan context via plugin (Stage 3 provides the context-file path; plugin integration builds on it)
 
-### Stage 4 — Closeout Auto-Continuation
-
-- Detect when a suggestion transitions to `implemented` and auto-create follow-up tasks
-- Record closeout evidence linked to verification pass
-- Offer "next stage" suggestion prompt on plan completion
-
 ## Plugin Boundary
 
 The current plan-ledger + snapshot layers do **not**:
@@ -55,7 +57,7 @@ The current plan-ledger + snapshot layers do **not**:
 - Modify `package.json` or any OpenCode package metadata
 - Create or modify subagent definitions
 - Touch the session start, state, or subagent-context plugins
-- Implement `complete-verification` auto-continuation or suggestion-completion wiring
+- Automatically create, promote, or execute continuation tasks
 
 Any future plugin that reads plan data should do so via the existing `read_plan()` / `list_plans()` Python API, or by reading the plan JSON files at `.just-demand/state/plans/<plan_id>/plan.json`. The schema is stable at `schema_version: "1.0"`.
 

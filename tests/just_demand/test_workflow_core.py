@@ -5305,6 +5305,130 @@ def _setup_plan_with_task(root, plan_title="Test Plan"):
     }
 
 
+class PlanCloseoutTests(unittest.TestCase):
+    def _ready(self, root: Path) -> dict:
+        ctx = _setup_plan_with_task(root)
+        mark_task(root, ctx["task_id"], "executing")
+        return ctx
+
+    def test_passed_closeout_updates_only_covered_suggestion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = self._ready(root)
+            result = complete_verification(
+                root, ctx["task_id"], "passed", "Verified snapshot behavior",
+                auto_archive=False, checkpoint_commit=False,
+            )
+
+            plan = read_plan(root, ctx["plan_id"])
+            covered = plan["suggestions"][ctx["suggestion_ids"]["r3"]]
+            unrelated = plan["suggestions"][ctx["suggestion_ids"]["r4"]]
+            self.assertEqual(covered["status"], "implemented")
+            self.assertEqual(unrelated["status"], "proposed")
+            evidence = [item for item in covered["evidence"] if isinstance(item, dict)]
+            self.assertEqual(evidence[-1]["task_id"], ctx["task_id"])
+            self.assertEqual(evidence[-1]["verification_summary"], "Verified snapshot behavior")
+            continuation = result["plan_continuation"]
+            self.assertEqual(continuation["completed_suggestions"][0]["id"], ctx["suggestion_ids"]["r3"])
+            self.assertTrue(any(item["id"] == ctx["suggestion_ids"]["r4"] for item in continuation["remaining_actionable"]))
+            self.assertIn("plan_continuation", result["completion_report"])
+
+    def test_failed_closeout_does_not_update_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = self._ready(root)
+            before = read_plan(root, ctx["plan_id"])
+            result = complete_verification(
+                root, ctx["task_id"], "failed", "Needs changes",
+                auto_archive=False, checkpoint_commit=False,
+            )
+            self.assertEqual(read_plan(root, ctx["plan_id"]), before)
+            self.assertNotIn("plan_continuation", result)
+
+    def test_plan_write_failure_leaves_task_retryable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = self._ready(root)
+            with patch("workflow_core._save_plan", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    complete_verification(
+                        root, ctx["task_id"], "passed", "Verified",
+                        auto_archive=False, checkpoint_commit=False,
+                    )
+            task = read_json(tasks_dir(root) / "active" / ctx["task_id"] / "task.json")
+            self.assertEqual(task["status"], "executing")
+            self.assertEqual(task["verification_status"], "not_started")
+
+    def test_plan_writeback_is_idempotent_for_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = self._ready(root)
+            import workflow_core
+            first = workflow_core._write_back_plan_closeout(root, ctx["task_id"], "Verified")
+            second = workflow_core._write_back_plan_closeout(root, ctx["task_id"], "Verified")
+            plan = read_plan(root, ctx["plan_id"])
+            suggestion = plan["suggestions"][ctx["suggestion_ids"]["r3"]]
+            evidence = [
+                item for item in suggestion["evidence"]
+                if isinstance(item, dict) and item.get("type") == "verification_closeout"
+            ]
+            self.assertEqual(len(evidence), 1)
+            self.assertEqual(first["completed_suggestions"], second["completed_suggestions"])
+
+    def test_archived_task_persists_plan_continuation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = self._ready(root)
+            result = complete_verification(
+                root, ctx["task_id"], "passed", "Verified",
+                checkpoint_commit=False,
+            )
+            archived_task = read_json(
+                tasks_dir(root) / "archive" / ctx["task_id"] / "task.json"
+            )
+            self.assertTrue(result["archived"])
+            self.assertIn("plan_continuation", archived_task["completion_report"])
+
+    def test_continuation_exposes_rejected_and_superseded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = self._ready(root)
+            rejected_id = ctx["suggestion_ids"]["r1"]
+            superseded_id = ctx["suggestion_ids"]["r2"]
+            update_suggestion_status(root, ctx["plan_id"], rejected_id, "rejected", reason="Declined")
+            update_suggestion_status(root, ctx["plan_id"], superseded_id, "superseded", reason="Replaced")
+            result = complete_verification(
+                root, ctx["task_id"], "passed", "Verified",
+                auto_archive=False, checkpoint_commit=False,
+            )
+            continuation = result["plan_continuation"]
+            self.assertEqual([item["id"] for item in continuation["rejected"]], [rejected_id])
+            self.assertEqual([item["id"] for item in continuation["superseded"]], [superseded_id])
+
+    def test_snapshot_refresh_failure_blocks_task_closeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = self._ready(root)
+            with patch(
+                "workflow_core._refresh_all_active_tasks_for_plan_unlocked",
+                return_value=[ctx["task_id"]],
+            ):
+                with self.assertRaisesRegex(RuntimeError, "snapshot refresh failed"):
+                    complete_verification(
+                        root, ctx["task_id"], "passed", "Verified",
+                        auto_archive=False, checkpoint_commit=False,
+                    )
+            task = read_json(tasks_dir(root) / "active" / ctx["task_id"] / "task.json")
+            self.assertEqual(task["status"], "executing")
+            plan = read_plan(root, ctx["plan_id"])
+            suggestion = plan["suggestions"][ctx["suggestion_ids"]["r3"]]
+            evidence = [
+                item for item in suggestion["evidence"]
+                if isinstance(item, dict) and item.get("type") == "verification_closeout"
+            ]
+            self.assertEqual(len(evidence), 1)
+
+
 class PlanSnapshotTests(unittest.TestCase):
     """Tests for plan snapshot context injection."""
 

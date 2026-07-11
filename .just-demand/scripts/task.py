@@ -580,6 +580,37 @@ def print_completion_report(report: dict[str, Any]) -> None:
         file=sys.stderr,
     )
 
+    continuation = report.get("plan_continuation")
+    if continuation:
+        print("  Plan continuation:", file=sys.stderr)
+        print(
+            f"    Plan: {continuation.get('plan_title') or continuation.get('plan_id', 'unknown')}",
+            file=sys.stderr,
+        )
+        completed = continuation.get("completed_suggestions", []) or []
+        remaining = continuation.get("remaining_actionable", []) or []
+        deferred = continuation.get("deferred", []) or []
+        rejected = continuation.get("rejected", []) or []
+        superseded = continuation.get("superseded", []) or []
+        blockers = continuation.get("blockers", []) or []
+        print(f"    Completed this task: {len(completed)}", file=sys.stderr)
+        print(f"    Remaining actionable: {len(remaining)}", file=sys.stderr)
+        if deferred:
+            print(f"    Deferred: {len(deferred)}", file=sys.stderr)
+        if rejected:
+            print(f"    Rejected: {len(rejected)}", file=sys.stderr)
+        if superseded:
+            print(f"    Superseded: {len(superseded)}", file=sys.stderr)
+        if blockers:
+            print(
+                f"    Blockers: {', '.join(str(item.get('id', 'unknown')) for item in blockers)}",
+                file=sys.stderr,
+            )
+        next_stage = continuation.get("next_stage")
+        if next_stage:
+            print(f"    Next stage: {next_stage.get('title', next_stage.get('id', 'unknown'))}", file=sys.stderr)
+        print(f"    Next action: {continuation.get('continue_action', 'Review the plan.')}", file=sys.stderr)
+
 
 def script_path() -> Path:
     """Return the absolute path of the running task.py script."""
