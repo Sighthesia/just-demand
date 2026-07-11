@@ -108,6 +108,7 @@ def ensure_workspace(root: Path) -> None:
         base / "state" / "sessions",
         base / "state" / "active",
         base / "state" / "archive",
+        base / "state" / "plans",
         base / "knowledge",
     ]:
         directory.mkdir(parents=True, exist_ok=True)
@@ -272,6 +273,7 @@ def default_task_json(
         "decision_refs": [],
         "deferred_option_refs": [],
         "subtasks": [],
+        "plan_id": None,
         "locks": [],
         "progress": None,
         "impact": [],
@@ -2517,3 +2519,486 @@ def start_verification(root: Path, task_id: str) -> dict[str, Any]:
         )
 
     return mark_task(root, task_id, "verifying", note="Starting verification phase")
+
+
+# ---------------------------------------------------------------------------
+# Plan-ledger — lightweight roadmap and suggestion data model
+# ---------------------------------------------------------------------------
+
+VALID_SUGGESTION_STATUSES = frozenset({
+    "proposed",
+    "accepted",
+    "deferred",
+    "rejected",
+    "implemented",
+    "superseded",
+})
+
+
+def plans_dir(root: Path) -> Path:
+    return state_dir(root) / "plans"
+
+
+def plan_path(root: Path, plan_id: str) -> Path:
+    return plans_dir(root) / plan_id
+
+
+def default_plan_data(plan_id: str, title: str) -> dict[str, Any]:
+    now = utc_now()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "id": plan_id,
+        "title": title,
+        "stages": [],
+        "suggestions": {},
+        "suggestion_order": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def default_suggestion_data(
+    suggestion_id: str,
+    stage_id: str,
+    verbatim_text: str,
+) -> dict[str, Any]:
+    now = utc_now()
+    return {
+        "id": suggestion_id,
+        "stage_id": stage_id,
+        "verbatim_text": verbatim_text,
+        "status": "proposed",
+        "status_history": [
+            {
+                "from_status": None,
+                "to_status": "proposed",
+                "at": now,
+                "reason": "Created",
+            }
+        ],
+        "dependencies": [],
+        "covered_tasks": [],
+        "evidence": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def create_plan(root: Path, title: str) -> dict[str, Any]:
+    """Create a new plan with an optional initial stage.
+
+    Args:
+        root: Project root.
+        title: Human-readable plan title.
+
+    Returns:
+        Dict with plan_id, title, and stages.
+
+    Raises:
+        RuntimeError if the plan cannot be created.
+    """
+    ensure_workspace(root)
+    now = utc_now()
+    date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with workflow_mutation_lock(root):
+        plan_id = unique_readable_id(
+            [plans_dir(root)],
+            f"{date_prefix}-{slugify(title)}-plan",
+            suffix="",
+        )
+
+        plan_dir = plan_path(root, plan_id)
+        plan_dir.mkdir(parents=True, exist_ok=False)
+
+        plan_data = default_plan_data(plan_id, title)
+        write_json_atomic(plan_dir / "plan.json", plan_data)
+
+    append_workspace_event(
+        root,
+        "plan_created",
+        "plan",
+        plan_id,
+        f"Created plan '{title}' ({plan_id})",
+    )
+
+    return {
+        "plan_id": plan_id,
+        "title": title,
+        "stages": [],
+    }
+
+
+def _load_plan(root: Path, plan_id: str) -> dict[str, Any]:
+    """Load plan data, raising FileNotFoundError if missing."""
+    pdir = plan_path(root, plan_id)
+    json_path = pdir / "plan.json"
+    if not json_path.is_file():
+        raise FileNotFoundError(f"Plan not found: {plan_id}")
+    return read_json(json_path)
+
+
+def _save_plan(root: Path, plan_data: dict[str, Any]) -> None:
+    """Atomically write plan data to disk."""
+    pdir = plan_path(root, plan_data["id"])
+    pdir.mkdir(parents=True, exist_ok=True)
+    plan_data["updated_at"] = utc_now()
+    write_json_atomic(pdir / "plan.json", plan_data)
+
+
+def read_plan(root: Path, plan_id: str) -> dict[str, Any]:
+    """Read and return plan data."""
+    return _load_plan(root, plan_id)
+
+
+def list_plans(root: Path) -> list[dict[str, Any]]:
+    """List all plans with summary info."""
+    ensure_workspace(root)
+    pdir = plans_dir(root)
+    if not pdir.exists():
+        return []
+    result = []
+    for entry in sorted(pdir.iterdir()):
+        if not entry.is_dir():
+            continue
+        json_path = entry / "plan.json"
+        if not json_path.is_file():
+            continue
+        plan = read_json(json_path)
+        result.append({
+            "plan_id": plan.get("id", entry.name),
+            "title": plan.get("title", ""),
+            "stage_count": len(plan.get("stages", [])),
+            "suggestion_count": len(plan.get("suggestions", {})),
+            "created_at": plan.get("created_at", ""),
+            "updated_at": plan.get("updated_at", ""),
+        })
+    return result
+
+
+def add_plan_stage(
+    root: Path,
+    plan_id: str,
+    stage_id: str,
+    title: str,
+) -> dict[str, Any]:
+    """Add a stage to an existing plan.
+
+    Args:
+        root: Project root.
+        plan_id: Existing plan id.
+        stage_id: Machine-readable stage id (e.g. 'phase-1').
+        title: Human-readable stage title.
+
+    Returns:
+        Updated plan data.
+
+    Raises:
+        FileNotFoundError: Plan does not exist.
+        ValueError: Stage id already exists in plan.
+    """
+    with workflow_mutation_lock(root):
+        plan = _load_plan(root, plan_id)
+        stages = plan.setdefault("stages", [])
+        if any(s["id"] == stage_id for s in stages):
+            raise ValueError(
+                f"Stage '{stage_id}' already exists in plan '{plan_id}'"
+            )
+        order = len(stages) + 1
+        stages.append({
+            "id": stage_id,
+            "title": title,
+            "order": order,
+        })
+        _save_plan(root, plan)
+
+    append_workspace_event(
+        root,
+        "plan_stage_added",
+        "plan",
+        plan_id,
+        f"Added stage '{stage_id}' to plan '{plan_id}'",
+    )
+
+    return plan
+
+
+def add_plan_suggestion(
+    root: Path,
+    plan_id: str,
+    stage_id: str,
+    verbatim_text: str,
+    *,
+    dependencies: list[str] | None = None,
+) -> dict[str, Any]:
+    """Add a verbatim suggestion to a plan stage.
+
+    The suggestion text is preserved verbatim as provided. A suggestion id
+    is auto-generated from the plan and stage.
+
+    Args:
+        root: Project root.
+        plan_id: Existing plan id.
+        stage_id: Existing stage id within the plan.
+        verbatim_text: The exact user original text, preserved as-is.
+        dependencies: Optional list of existing suggestion ids this depends on.
+
+    Returns:
+        Dict with suggestion_id and updated plan data.
+
+    Raises:
+        FileNotFoundError: Plan does not exist.
+        ValueError: Stage id not found.
+    """
+    with workflow_mutation_lock(root):
+        plan = _load_plan(root, plan_id)
+        stages = plan.get("stages", [])
+        if not any(s["id"] == stage_id for s in stages):
+            raise ValueError(
+                f"Stage '{stage_id}' not found in plan '{plan_id}'. "
+                f"Known stages: {', '.join(s['id'] for s in stages)}"
+            )
+
+        suggestions = plan.setdefault("suggestions", {})
+        suggestion_order = plan.setdefault("suggestion_order", [])
+
+        # Build suggestion id
+        slug = slugify(verbatim_text[:40])
+        base_id = f"sug-{slug}"
+        suggestion_id = base_id
+        existing_ids = set(suggestions.keys())
+        if suggestion_id in existing_ids:
+            for _ in range(100):
+                candidate = f"{base_id}-{uuid.uuid4().hex[:6]}"
+                if candidate not in existing_ids:
+                    suggestion_id = candidate
+                    break
+            else:
+                raise RuntimeError(f"Could not generate unique suggestion id")
+
+        # Validate dependencies point to existing suggestions
+        if dependencies:
+            for dep_id in dependencies:
+                if dep_id not in suggestions:
+                    raise ValueError(
+                        f"Dependency suggestion '{dep_id}' not found in plan '{plan_id}'"
+                    )
+
+        sug_data = default_suggestion_data(suggestion_id, stage_id, verbatim_text)
+        if dependencies:
+            sug_data["dependencies"] = list(dependencies)
+        suggestions[suggestion_id] = sug_data
+        suggestion_order.append(suggestion_id)
+        _save_plan(root, plan)
+
+    append_workspace_event(
+        root,
+        "plan_suggestion_added",
+        "plan",
+        plan_id,
+        f"Added suggestion '{suggestion_id}' to stage '{stage_id}'",
+    )
+
+    return {
+        "suggestion_id": suggestion_id,
+        "plan": plan,
+    }
+
+
+def update_suggestion_status(
+    root: Path,
+    plan_id: str,
+    suggestion_id: str,
+    new_status: str,
+    *,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Update suggestion status, preserving history.
+
+    Args:
+        root: Project root.
+        plan_id: Existing plan id.
+        suggestion_id: Existing suggestion id within the plan.
+        new_status: One of VALID_SUGGESTION_STATUSES.
+        reason: Optional human-readable reason for the transition.
+
+    Returns:
+        Updated plan data.
+
+    Raises:
+        FileNotFoundError: Plan does not exist.
+        ValueError: Invalid status or suggestion not found.
+    """
+    if new_status not in VALID_SUGGESTION_STATUSES:
+        raise ValueError(
+            f"Invalid suggestion status '{new_status}'. "
+            f"Valid: {', '.join(sorted(VALID_SUGGESTION_STATUSES))}"
+        )
+
+    with workflow_mutation_lock(root):
+        plan = _load_plan(root, plan_id)
+        suggestions = plan.get("suggestions", {})
+        if suggestion_id not in suggestions:
+            raise ValueError(
+                f"Suggestion '{suggestion_id}' not found in plan '{plan_id}'"
+            )
+
+        sug = suggestions[suggestion_id]
+        from_status = sug["status"]
+        if from_status == new_status:
+            raise ValueError(
+                f"Suggestion '{suggestion_id}' status is already '{new_status}'"
+            )
+
+        now = utc_now()
+        sug["status"] = new_status
+        history = sug.setdefault("status_history", [])
+        history.append({
+            "from_status": from_status,
+            "to_status": new_status,
+            "at": now,
+            "reason": reason or "",
+        })
+        sug["updated_at"] = now
+        suggestions[suggestion_id] = sug
+        _save_plan(root, plan)
+
+    append_workspace_event(
+        root,
+        "plan_suggestion_status_updated",
+        "plan",
+        plan_id,
+        f"Updated suggestion '{suggestion_id}' status: {from_status} -> {new_status}",
+        from_status=from_status,
+        to_status=new_status,
+    )
+
+    return plan
+
+
+def add_task_to_plan(
+    root: Path,
+    plan_id: str,
+    suggestion_id: str,
+    task_id: str,
+) -> dict[str, Any]:
+    """Associate an existing task with a plan suggestion.
+
+    The plan is the authoritative source of truth for task-plan association
+    (via each suggestion's ``covered_tasks`` list). The task's ``plan_id``
+    is a convenience field set before the plan save, so a write failure
+    never leaves the plan referencing a task whose ``plan_id`` is stale.
+    If the plan save fails after the task was updated, the task write is
+    rolled back.  All writes happen inside the same mutation lock.
+
+    Args:
+        root: Project root.
+        plan_id: Existing plan id.
+        suggestion_id: Existing suggestion id within the plan.
+        task_id: Existing task id (active or archived).
+
+    Returns:
+        Updated plan data.
+
+    Raises:
+        FileNotFoundError: Plan or task not found.
+        ValueError: Suggestion not found in plan.
+    """
+    # Verify task exists (validation before lock -- cheap idempotent check)
+    tpath = find_task_json_path(root, task_id)
+    if tpath is None:
+        raise FileNotFoundError(f"Task not found: {task_id}")
+
+    with workflow_mutation_lock(root):
+        plan = _load_plan(root, plan_id)
+        suggestions = plan.get("suggestions", {})
+        if suggestion_id not in suggestions:
+            raise ValueError(
+                f"Suggestion '{suggestion_id}' not found in plan '{plan_id}'"
+            )
+
+        sug = suggestions[suggestion_id]
+        covered = sug.setdefault("covered_tasks", [])
+        if task_id not in covered:
+            covered.append(task_id)
+        suggestions[suggestion_id] = sug
+
+        # Write task.plan_id FIRST (non-authoritative convenience field).
+        # If this write fails the exception propagates before the plan is
+        # saved, so there is no inconsistency.
+        active_path = tasks_dir(root) / "active" / task_id / "task.json"
+        task_was_modified = False
+        if active_path.is_file():
+            task_data = read_json(active_path)
+            if task_data.get("plan_id") is None:
+                task_data["plan_id"] = plan_id
+                write_json_atomic(active_path, task_data)
+                task_was_modified = True
+
+        # Save plan LAST (authoritative commit point).
+        try:
+            _save_plan(root, plan)
+        except Exception:
+            # Rollback: restore task.plan_id if we changed it.
+            if task_was_modified and active_path.is_file():
+                task_data = read_json(active_path)
+                task_data["plan_id"] = None
+                write_json_atomic(active_path, task_data)
+            raise
+
+    append_workspace_event(
+        root,
+        "plan_task_added",
+        "plan",
+        plan_id,
+        f"Associated task '{task_id}' with suggestion '{suggestion_id}'",
+    )
+
+    return plan
+
+
+def add_plan_evidence(
+    root: Path,
+    plan_id: str,
+    suggestion_id: str,
+    evidence_text: str,
+) -> dict[str, Any]:
+    """Record completion evidence for a suggestion.
+
+    Args:
+        root: Project root.
+        plan_id: Existing plan id.
+        suggestion_id: Existing suggestion id within the plan.
+        evidence_text: Evidence of completion.
+
+    Returns:
+        Updated plan data.
+
+    Raises:
+        FileNotFoundError: Plan does not exist.
+        ValueError: Suggestion not found.
+    """
+    with workflow_mutation_lock(root):
+        plan = _load_plan(root, plan_id)
+        suggestions = plan.get("suggestions", {})
+        if suggestion_id not in suggestions:
+            raise ValueError(
+                f"Suggestion '{suggestion_id}' not found in plan '{plan_id}'"
+            )
+
+        sug = suggestions[suggestion_id]
+        evidence = sug.setdefault("evidence", [])
+        if evidence_text not in evidence:
+            evidence.append(evidence_text)
+        sug["updated_at"] = utc_now()
+        suggestions[suggestion_id] = sug
+        _save_plan(root, plan)
+
+    append_workspace_event(
+        root,
+        "plan_evidence_added",
+        "plan",
+        plan_id,
+        f"Added evidence to suggestion '{suggestion_id}'",
+    )
+
+    return plan

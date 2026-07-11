@@ -2,8 +2,10 @@ import json
 import re
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import sys
 
@@ -14,20 +16,27 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from workflow_core import (
     acquire_lock,
+    add_plan_evidence,
+    add_plan_stage,
+    add_plan_suggestion,
+    add_task_to_plan,
     archive_task,
     cleanup_completed_task,
     complete_verification,
     create_followup,
     create_intake,
+    create_plan,
     create_validation_revision,
     ensure_workspace,
     knowledge_dir,
+    list_plans,
     list_unfinished_tasks,
     locks_path,
     mark_task,
     parse_markdown_clarification_fields,
     promote_to_task,
     read_json,
+    read_plan,
     select_task,
     start_execution,
     start_reflection,
@@ -35,6 +44,8 @@ from workflow_core import (
     state_dir,
     tasks_dir,
     task_event_path,
+    update_intake_section,
+    update_suggestion_status,
     update_task_clarification,
     write_json_atomic,
 )
@@ -4258,6 +4269,987 @@ Approach from markdown (should be overridden).
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "error")
             self.assertIn("Task not found", payload["message"])
+
+
+# ===========================================================================
+# Plan-ledger tests
+# ===========================================================================
+
+
+class PlanLedgerTests(unittest.TestCase):
+    """Tests for the plan-ledger data model and CLI operations."""
+
+    # ------------------------------------------------------------------
+    # create_plan
+    # ------------------------------------------------------------------
+
+    def test_create_plan_creates_plan_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_plan(root, "My Roadmap")
+            plan_id = result["plan_id"]
+            self.assertIn("plan_id", result)
+            self.assertEqual(result["title"], "My Roadmap")
+
+            plan_dir = root / ".just-demand" / "state" / "plans" / plan_id
+            self.assertTrue((plan_dir / "plan.json").is_file())
+
+            plan = read_json(plan_dir / "plan.json")
+            self.assertEqual(plan["title"], "My Roadmap")
+            self.assertEqual(plan["stages"], [])
+            self.assertEqual(plan["suggestions"], {})
+            self.assertIn("created_at", plan)
+
+    def test_create_plan_emits_workspace_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            create_plan(root, "Event Test")
+
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            types = [json.loads(e)["type"] for e in events if e]
+            self.assertIn("plan_created", types)
+
+    def test_create_plan_unique_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = create_plan(root, "Same Title")
+            second = create_plan(root, "Same Title")
+            self.assertNotEqual(first["plan_id"], second["plan_id"])
+
+    # ------------------------------------------------------------------
+    # read_plan / list_plans
+    # ------------------------------------------------------------------
+
+    def test_list_plans_returns_plan_summaries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            create_plan(root, "Plan A")
+            create_plan(root, "Plan B")
+
+            plans = list_plans(root)
+            self.assertEqual(len(plans), 2)
+            titles = {p["title"] for p in plans}
+            self.assertIn("Plan A", titles)
+            self.assertIn("Plan B", titles)
+
+    def test_list_plans_empty_when_no_plans(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            self.assertEqual(list_plans(root), [])
+
+    def test_read_plan_returns_plan_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            created = create_plan(root, "Readable Plan")
+            plan = read_plan(root, created["plan_id"])
+            self.assertEqual(plan["title"], "Readable Plan")
+
+    def test_read_plan_missing_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            with self.assertRaises(FileNotFoundError):
+                read_plan(root, "nonexistent-plan")
+
+    # ------------------------------------------------------------------
+    # add_plan_stage
+    # ------------------------------------------------------------------
+
+    def test_add_plan_stage_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Stage Test")
+            plan_id = plan["plan_id"]
+
+            updated = add_plan_stage(root, plan_id, "phase-1", "Discovery")
+            stages = updated["stages"]
+            self.assertEqual(len(stages), 1)
+            self.assertEqual(stages[0]["id"], "phase-1")
+            self.assertEqual(stages[0]["title"], "Discovery")
+            self.assertEqual(stages[0]["order"], 1)
+
+    def test_add_plan_stage_sequential_ordering(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Order Test")
+            plan_id = plan["plan_id"]
+
+            add_plan_stage(root, plan_id, "a", "Stage A")
+            add_plan_stage(root, plan_id, "b", "Stage B")
+            add_plan_stage(root, plan_id, "c", "Stage C")
+
+            updated = read_plan(root, plan_id)
+            orders = [s["order"] for s in updated["stages"]]
+            self.assertEqual(orders, [1, 2, 3])
+
+    def test_add_plan_stage_duplicate_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Dup Stage")
+            add_plan_stage(root, plan["plan_id"], "phase-1", "First")
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                add_plan_stage(root, plan["plan_id"], "phase-1", "Duplicate")
+
+    def test_add_plan_stage_missing_plan_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            with self.assertRaises(FileNotFoundError):
+                add_plan_stage(root, "nonexistent", "s1", "Stage")
+
+    def test_add_plan_stage_emits_workspace_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Event Stage")
+            add_plan_stage(root, plan["plan_id"], "s1", "Stage One")
+
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            types = [json.loads(e)["type"] for e in events if e]
+            self.assertIn("plan_stage_added", types)
+
+    # ------------------------------------------------------------------
+    # add_plan_suggestion — verbatim text retention
+    # ------------------------------------------------------------------
+
+    def test_add_suggestion_preserves_verbatim_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Sug Test")
+            plan_id = plan["plan_id"]
+            add_plan_stage(root, plan_id, "phase-1", "Phase 1")
+
+            verbatim = "We should use event-driven architecture for the notification service."
+            result = add_plan_suggestion(root, plan_id, "phase-1", verbatim)
+            sug_id = result["suggestion_id"]
+
+            plan_data = read_plan(root, plan_id)
+            sug = plan_data["suggestions"][sug_id]
+            self.assertEqual(sug["verbatim_text"], verbatim)
+
+    def test_add_suggestion_defaults_to_proposed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Default Status")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            result = add_plan_suggestion(root, plan["plan_id"], "p1", "Some suggestion")
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][result["suggestion_id"]]
+            self.assertEqual(sug["status"], "proposed")
+
+    def test_add_suggestion_records_initial_status_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Status History")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            result = add_plan_suggestion(root, plan["plan_id"], "p1", "Initial suggestion")
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][result["suggestion_id"]]
+            self.assertEqual(len(sug["status_history"]), 1)
+            entry = sug["status_history"][0]
+            self.assertIsNone(entry["from_status"])
+            self.assertEqual(entry["to_status"], "proposed")
+            self.assertIn("at", entry)
+
+    def test_add_suggestion_unknown_stage_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Bad Stage")
+            with self.assertRaisesRegex(ValueError, "Stage 'ghost' not found"):
+                add_plan_suggestion(root, plan["plan_id"], "ghost", "Text")
+
+    def test_add_suggestion_unknown_plan_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            with self.assertRaises(FileNotFoundError):
+                add_plan_suggestion(root, "nonexistent", "s1", "Text")
+
+    def test_add_suggestion_with_dependencies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Dep Test")
+            plan_id = plan["plan_id"]
+            add_plan_stage(root, plan_id, "p1", "Phase 1")
+            r1 = add_plan_suggestion(root, plan_id, "p1", "First suggestion")
+            r2 = add_plan_suggestion(root, plan_id, "p1", "Second suggestion",
+                                      dependencies=[r1["suggestion_id"]])
+            plan_data = read_plan(root, plan_id)
+            sug2 = plan_data["suggestions"][r2["suggestion_id"]]
+            self.assertIn(r1["suggestion_id"], sug2["dependencies"])
+
+    def test_add_suggestion_invalid_dependency_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Bad Dep")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            with self.assertRaisesRegex(ValueError, "Dependency suggestion 'nonexistent' not found"):
+                add_plan_suggestion(root, plan["plan_id"], "p1", "Text",
+                                    dependencies=["nonexistent"])
+
+    def test_add_suggestion_emits_workspace_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Sug Event")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            add_plan_suggestion(root, plan["plan_id"], "p1", "Event suggestion")
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            types = [json.loads(e)["type"] for e in events if e]
+            self.assertIn("plan_suggestion_added", types)
+
+    # ------------------------------------------------------------------
+    # update_suggestion_status — status history
+    # ------------------------------------------------------------------
+
+    def test_update_suggestion_status_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Status Update")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Updatable suggestion")
+            sug_id = r["suggestion_id"]
+
+            update_suggestion_status(root, plan["plan_id"], sug_id, "accepted",
+                                      reason="Approved by team")
+
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][sug_id]
+            self.assertEqual(sug["status"], "accepted")
+
+    def test_update_suggestion_status_preserves_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "History Chain")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "History suggestion")
+            sug_id = r["suggestion_id"]
+
+            update_suggestion_status(root, plan["plan_id"], sug_id, "accepted",
+                                      reason="Approved")
+            update_suggestion_status(root, plan["plan_id"], sug_id, "implemented",
+                                      reason="Done")
+
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][sug_id]
+            # Initial creation + 2 transitions = 3 entries
+            self.assertEqual(len(sug["status_history"]), 3)
+            self.assertEqual(sug["status_history"][1]["from_status"], "proposed")
+            self.assertEqual(sug["status_history"][1]["to_status"], "accepted")
+            self.assertEqual(sug["status_history"][2]["from_status"], "accepted")
+            self.assertEqual(sug["status_history"][2]["to_status"], "implemented")
+
+    def test_update_suggestion_status_invalid_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Bad Status")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Suggestion")
+            with self.assertRaisesRegex(ValueError, "Invalid suggestion status"):
+                update_suggestion_status(root, plan["plan_id"], r["suggestion_id"], "bogus")
+
+    def test_update_suggestion_status_unknown_suggestion_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Missing Sug")
+            with self.assertRaisesRegex(ValueError, "not found"):
+                update_suggestion_status(root, plan["plan_id"], "nonexistent", "accepted")
+
+    def test_update_suggestion_status_same_status_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Same Status")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Suggestion")
+            with self.assertRaisesRegex(ValueError, "already"):
+                update_suggestion_status(root, plan["plan_id"], r["suggestion_id"], "proposed")
+
+    def test_update_suggestion_status_emits_event_with_from_to(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Status Event")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Suggestion")
+            sug_id = r["suggestion_id"]
+
+            update_suggestion_status(root, plan["plan_id"], sug_id, "accepted",
+                                      reason="Team approved")
+
+            raw_events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            events = [json.loads(e) for e in raw_events if e]
+            status_events = [e for e in events if e["type"] == "plan_suggestion_status_updated"]
+            self.assertEqual(len(status_events), 1)
+            self.assertEqual(status_events[0]["from_status"], "proposed")
+            self.assertEqual(status_events[0]["to_status"], "accepted")
+
+    # ------------------------------------------------------------------
+    # add_task_to_plan — task association
+    # ------------------------------------------------------------------
+
+    def test_add_task_to_plan_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Task Assoc")
+            plan_id = plan["plan_id"]
+            add_plan_stage(root, plan_id, "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan_id, "p1", "Needs implementation")
+
+            # Create a task
+            intake = create_intake(root, "Task for plan", "Implement the suggestion", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "Scope")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "Works")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. Do it")
+            update_intake_section(root, intake["intake_id"], "Approval", "Approved")
+            task = promote_to_task(root, intake["intake_id"], "Plan task", "Implement", "design",
+                                    ["Works"])
+            task_id = task["task_id"]
+
+            result = add_task_to_plan(root, plan_id, r["suggestion_id"], task_id)
+            plan_data = read_plan(root, plan_id)
+            sug = plan_data["suggestions"][r["suggestion_id"]]
+            self.assertIn(task_id, sug["covered_tasks"])
+
+    def test_add_task_to_plan_sets_plan_id_on_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Plan ID Test")
+            plan_id = plan["plan_id"]
+            add_plan_stage(root, plan_id, "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan_id, "p1", "Suggestion with task")
+
+            intake = create_intake(root, "Plan ID task", "Task under plan", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "Scope")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "Works")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. Do it")
+            update_intake_section(root, intake["intake_id"], "Approval", "Approved")
+            task = promote_to_task(root, intake["intake_id"], "Plan ID task", "Implement", "design",
+                                    ["Works"])
+            task_id = task["task_id"]
+
+            add_task_to_plan(root, plan_id, r["suggestion_id"], task_id)
+            task_data = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertEqual(task_data["plan_id"], plan_id)
+
+    def test_add_task_to_plan_unknown_plan_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            with self.assertRaises(FileNotFoundError):
+                add_task_to_plan(root, "nonexistent", "sug-1", "task-1")
+
+    def test_add_task_to_plan_unknown_task_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Unknown task")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Suggestion")
+            with self.assertRaises(FileNotFoundError):
+                add_task_to_plan(root, plan["plan_id"], r["suggestion_id"], "nonexistent-task")
+
+    def test_add_task_to_plan_emits_workspace_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Task Event")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Suggestion")
+
+            intake = create_intake(root, "Event task", "Task", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "Scope")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "Works")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. Do it")
+            update_intake_section(root, intake["intake_id"], "Approval", "Approved")
+            task = promote_to_task(root, intake["intake_id"], "Event task", "Task", "design",
+                                    ["Works"])
+
+            add_task_to_plan(root, plan["plan_id"], r["suggestion_id"], task["task_id"])
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            types = [json.loads(e)["type"] for e in events if e]
+            self.assertIn("plan_task_added", types)
+
+    # ------------------------------------------------------------------
+    # add_plan_evidence
+    # ------------------------------------------------------------------
+
+    def test_add_evidence_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Evidence Test")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Suggestion")
+
+            add_plan_evidence(root, plan["plan_id"], r["suggestion_id"],
+                               "Implementation completed in PR #42")
+
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][r["suggestion_id"]]
+            self.assertIn("Implementation completed in PR #42", sug["evidence"])
+
+    def test_add_evidence_accumulates_multiple_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Multi Evidence")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Suggestion")
+            sug_id = r["suggestion_id"]
+
+            add_plan_evidence(root, plan["plan_id"], sug_id, "Evidence A")
+            add_plan_evidence(root, plan["plan_id"], sug_id, "Evidence B")
+
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][sug_id]
+            self.assertEqual(len(sug["evidence"]), 2)
+            self.assertIn("Evidence A", sug["evidence"])
+            self.assertIn("Evidence B", sug["evidence"])
+
+    def test_add_evidence_unknown_suggestion_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Bad Evidence")
+            with self.assertRaisesRegex(ValueError, "not found"):
+                add_plan_evidence(root, plan["plan_id"], "nonexistent-sug", "Evidence")
+
+    def test_add_evidence_emits_workspace_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Evidence Event")
+            add_plan_stage(root, plan["plan_id"], "p1", "Phase 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "p1", "Suggestion")
+            add_plan_evidence(root, plan["plan_id"], r["suggestion_id"], "Done")
+
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            types = [json.loads(e)["type"] for e in events if e]
+            self.assertIn("plan_evidence_added", types)
+
+    # ------------------------------------------------------------------
+    # Task compatibility: tasks without plan_id remain unchanged
+    # ------------------------------------------------------------------
+
+    def test_existing_task_optional_plan_id_is_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Old task", "No plan", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "Scope")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "Works")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. Do it")
+            update_intake_section(root, intake["intake_id"], "Approval", "Approved")
+            task = promote_to_task(root, intake["intake_id"], "Old task", "No plan", "design",
+                                    ["Works"])
+            task_data = read_json(tasks_dir(root) / "active" / task["task_id"] / "task.json")
+            # plan_id should be present and None by default
+            self.assertIn("plan_id", task_data)
+            self.assertIsNone(task_data["plan_id"])
+
+    def test_old_task_still_works_without_plan(self):
+        """Tasks without a plan behave exactly as before — no plan-related changes affect them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            # Full lifecycle without any plan involvement
+            intake = create_intake(root, "No plan task", "Task without plan", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "Scope")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "Works")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. Do it")
+            update_intake_section(root, intake["intake_id"], "Approval", "Approved")
+            task = promote_to_task(root, intake["intake_id"], "No plan task", "Without plan",
+                                    "design", ["Works"])
+            task_id = task["task_id"]
+
+            create_validation_revision(root, task_id, "No plan.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            mark_task(root, task_id, "executing", progress=50)
+            complete_verification(root, task_id, "passed", "Done", auto_archive=False)
+
+            task_data = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertEqual(task_data["status"], "done")
+            self.assertIsNone(task_data["plan_id"])
+
+    # ------------------------------------------------------------------
+    # Invalid input handling
+    # ------------------------------------------------------------------
+
+    def test_create_plan_empty_title(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = create_plan(root, "")
+            # Should still create a plan with sanitized slug
+            self.assertIn("plan_id", result)
+            self.assertTrue(result["plan_id"].endswith("-plan"))
+
+    def test_add_suggestion_empty_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Empty text")
+            add_plan_stage(root, plan["plan_id"], "s1", "Stage 1")
+            # Empty text is allowed (it's preserved verbatim)
+            result = add_plan_suggestion(root, plan["plan_id"], "s1", "")
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][result["suggestion_id"]]
+            self.assertEqual(sug["verbatim_text"], "")
+
+    # ------------------------------------------------------------------
+    # Workspace events integration
+    # ------------------------------------------------------------------
+
+    def test_plan_events_logged_in_workspace_events(self):
+        """All plan operations emit workspace events with correct types."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Full Event Test")
+            plan_id = plan["plan_id"]
+            add_plan_stage(root, plan_id, "p1", "Phase 1")
+
+            r = add_plan_suggestion(root, plan_id, "p1", "Suggest something")
+            sug_id = r["suggestion_id"]
+
+            update_suggestion_status(root, plan_id, sug_id, "accepted", reason="OK")
+            add_plan_evidence(root, plan_id, sug_id, "Evidence here")
+
+            intake = create_intake(root, "Plan event task", "Task", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "Scope")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "Works")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. Do it")
+            update_intake_section(root, intake["intake_id"], "Approval", "Approved")
+            task = promote_to_task(root, intake["intake_id"], "Event task", "Task", "design",
+                                    ["Works"])
+            add_task_to_plan(root, plan_id, sug_id, task["task_id"])
+
+            events = (state_dir(root) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            event_types = [json.loads(e)["type"] for e in events if e]
+            for expected_type in ["plan_created", "plan_stage_added", "plan_suggestion_added",
+                                   "plan_suggestion_status_updated", "plan_evidence_added",
+                                   "plan_task_added"]:
+                with self.subTest(event_type=expected_type):
+                    self.assertIn(expected_type, event_types)
+
+    # ------------------------------------------------------------------
+    # CLI integration tests
+    # ------------------------------------------------------------------
+
+    def _run_cli(self, root: Path, *args: str) -> dict:
+        import subprocess
+        script = REPO_ROOT / "just-demand"
+        result = subprocess.run(
+            [sys.executable, str(script), str(root), *args],
+            text=True, capture_output=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"CLI error ({result.returncode}): {result.stdout} {result.stderr}")
+        return json.loads(result.stdout)
+
+    def test_cli_create_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = self._run_cli(root, "create-plan", "CLI Plan")
+            self.assertIn("plan_id", payload)
+            self.assertEqual(payload["title"], "CLI Plan")
+
+            # Verify it's persisted
+            plans = list_plans(root)
+            self.assertEqual(len(plans), 1)
+
+    def test_cli_list_plans(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run_cli(root, "create-plan", "Plan One")
+            self._run_cli(root, "create-plan", "Plan Two")
+            payload = self._run_cli(root, "list-plans")
+            self.assertEqual(len(payload["plans"]), 2)
+
+    def test_cli_show_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Showable Plan")
+            plan_id = plan["plan_id"]
+            add_plan_stage(root, plan_id, "s1", "Stage 1")
+
+            payload = self._run_cli(root, "show-plan", plan_id)
+            self.assertEqual(payload["title"], "Showable Plan")
+            self.assertEqual(len(payload["stages"]), 1)
+
+    def test_cli_add_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "CLI Stage")
+            payload = self._run_cli(root, "add-stage", plan["plan_id"], "phase-x", "Phase X")
+            stages = payload["stages"]
+            self.assertEqual(len(stages), 1)
+            self.assertEqual(stages[0]["id"], "phase-x")
+
+    def test_cli_add_suggestion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "CLI Sug")
+            add_plan_stage(root, plan["plan_id"], "s1", "Stage 1")
+            payload = self._run_cli(root, "add-suggestion", plan["plan_id"], "s1",
+                                     "Verbatim suggestion from CLI")
+            self.assertIn("suggestion_id", payload)
+
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][payload["suggestion_id"]]
+            self.assertEqual(sug["verbatim_text"], "Verbatim suggestion from CLI")
+
+    def test_cli_update_suggestion_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "CLI Status")
+            add_plan_stage(root, plan["plan_id"], "s1", "Stage 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "s1", "Status suggestion")
+            sug_id = r["suggestion_id"]
+
+            payload = self._run_cli(root, "update-suggestion-status", plan["plan_id"],
+                                     sug_id, "accepted", "--reason", "CLI approved")
+            self.assertEqual(payload["suggestions"][sug_id]["status"], "accepted")
+
+    def test_cli_add_task_to_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "CLI Task")
+            add_plan_stage(root, plan["plan_id"], "s1", "Stage 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "s1", "Task suggestion")
+
+            intake = create_intake(root, "CLI plan task", "Task", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "Scope")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "Works")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. Do it")
+            update_intake_section(root, intake["intake_id"], "Approval", "Approved")
+            task = promote_to_task(root, intake["intake_id"], "CLI plan task", "Task", "design",
+                                    ["Works"])
+
+            self._run_cli(root, "add-task-to-plan", plan["plan_id"], r["suggestion_id"],
+                           task["task_id"])
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][r["suggestion_id"]]
+            self.assertIn(task["task_id"], sug["covered_tasks"])
+
+    def test_cli_add_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "CLI Evidence")
+            add_plan_stage(root, plan["plan_id"], "s1", "Stage 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "s1", "Evidence suggestion")
+            sug_id = r["suggestion_id"]
+
+            payload = self._run_cli(root, "add-evidence", plan["plan_id"], sug_id,
+                                     "CLI evidence recorded")
+            plan_data = read_plan(root, plan["plan_id"])
+            sug = plan_data["suggestions"][sug_id]
+            self.assertIn("CLI evidence recorded", sug["evidence"])
+
+    def test_cli_invalid_plan_shows_error(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "show-plan", "nonexistent"],
+                text=True, capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+
+    def test_cli_invalid_status_shows_error(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            # Need a plan and suggestion first
+            plan = create_plan(root, "Error Test")
+            add_plan_stage(root, plan["plan_id"], "s1", "Stage 1")
+            r = add_plan_suggestion(root, plan["plan_id"], "s1", "Suggestion")
+
+            script = REPO_ROOT / "just-demand"
+            result = subprocess.run(
+                [sys.executable, str(script), str(root), "update-suggestion-status",
+                 plan["plan_id"], r["suggestion_id"], "bogus"],
+                text=True, capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "error")
+
+    def test_suggestion_order_is_recorded(self):
+        """Suggestions added to a plan are tracked in insertion order."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Order Test")
+            add_plan_stage(root, plan["plan_id"], "s1", "Stage 1")
+
+            r1 = add_plan_suggestion(root, plan["plan_id"], "s1", "First")
+            r2 = add_plan_suggestion(root, plan["plan_id"], "s1", "Second")
+            r3 = add_plan_suggestion(root, plan["plan_id"], "s1", "Third")
+
+            plan_data = read_plan(root, plan["plan_id"])
+            order = plan_data.get("suggestion_order", [])
+            self.assertEqual(order, [r1["suggestion_id"], r2["suggestion_id"], r3["suggestion_id"]])
+
+    # ── Concurrency regression tests ──────────────────────────────────────
+
+    def test_concurrent_suggestion_additions_preserve_all_data(self):
+        """Parallel add_plan_suggestion calls must both succeed (read-modify-write race)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Concurrency Suggestion")
+            pid = plan["plan_id"]
+            add_plan_stage(root, pid, "phase-1", "Phase 1")
+
+            results: list[dict] = []
+            errors: list[Exception] = []
+            lock = threading.Lock()
+
+            def add_one(text: str) -> None:
+                try:
+                    r = add_plan_suggestion(root, pid, "phase-1", text)
+                    with lock:
+                        results.append(r)
+                except Exception as e:
+                    with lock:
+                        errors.append(e)
+
+            t1 = threading.Thread(target=add_one, args=("Suggestion A",))
+            t2 = threading.Thread(target=add_one, args=("Suggestion B",))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            self.assertEqual(len(errors), 0, f"Concurrent suggestion errors: {errors}")
+            self.assertEqual(len(results), 2)
+
+            plan_data = read_plan(root, pid)
+            sug_ids = {r["suggestion_id"] for r in results}
+            for sid in sug_ids:
+                self.assertIn(sid, plan_data["suggestions"],
+                              f"Suggestion {sid} missing from plan after concurrent add")
+            self.assertEqual(len(plan_data["suggestions"]), 2)
+
+    def test_concurrent_stage_additions_preserve_all_stages(self):
+        """Parallel add_plan_stage calls must both succeed (read-modify-write race)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Concurrency Stage")
+            pid = plan["plan_id"]
+
+            errors: list[Exception] = []
+            lock = threading.Lock()
+
+            def add_one(stage_id: str, title: str) -> None:
+                try:
+                    add_plan_stage(root, pid, stage_id, title)
+                except Exception as e:
+                    with lock:
+                        errors.append(e)
+
+            t1 = threading.Thread(target=add_one, args=("s1", "Stage 1"))
+            t2 = threading.Thread(target=add_one, args=("s2", "Stage 2"))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            self.assertEqual(len(errors), 0, f"Concurrent stage errors: {errors}")
+
+            plan_data = read_plan(root, pid)
+            stage_ids = {s["id"] for s in plan_data.get("stages", [])}
+            self.assertIn("s1", stage_ids)
+            self.assertIn("s2", stage_ids)
+
+    def test_concurrent_suggestion_status_updates(self):
+        """Parallel update_suggestion_status must not lose transitions."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Concurrency Status")
+            pid = plan["plan_id"]
+            add_plan_stage(root, pid, "s1", "Stage 1")
+            r1 = add_plan_suggestion(root, pid, "s1", "Suggestion A")
+            r2 = add_plan_suggestion(root, pid, "s1", "Suggestion B")
+            sid_a = r1["suggestion_id"]
+            sid_b = r2["suggestion_id"]
+
+            errors: list[Exception] = []
+            lock = threading.Lock()
+
+            def accept_a() -> None:
+                try:
+                    update_suggestion_status(root, pid, sid_a, "accepted", reason="Approved")
+                except Exception as e:
+                    with lock:
+                        errors.append(e)
+
+            def accept_b() -> None:
+                try:
+                    update_suggestion_status(root, pid, sid_b, "accepted", reason="Approved")
+                except Exception as e:
+                    with lock:
+                        errors.append(e)
+
+            t1 = threading.Thread(target=accept_a)
+            t2 = threading.Thread(target=accept_b)
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            self.assertEqual(len(errors), 0, f"Concurrent status errors: {errors}")
+
+            plan_data = read_plan(root, pid)
+            self.assertEqual(plan_data["suggestions"][sid_a]["status"], "accepted")
+            self.assertEqual(plan_data["suggestions"][sid_b]["status"], "accepted")
+
+    # ── Fault injection tests for add_task_to_plan ─────────────────────────
+
+    def test_add_task_to_plan_task_write_failure_no_inconsistency(self):
+        """Simulate task JSON write failure; plan must not reference the task."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Fault Task")
+            pid = plan["plan_id"]
+            add_plan_stage(root, pid, "s1", "Stage 1")
+            r = add_plan_suggestion(root, pid, "s1", "Suggestion")
+
+            intake = create_intake(root, "Fault task", "Task", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "S")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "W")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. X")
+            update_intake_section(root, intake["intake_id"], "Approval", "Y")
+            task = promote_to_task(root, intake["intake_id"], "Fault task", "T", "design", ["W"])
+            tid = task["task_id"]
+
+            # Inject failure into the task write: make write_json_atomic fail
+            # when called on the task.json path.
+            def _fail_on_task(path, data):
+                if "active" in str(path) and tid in str(path):
+                    raise OSError("Simulated task write failure")
+                return write_json_atomic(path, data)
+
+            with patch("workflow_core.write_json_atomic", side_effect=_fail_on_task):
+                with self.assertRaises(OSError):
+                    add_task_to_plan(root, pid, r["suggestion_id"], tid)
+
+            # Plan must NOT reference the failed task
+            plan_data = read_plan(root, pid)
+            sug = plan_data["suggestions"][r["suggestion_id"]]
+            self.assertNotIn(tid, sug.get("covered_tasks", []),
+                             "Plan should not reference task when task write failed")
+
+            # Task must still have plan_id = None
+            task_data = read_json(tasks_dir(root) / "active" / tid / "task.json")
+            self.assertIsNone(task_data.get("plan_id"),
+                              "Task plan_id must remain None when task write failed")
+
+    def test_add_task_to_plan_plan_write_failure_rolls_back_task(self):
+        """Simulate plan JSON write failure; task.plan_id must be rolled back."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Rollback Plan")
+            pid = plan["plan_id"]
+            add_plan_stage(root, pid, "s1", "Stage 1")
+            r = add_plan_suggestion(root, pid, "s1", "Suggestion")
+
+            intake = create_intake(root, "Rollback task", "Task", "s1")
+            update_intake_section(root, intake["intake_id"], "Scope", "S")
+            update_intake_section(root, intake["intake_id"], "Final Expected Effect", "W")
+            update_intake_section(root, intake["intake_id"], "Chosen Approach", "A")
+            update_intake_section(root, intake["intake_id"], "Final Implementation Plan", "1. X")
+            update_intake_section(root, intake["intake_id"], "Approval", "Y")
+            task = promote_to_task(root, intake["intake_id"], "Rollback task", "T", "design", ["W"])
+            tid = task["task_id"]
+
+            # Inject failure into the plan save (task write is 1st call,
+            # _save_plan → plan.json is 2nd call).
+            call_count = [0]
+
+            def _fail_on_plan_save(path, data):
+                call_count[0] += 1
+                if call_count[0] == 2:
+                    raise OSError("Simulated plan save failure")
+                return write_json_atomic(path, data)
+
+            with patch("workflow_core.write_json_atomic", side_effect=_fail_on_plan_save):
+                with self.assertRaises(OSError):
+                    add_task_to_plan(root, pid, r["suggestion_id"], tid)
+
+            # Task plan_id must be rolled back to None
+            task_data = read_json(tasks_dir(root) / "active" / tid / "task.json")
+            self.assertIsNone(task_data.get("plan_id"),
+                              "Task plan_id must be rolled back on plan save failure")
+
+            # Plan must not reference the task
+            plan_data = read_plan(root, pid)
+            sug = plan_data["suggestions"][r["suggestion_id"]]
+            self.assertNotIn(tid, sug.get("covered_tasks", []),
+                             "Plan should not reference task when plan save failed")
+
+    def test_concurrent_add_task_to_plan_preserves_all_associations(self):
+        """Parallel add_task_to_plan on different suggestions must both succeed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = create_plan(root, "Concurrent Task Assoc")
+            pid = plan["plan_id"]
+            add_plan_stage(root, pid, "s1", "Stage 1")
+            r1 = add_plan_suggestion(root, pid, "s1", "Suggestion A")
+            r2 = add_plan_suggestion(root, pid, "s1", "Suggestion B")
+            sid_a = r1["suggestion_id"]
+            sid_b = r2["suggestion_id"]
+
+            # Create two tasks
+            def _make_task(title):
+                i = create_intake(root, title, "Task", "s1")
+                update_intake_section(root, i["intake_id"], "Scope", "S")
+                update_intake_section(root, i["intake_id"], "Final Expected Effect", "W")
+                update_intake_section(root, i["intake_id"], "Chosen Approach", "A")
+                update_intake_section(root, i["intake_id"], "Final Implementation Plan", "1. X")
+                update_intake_section(root, i["intake_id"], "Approval", "Y")
+                return promote_to_task(root, i["intake_id"], title, "T", "design", ["W"])
+
+            t1 = _make_task("Concurrent task A")
+            t2 = _make_task("Concurrent task B")
+
+            errors: list[Exception] = []
+            lock = threading.Lock()
+
+            def associate_a():
+                try:
+                    add_task_to_plan(root, pid, sid_a, t1["task_id"])
+                except Exception as e:
+                    with lock:
+                        errors.append(e)
+
+            def associate_b():
+                try:
+                    add_task_to_plan(root, pid, sid_b, t2["task_id"])
+                except Exception as e:
+                    with lock:
+                        errors.append(e)
+
+            ta = threading.Thread(target=associate_a)
+            tb = threading.Thread(target=associate_b)
+            ta.start()
+            tb.start()
+            ta.join()
+            tb.join()
+
+            self.assertEqual(len(errors), 0, f"Concurrent task assoc errors: {errors}")
+
+            plan_data = read_plan(root, pid)
+            self.assertIn(t1["task_id"], plan_data["suggestions"][sid_a]["covered_tasks"])
+            self.assertIn(t2["task_id"], plan_data["suggestions"][sid_b]["covered_tasks"])
+
+            # Task plan_id must be set
+            td1 = read_json(tasks_dir(root) / "active" / t1["task_id"] / "task.json")
+            td2 = read_json(tasks_dir(root) / "active" / t2["task_id"] / "task.json")
+            self.assertEqual(td1.get("plan_id"), pid)
+            self.assertEqual(td2.get("plan_id"), pid)
 
 
 if __name__ == "__main__":

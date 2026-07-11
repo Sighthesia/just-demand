@@ -10,21 +10,29 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from workflow_core import (
+    add_plan_evidence,
+    add_plan_stage,
+    add_plan_suggestion,
+    add_task_to_plan,
     archive_task,
     cleanup_completed_task,
     complete_verification,
     create_checkpoint_commit,
     create_followup,
     create_intake,
+    create_plan,
+    list_plans,
     list_unfinished_tasks,
     mark_task,
     parse_markdown_clarification_fields,
     promote_to_task,
+    read_plan,
     select_task,
     show_task_readiness,
     start_reflection,
     start_verification,
     update_intake_section,
+    update_suggestion_status,
     update_task_clarification,
 )
 from install import (
@@ -37,20 +45,27 @@ from install import (
 
 
 COMMANDS = {
+    "add-evidence",
+    "add-stage",
+    "add-suggestion",
+    "add-task-to-plan",
     "archive-task",
     "checkpoint-commit",
     "cleanup-task",
     "complete-verification",
     "create-intake",
+    "create-plan",
     "doctor",
     "init",
     "install",
     "list-active",
+    "list-plans",
     "mark",
     "promote",
     "record-followup",
     "resume",
     "select-task",
+    "show-plan",
     "show-readiness",
     "start-reflection",
     "start-verification",
@@ -58,6 +73,7 @@ COMMANDS = {
     "update",
     "update-clarification",
     "update-intake-section",
+    "update-suggestion-status",
     "where",
 }
 
@@ -215,6 +231,43 @@ def build_parser() -> argparse.ArgumentParser:
 
     start_reflection_parser = sub.add_parser("start-reflection", help="Create structured reflection context for a task with repeated follow-ups")
     start_reflection_parser.add_argument("task_id", help="Task ID with at least 2 follow-up contexts")
+
+    # --- Plan commands ---
+    create_plan_parser = sub.add_parser("create-plan", help="Create a new plan for a multi-stage roadmap")
+    create_plan_parser.add_argument("title", help="Human-readable plan title")
+
+    show_plan = sub.add_parser("show-plan", help="Show plan details with stages and suggestions")
+    show_plan.add_argument("plan_id", help="Plan ID to show")
+
+    list_plans_parser = sub.add_parser("list-plans", help="List all plans")
+
+    add_stage = sub.add_parser("add-stage", help="Add a stage to an existing plan")
+    add_stage.add_argument("plan_id", help="Plan ID")
+    add_stage.add_argument("stage_id", help="Machine-readable stage id (e.g. 'phase-1')")
+    add_stage.add_argument("title", help="Human-readable stage title")
+
+    add_suggestion = sub.add_parser("add-suggestion", help="Add a verbatim suggestion to a plan stage")
+    add_suggestion.add_argument("plan_id", help="Plan ID")
+    add_suggestion.add_argument("stage_id", help="Stage ID within the plan")
+    add_suggestion.add_argument("text", help="Verbatim suggestion text (preserved as-is)")
+    add_suggestion.add_argument("--depends-on", action="append", default=None, dest="dependencies",
+                                 help="Suggestion ID that this depends on (repeatable)")
+
+    update_sug_status = sub.add_parser("update-suggestion-status", help="Update suggestion status with history")
+    update_sug_status.add_argument("plan_id", help="Plan ID")
+    update_sug_status.add_argument("suggestion_id", help="Suggestion ID within the plan")
+    update_sug_status.add_argument("status", help=f"New status ({', '.join(sorted(['proposed','accepted','deferred','rejected','implemented','superseded']))})")
+    update_sug_status.add_argument("--reason", default=None, help="Reason for the status change")
+
+    add_task_to_plan_parser = sub.add_parser("add-task-to-plan", help="Associate a task with a plan suggestion")
+    add_task_to_plan_parser.add_argument("plan_id", help="Plan ID")
+    add_task_to_plan_parser.add_argument("suggestion_id", help="Suggestion ID within the plan")
+    add_task_to_plan_parser.add_argument("task_id", help="Task ID to associate")
+
+    add_evidence_parser = sub.add_parser("add-evidence", help="Record completion evidence for a suggestion")
+    add_evidence_parser.add_argument("plan_id", help="Plan ID")
+    add_evidence_parser.add_argument("suggestion_id", help="Suggestion ID within the plan")
+    add_evidence_parser.add_argument("evidence", help="Evidence text")
 
     sub.add_parser("where", help="Print the global CLI path and invocation example")
 
@@ -412,6 +465,28 @@ def execute_command(root: Path, args: list[str]) -> int:
             result = show_task_readiness(root, parsed.task_id)
         elif parsed.command == "start-reflection":
             result = start_reflection(root, parsed.task_id)
+        elif parsed.command == "create-plan":
+            result = create_plan(root, parsed.title)
+        elif parsed.command == "show-plan":
+            result = read_plan(root, parsed.plan_id)
+        elif parsed.command == "list-plans":
+            result = {"plans": list_plans(root)}
+        elif parsed.command == "add-stage":
+            result = add_plan_stage(root, parsed.plan_id, parsed.stage_id, parsed.title)
+        elif parsed.command == "add-suggestion":
+            result = add_plan_suggestion(
+                root, parsed.plan_id, parsed.stage_id, parsed.text,
+                dependencies=parsed.dependencies,
+            )
+        elif parsed.command == "update-suggestion-status":
+            result = update_suggestion_status(
+                root, parsed.plan_id, parsed.suggestion_id, parsed.status,
+                reason=parsed.reason,
+            )
+        elif parsed.command == "add-task-to-plan":
+            result = add_task_to_plan(root, parsed.plan_id, parsed.suggestion_id, parsed.task_id)
+        elif parsed.command == "add-evidence":
+            result = add_plan_evidence(root, parsed.plan_id, parsed.suggestion_id, parsed.evidence)
         else:
             raise RuntimeError(f"Unsupported command: {parsed.command}")
     except Exception as exc:
