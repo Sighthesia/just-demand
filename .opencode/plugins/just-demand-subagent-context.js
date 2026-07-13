@@ -1,0 +1,1 @@
+/home/Sighthesia/.config/opencode/plugins/just-demand-subagent-context.js

@@ -1,0 +1,1 @@
+/home/Sighthesia/.config/opencode/plugins/just-demand-lib.js

@@ -18,6 +18,7 @@ Canonical workflow spec: `docs/workflow-spec.md`. The spec is the reference for 
 - Do not dispatch implementation before the user has confirmed the direction and the task is ready.
 - Long-context implementation, research, and verification must run through subagents. The main session should coordinate and summarize, not absorb the full execution context inline.
 - When a suitable `just-demand-*` subagent exists for long-context work, prefer dispatch over continuing inline in the main session.
+- Small reads/edits (~几十行) and high-confidence, script-verifiable checks (bug detection, data analysis) are exceptions and may stay in the main session without subagent dispatch.
 - A one-turn subagent skip is not a persistent permission to keep doing later long-context work inline; new broad analysis or code edits require routing again unless the user gives a fresh explicit override.
 - When reporting progress or a result, lead with the user-visible effect or the decision the user needs to make; treat task state, mark commands, and checkpoint mechanics as supporting detail.
 - If a suitable subagent is unavailable, ask the user to retry now or skip one turn rather than silently falling back.
@@ -28,7 +29,7 @@ Canonical workflow spec: `docs/workflow-spec.md`. The spec is the reference for 
 
 ## Role Dispatch Guide
 
-- `just-demand-researcher`: use for evidence gathering, repository inspection, option comparison, and risk identification before the implementation path is chosen.
+- `just-demand-researcher`: use for source collection, browsing, and factual summarization only. This subagent does not analyze, diagnose, compare options, or recommend paths. If analysis or decision support is needed, use `just-demand-advisor` instead.
 - `just-demand-coder`: use for scoped implementation once the task is clarified and the chosen approach is explicit.
 - `just-demand-tester`: use for validation against the task brief, visible-effect checks, and low-risk local fixes after implementation or when a result needs review.
 - `just-demand-advisor`: use for fresh-context diagnosis, repeated failures, cross-boundary framing, or when the main session needs an independent recommendation before choosing a path.
@@ -108,7 +109,7 @@ Do not make the user choose implementation details. Escalate only when the wrong
 
 ## Subagent Routing
 
-- `just-demand-researcher`: research only; no code changes.
+- `just-demand-researcher`: source collection and summary only — no analysis, diagnosis, or recommendation.
 - `just-demand-coder`: scoped implementation; no commits.
 - `just-demand-tester`: verify requirements and fix only low-risk local issues within scope.
 - `just-demand-advisor`: independent analysis and advisory for difficult or cross-boundary problems; no direct large-scale implementation.
@@ -201,7 +202,7 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 4. If `list-active` shows unfinished tasks but no current task is selected, pick the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
 5. Ensure the current task package has the required files for the intended subagent.
 6. Verify the clarification gate above passes. If not, route back to clarification.
-7. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
+7. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session. Small reads/edits (~几十行) and script-verifiable checks may proceed inline in the main session.
 8. Review subagent output before moving to the next phase.
 9. Run verification before claiming completion.
 

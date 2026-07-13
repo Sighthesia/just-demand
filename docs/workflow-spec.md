@@ -29,14 +29,18 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
 
 7. **Long context belongs to subagents.** Broad code reading, multi-file implementation, extended debugging, and research that would consume significant main-session context must route through `just-demand-*` subagents by default. The main session coordinates and summarizes; it does not absorb full execution context inline.
 
-8. **Mismatch feedback is optionized before re-implementation.** When the user reports a deviation (vague or precise), the agent does not guess the root cause and patch blindly. Instead it leads with options: locate the deviation dimension, then pin the target state via contrastive choices. The user click-selects rather than writing prose.
+8. **Small work stays in the main session.** Reading or editing roughly tens of lines of code, or tasks that can be reliably verified by a local script (high-confidence bug detection, scriptable data analysis), remain in the main session by default. They do not require subagent dispatch. The main agent judges scope: if the work crosses into broad reading, multi-file changes, or uncertain analysis, it routes through the appropriate subagent.
 
-9.  **Repeated mismatch triggers reflection.** If the same issue fails twice consecutively, the workflow stops blind patching, enters reflection, and routes to the `advisor` subagent for fresh-context analysis before any more implementation.
+9. **Mismatch feedback is optionized before re-implementation.** When the user reports a deviation (vague or precise), the agent does not guess the root cause and patch blindly. Instead it leads with options: locate the deviation dimension, then pin the target state via contrastive choices. The user click-selects rather than writing prose.
 
-10. **Risk-triggered confirmation.** Confirmation is not universal — it is proportional to risk. Low-risk work that does not change user-visible behavior, architecture, compatibility, security, cost, or long-term maintenance proceeds by default with a concise description and no permission request. Only decisions that affect those dimensions require explicit user choice with a recommended default.
+10.  **Repeated mismatch triggers reflection.** If the same issue fails twice consecutively, the workflow stops blind patching, enters reflection, and routes to the `advisor` subagent for fresh-context analysis before any more implementation.
+
+11. **Risk-triggered confirmation.** Confirmation is not universal — it is proportional to risk. Low-risk work that does not change user-visible behavior, architecture, compatibility, security, cost, or long-term maintenance proceeds by default with a concise description and no permission request. Only decisions that affect those dimensions require explicit user choice with a recommended default.
 
     Low-risk (auto-proceed):
     - Read-only investigation: inspecting, reading, tracing, searching the codebase without modification.
+    - Small code edits: modifying roughly tens of lines of code with well-understood scope.
+    - Script-verifiable analysis: bug detection, data analysis, or checks that a local script can reliably pass/fail.
     - Standard verification: running existing tests, lint, or archive checks.
     - Evidence gathering: searching docs, grepping, collecting reproduction data.
     - Subagent routing: dispatching a supported subagent when direction is already explicit.
@@ -100,7 +104,7 @@ The main agent is the **workflow owner, delivery lead, and dispatcher**. The mai
 
 Subagents execute focused role contracts inside a task boundary. They do not create, promote, close, or re-route tasks.
 
-- **Researcher**: evidence gathering, problem mapping, option comparison.
+- **Researcher**: source collection, browsing, and factual summarization only — no analysis, diagnosis, or recommendation.
 - **Coder**: scoped implementation inside the task boundary.
 - **Tester**: acceptance verification and low-risk local fixes.
 - **Advisor**: fresh-context framing and cross-boundary tradeoff analysis.
@@ -173,7 +177,7 @@ Before implementation or verification:
 2. Run `just-demand . list-active` and inspect unfinished tasks for conflict risk.
 3. Select or resume the intended task if another unfinished task is current.
 4. Ensure the task context package exists for the intended subagent.
-5. Dispatch the narrowest suitable `just-demand-*` subagent when long-context work is involved.
+5. Dispatch the narrowest suitable `just-demand-*` subagent when long-context work is involved. Small work (roughly tens of lines of code read or edited, or tasks verifiable by a local script) may proceed in the main session without subagent dispatch.
 
 Required task context files:
 

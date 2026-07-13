@@ -407,7 +407,7 @@ class InstallIntegrationTests(unittest.TestCase):
 
             # Output contract coverage
             self.assertIn('## Output Contract', researcher_agent)
-            self.assertIn('**Key findings**', researcher_agent)
+            self.assertIn('**Source excerpts**', researcher_agent)
             self.assertIn('## Output Contract', advisor_agent)
             self.assertIn('**Recommendation**', advisor_agent)
             self.assertIn('## Output Contract', coder_agent)

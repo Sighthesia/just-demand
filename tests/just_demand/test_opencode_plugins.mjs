@@ -38,6 +38,7 @@ import {
   detectActiveContractsForTask,
   detectContractTriggers,
   textLooksLikeReadOnlyWork,
+  textLooksLikeSmallWork,
   setToolGateSkipOverride,
 } from "../../.opencode/plugins/just-demand-lib.js"
 import sessionStartFactory from "../../.opencode/plugins/just-demand-session-start.js"
@@ -1126,6 +1127,82 @@ test("textLooksLikeReadOnlyWork returns false for empty or non-analysis text", (
   assert.equal(textLooksLikeReadOnlyWork(null), false)
 })
 
+// ---------------------------------------------------------------------------
+// small-work bypass: textLooksLikeSmallWork
+// ---------------------------------------------------------------------------
+test("textLooksLikeSmallWork detects small-edit signals in English", () => {
+  const samples = [
+    "I will make a small edit to the config.",
+    "This is a quick fix for the typo.",
+    "A simple change to the timeout value.",
+    "Minor read of the source file.",
+    "Tiny adjustment to the CSS.",
+    "Brief check of the test output.",
+    "Narrow fix for the edge case.",
+    "This is a small read/edit of about 20 lines.",
+    "Just a 5-line fix.",
+    "I'll read a few files quickly.",
+    "Just check the logs for errors.",
+    "Small change to the error handler.",
+    "Let me make a quick fix inline.",
+    // line-count patterns
+    "~10 lines of code change.",
+    "~30行的修改。",
+    "约20行代码的读取。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeSmallWork(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeSmallWork detects script-verifiable signals", () => {
+  const samples = [
+    "This is a script-verifiable check.",
+    "High-confidence bug detection via script.",
+    "A deterministic analysis of the output.",
+    "This is a script-verifiable analysis.",
+    "Reliable verification through local script.",
+    "可脚本验证的检查。",
+    "高置信度的数据分析。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeSmallWork(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeSmallWork detects Chinese small-work signals", () => {
+  const samples = [
+    "几十行的代码读取。",
+    "这是一个小修改。",
+    "快速检查一下日志。",
+    "本地脚本可验证的检查。",
+    "小修复一个 typo。",
+    "简单看一下报告。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeSmallWork(sample), true, `Expected true for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeSmallWork returns false for broad work without small-work signal", () => {
+  const samples = [
+    "I will implement the new feature.",
+    "Let me refactor the entire module.",
+    "I need to design the architecture.",
+    "Let me investigate the code structure first.",
+    "I will analyze the debug log.",
+    "大范围重构。",
+  ]
+  for (const sample of samples) {
+    assert.equal(textLooksLikeSmallWork(sample), false, `Expected false for: "${sample}"`)
+  }
+})
+
+test("textLooksLikeSmallWork returns false for empty or null input", () => {
+  assert.equal(textLooksLikeSmallWork(""), false)
+  assert.equal(textLooksLikeSmallWork(null), false)
+})
+
 test("risk-triggered controller decision does not add clarify_hint for read-only work with active task", () => {
   // When the agent's output describes read-only analysis work with a planning task,
   // the clarify_hint reminder should not fire.
@@ -1154,6 +1231,101 @@ test("risk-triggered controller decision still blocks concrete modification work
   })
 
   assert.equal(decision.reason_code, "clarify_hint", "Modification work should still trigger clarify_hint")
+})
+
+// ---------------------------------------------------------------------------
+// controller decision: small-work bypass (small_work_bypass)
+// ---------------------------------------------------------------------------
+test("controller decision allows small read/edit work via small_work_bypass", () => {
+  const samples = [
+    "I will make a small edit to the config.",
+    "This is a quick fix for the typo.",
+    "A simple change to the timeout value.",
+    "Minor read of the source file.",
+    "A ~10-line fix.",
+    "Small change to the error handler.",
+    "约20行代码的读取。",
+    "小修复一个 typo。",
+  ]
+
+  for (const sample of samples) {
+    const decision = buildControllerDecision(sample, {
+      activeTask: {
+        id: "task-a",
+        status: "executing",
+        current_step: "execute",
+        verification_status: "not_started",
+        assigned_subagents: [],
+      },
+      same_topic_turns: 0,
+      subagent_unavailable_pending: false,
+    })
+
+    assert.equal(decision.phase, CONTROLLER_PHASE.execute, `Expected execute phase for: "${sample}"`)
+    assert.equal(decision.action, CONTROLLER_ACTION.allow, `Expected allow action for: "${sample}"`)
+    assert.equal(decision.reason_code, "small_work_bypass", `Expected small_work_bypass for: "${sample}"`)
+    assert.deepEqual(decision.rewrite, null, `Expected null rewrite for: "${sample}"`)
+  }
+})
+
+test("controller decision allows script-verifiable high-confidence work via small_work_bypass", () => {
+  const samples = [
+    "This is a script-verifiable check.",
+    "High-confidence bug detection via script.",
+    "A deterministic analysis of the output.",
+    "Reliable verification through local script.",
+    "可脚本验证的检查。",
+    "高置信度的数据分析。",
+    "本地脚本可验证的检查。",
+  ]
+
+  for (const sample of samples) {
+    const decision = buildControllerDecision(sample, {
+      activeTask: {
+        id: "task-a",
+        status: "executing",
+        current_step: "execute",
+        verification_status: "not_started",
+        assigned_subagents: [],
+      },
+      same_topic_turns: 0,
+      subagent_unavailable_pending: false,
+    })
+
+    assert.equal(decision.phase, CONTROLLER_PHASE.execute, `Expected execute phase for: "${sample}"`)
+    assert.equal(decision.action, CONTROLLER_ACTION.allow, `Expected allow action for: "${sample}"`)
+    assert.equal(decision.reason_code, "small_work_bypass", `Expected small_work_bypass for: "${sample}"`)
+    assert.deepEqual(decision.rewrite, null, `Expected null rewrite for: "${sample}"`)
+  }
+})
+
+test("controller decision blocks large execution requests with execution_needed (not small_work_bypass)", () => {
+  const samples = [
+    "I will implement the new feature.",
+    "Let me refactor the entire module.",
+    "I will design the architecture.",
+    "我来重构这个模块。",
+    "I will refactor the whole module.",
+  ]
+
+  for (const sample of samples) {
+    const decision = buildControllerDecision(sample, {
+      activeTask: {
+        id: "task-a",
+        status: "executing",
+        current_step: "execute",
+        verification_status: "not_started",
+        assigned_subagents: [],
+      },
+      same_topic_turns: 0,
+      subagent_unavailable_pending: false,
+    })
+
+    assert.equal(decision.phase, CONTROLLER_PHASE.execute, `Expected execute phase for: "${sample}"`)
+    assert.equal(decision.action, CONTROLLER_ACTION.block, `Expected block action for: "${sample}"`)
+    assert.equal(decision.reason_code, "execution_needed", `Expected execution_needed for: "${sample}"`)
+    assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true }, `Expected replace rewrite for: "${sample}"`)
+  }
 })
 
 // ---------------------------------------------------------------------------

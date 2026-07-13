@@ -8,7 +8,7 @@ description: "Load this skill first for repo work so the correct just-demand rou
 - **Effect first**: lead every reply with the result, conclusion, or recommendation.
 - **Defaults first**: recommend the path before asking; options only when the choice matters.
 - **Clarify before execute**: no edits or subagent dispatch until the final effect, approach, and plan are approved.
-- **Subagents for long work**: route broad reading, 3+ files, or extended verification through a subagent, not inline.
+- **Subagents for long work**: route broad reading, 3+ files, or extended verification through a subagent, not inline. Small reads/edits (~几十行) and script-verifiable checks may stay in the main session.
 - **Closeout is a real step**: completion wording does not replace `complete-verification`.
 
 # Skill Priority
@@ -237,7 +237,7 @@ Route 2 is the default when concrete work, bug reports, or implementation reques
 
 ### Long-Context Work Routing
 
-Long-context execution work (broad code reading, 3+ files, multi-step research/debugging, or extended verification) must route through a `just-demand-*` subagent by default. Inline handling in the main session is only permitted with an explicit workflow skip override. The plugin enforces this: execution intent on an active task without assigned subagents triggers a hard block with subagent routing guidance.
+Long-context execution work (broad code reading, 3+ files, multi-step research/debugging, or extended verification) must route through a `just-demand-*` subagent by default. Inline handling in the main session is only permitted with an explicit workflow skip override, or for small reads/edits (~几十行) and script-verifiable checks. The plugin enforces this: execution intent on an active task without assigned subagents ordinarily triggers a hard block with subagent routing guidance, but small-work signals bypass the block.
 
 ## Commands
 
