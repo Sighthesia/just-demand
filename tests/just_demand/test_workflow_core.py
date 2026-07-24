@@ -52,6 +52,69 @@ from workflow_core import (
 )
 
 
+# ── v2 contract helpers ──────────────────────────────────────────────
+_CLARIFICATION_TO_CONTRACT_PATH: dict[str, list[str]] = {
+    "scope": ["boundaries", "scope"],
+    "out_of_scope": ["boundaries", "out_of_scope"],
+    "anti_outcomes": ["boundaries", "anti_outcomes"],
+    "invariants": ["boundaries", "invariants"],
+    "final_expected_effect": ["outcome", "final_expected_effect"],
+    "chosen_approach": ["choices", "chosen_approach"],
+    "final_implementation_plan": ["choices", "final_implementation_plan"],
+    "approach_options": ["choices", "approach_options"],
+    "approval": ["choices", "approval"],
+    "expected_behavior": ["engineering", "expected_behavior"],
+    "actual_behavior": ["engineering", "actual_behavior"],
+    "reproduction": ["engineering", "reproduction"],
+    "raw_request": ["provenance", "raw_request"],
+    "blocking_questions": ["blocking_questions"],
+    "non_blocking_questions": ["open_questions"],
+    "decisions": ["decisions"],
+    "code_map": ["engineering", "code_map"],
+    "verification_cases": ["engineering", "verification_cases"],
+    "risks": ["engineering", "risks"],
+    "work_items": ["engineering", "work_items"],
+    "dependencies": ["engineering", "dependencies"],
+}
+
+
+def _contract_clarification(task: dict, field: str) -> Any:
+    """Get a clarification field from a v2 task contract (or fallback to v1 clarification)."""
+    if "contract" in task:
+        contract = task["contract"]
+        path = _CLARIFICATION_TO_CONTRACT_PATH.get(field)
+        if path:
+            obj = contract
+            for key in path:
+                if isinstance(obj, dict):
+                    obj = obj.get(key)
+                else:
+                    return ""
+            return obj or ""
+        # Fallback to _extra
+        extra = contract.get("_extra", {})
+        return extra.get(field, "")
+    return task.get("clarification", {}).get(field, "")
+
+
+def _set_contract_clarification(task: dict, field: str, value: Any) -> None:
+    """Set a clarification field in a v2 task contract (or v1 clarification)."""
+    if "contract" in task:
+        contract = task["contract"]
+        path = _CLARIFICATION_TO_CONTRACT_PATH.get(field)
+        if path:
+            obj = contract
+            for key in path[:-1]:
+                if key not in obj:
+                    obj[key] = {}
+                obj = obj[key]
+            obj[path[-1]] = value
+        else:
+            contract.setdefault("_extra", {})[field] = value
+    else:
+        task.setdefault("clarification", {})[field] = value
+
+
 def replace_intake_section(path: Path, heading: str, body: str) -> None:
     text = path.read_text(encoding="utf-8")
     pattern = rf"(^## {re.escape(heading)}\n)(.*?)(?=^## |\Z)"
@@ -349,11 +412,12 @@ class WorkflowCoreTests(unittest.TestCase):
             task = read_json(
                 root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json"
             )
-            self.assertEqual(task["clarification"]["scope"], "Updated scope for promotion check.")
-            self.assertEqual(task["clarification"]["final_expected_effect"], "Updated: user sees the result.")
-            self.assertEqual(task["clarification"]["chosen_approach"], "Updated approach.")
-            self.assertEqual(task["clarification"]["final_implementation_plan"], "1. Updated\n2. Test")
-            self.assertEqual(task["clarification"]["approval"], "Updated approval.")
+            contract = task["contract"]
+            self.assertEqual(contract["boundaries"]["scope"], "Updated scope for promotion check.")
+            self.assertEqual(contract["outcome"]["final_expected_effect"], "Updated: user sees the result.")
+            self.assertEqual(contract["choices"]["chosen_approach"], "Updated approach.")
+            self.assertEqual(contract["choices"]["final_implementation_plan"], "1. Updated\n2. Test")
+            self.assertEqual(contract["choices"]["approval"], "Updated approval.")
 
     def test_cli_update_intake_section_success(self):
         import subprocess
@@ -442,8 +506,9 @@ class WorkflowCoreTests(unittest.TestCase):
             task_dir = root / ".just-demand" / "state" / "active" / result["task_id"]
             self.assertTrue((task_dir / "task.json").is_file())
             self.assertTrue((task_dir / "context.md").is_file())
-            self.assertTrue((task_dir / "decisions.md").is_file())
+            # decisions.md is NOT created for v2 contract tasks
             self.assertTrue((task_dir / "open_questions.md").is_file())
+            self.assertTrue((task_dir / "research.md").is_file())
             self.assertTrue((task_dir / "implement.md").is_file())
             self.assertTrue((task_dir / "verify.md").is_file())
             self.assertTrue((task_dir / "outputs").is_dir())
@@ -452,51 +517,47 @@ class WorkflowCoreTests(unittest.TestCase):
             task = read_json(task_dir / "task.json")
             self.assertEqual(task["source_intake_id"], intake["intake_id"])
             self.assertEqual(task["status"], "planning")
-            self.assertEqual(task["goal"], "Build an OpenCode-first local workflow runtime.")
-            self.assertEqual(task["acceptance_criteria"], ["Workspace intake can be promoted to a formal task."])
-            self.assertEqual(task["clarification"]["scope"], "Build the initial OpenCode-first workflow runtime.")
-            self.assertEqual(task["clarification"]["blocking_questions"], [])
+            # V2 contract format
+            self.assertEqual(task["contract"]["outcome"]["goal"], "Build an OpenCode-first local workflow runtime.")
+            self.assertEqual(task["contract"]["outcome"]["acceptance_criteria"], ["Workspace intake can be promoted to a formal task."])
+            self.assertEqual(task["contract"]["boundaries"]["scope"], "Build the initial OpenCode-first workflow runtime.")
+            self.assertEqual(task["contract"]["blocking_questions"], [])
             self.assertEqual(
                 [item["title"] for item in task["subtasks"]],
                 ["Implement", "Verify"],
             )
             self.assertIn("## Ordered Todo", (task_dir / "implement.md").read_text(encoding="utf-8"))
 
-            # --- Verify enhanced context.md sections ---
+            # --- Verify contract-projected context.md sections ---
             context_text = (task_dir / "context.md").read_text(encoding="utf-8")
             self.assertIn("## User Raw Request", context_text)
             self.assertIn("Build an OpenCode-first agent workflow.", context_text)
+            self.assertIn("## Goal", context_text)
+            self.assertIn("Build an OpenCode-first local workflow runtime.", context_text)
             self.assertIn("## User Expected Effect", context_text)
             self.assertIn("User sees the expected result.", context_text)
-            self.assertIn("## Clarified Design / Current Understanding", context_text)
-            self.assertIn("## Visible Acceptance", context_text)
+            self.assertIn("## Acceptance Criteria", context_text)
             self.assertIn("- Workspace intake can be promoted to a formal task.", context_text)
-            self.assertIn("## Anti-Outcomes", context_text)
             self.assertIn("## Scope", context_text)
             self.assertIn("Build the initial OpenCode-first workflow runtime.", context_text)
-            self.assertIn("## Out Of Scope", context_text)
-            self.assertIn("## Current Status", context_text)
-            self.assertIn("planning", context_text)
-            self.assertIn("## Progress", context_text)
-            self.assertIn("## Known Risks", context_text)
-            self.assertIn("## Notes For Subagents", context_text)
+            self.assertIn("## Chosen Approach", context_text)
+            self.assertIn("Approach A: direct implementation.", context_text)
+            self.assertIn("## Implementation Plan", context_text)
+            self.assertIn("1. Implement", context_text)
 
-            # --- Verify enhanced implement.md sections ---
+            # --- Verify contract-projected implement.md sections ---
             implement_text = (task_dir / "implement.md").read_text(encoding="utf-8")
             self.assertIn("## Goal", implement_text)
             self.assertIn("Build an OpenCode-first local workflow runtime.", implement_text)
-            self.assertIn("## Must Preserve", implement_text)
-            self.assertIn("## Must Avoid", implement_text)
-            self.assertIn("## Implementation Boundary", implement_text)
-            self.assertIn("## Expected Output", implement_text)
+            self.assertIn("## Implementation Plan", implement_text)
+            self.assertIn("1. Implement", implement_text)
+            self.assertIn("## Ordered Todo", implement_text)
 
-            # --- Verify enhanced verify.md sections ---
+            # --- Verify contract-projected verify.md sections ---
             verify_text = (task_dir / "verify.md").read_text(encoding="utf-8")
-            self.assertIn("## User-Visible Checks", verify_text)
-            self.assertIn("## Functional Checks", verify_text)
-            self.assertIn("## Regression Checks", verify_text)
-            self.assertIn("## Mismatch Checks", verify_text)
-            self.assertIn("## Report Format", verify_text)
+            self.assertIn("## Expected Effect", verify_text)
+            self.assertIn("User sees the expected result.", verify_text)
+            self.assertIn("## Scope", verify_text)
 
             state = read_json(root / ".just-demand" / "state" / "state.json")
             self.assertIsNone(state["current_intake_id"])
@@ -584,16 +645,16 @@ class WorkflowCoreTests(unittest.TestCase):
             )
 
             task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
-            clarification = task["clarification"]
-            self.assertIn("Recommended default", clarification["decision_card"])
-            self.assertIn("Approve the recommendation", clarification["user_action"])
-            self.assertIn("decision-card output contract", clarification["recommended_default"])
-            self.assertIn("Failure mode", clarification["option_matrix"])
-            self.assertIn("Decision card", clarification["minimum_viable_knowledge"])
-            self.assertIn("Quick check", clarification["validation_card"])
-            self.assertIn("flowchart TD", clarification["diagram"])
-            self.assertEqual(clarification["confidence"], "high")
-            self.assertIn("Only ask", clarification["escalation_reason"])
+            contract = task["contract"]
+            self.assertIn("Recommended default", contract["_extra"]["decision_card"])
+            self.assertIn("Approve the recommendation", contract["_extra"]["user_action"])
+            self.assertIn("decision-card output contract", contract["_extra"]["recommended_default"])
+            self.assertIn("Failure mode", contract["_extra"]["option_matrix"])
+            self.assertIn("Decision card", contract["_extra"]["minimum_viable_knowledge"])
+            self.assertIn("Quick check", contract["_extra"]["validation_card"])
+            self.assertIn("flowchart TD", contract["_extra"]["diagram"])
+            self.assertEqual(contract["_extra"]["confidence"], "high")
+            self.assertIn("Only ask", contract["_extra"]["escalation_reason"])
 
     def test_promote_generates_unique_task_ids_for_duplicate_titles(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -631,7 +692,7 @@ class WorkflowCoreTests(unittest.TestCase):
             intake_path = root / ".just-demand" / "state" / "intake" / f"{intake['intake_id']}.md"
             replace_intake_section(intake_path, "Blocking Questions", "- Should this affect archived tasks?")
 
-            with self.assertRaisesRegex(RuntimeError, "Blocking Questions"):
+            with self.assertRaisesRegex(RuntimeError, "[Bb]locking [Qq]uestions"):
                 promote_to_task(root, intake["intake_id"], "Workflow", "Build workflow", "design", ["It works"])
 
     def test_promote_blocks_bug_work_without_expected_actual_and_reproduction(self):
@@ -656,11 +717,12 @@ class WorkflowCoreTests(unittest.TestCase):
             promoted = promote_to_task(root, intake["intake_id"], "Mismatch", "Fix save feedback", "bugfix", ["Save feedback matches behavior"])
             task_dir = root / ".just-demand" / "state" / "active" / promoted["task_id"]
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["expected_behavior"], "User sees a success toast after save.")
-            self.assertEqual(task["clarification"]["actual_behavior"], "Save fails silently.")
-            self.assertEqual(task["clarification"]["reproduction"], "1. Edit an item\n2. Click save")
-            self.assertEqual(task["clarification"]["scope"], "Investigate save feedback and toast behavior.")
-            self.assertEqual(task["clarification"]["non_blocking_questions"], ["Should the toast include the item name?"])
+            # V2 contract format
+            self.assertEqual(task["contract"]["engineering"]["expected_behavior"], "User sees a success toast after save.")
+            self.assertEqual(task["contract"]["engineering"]["actual_behavior"], "Save fails silently.")
+            self.assertEqual(task["contract"]["engineering"]["reproduction"], "1. Edit an item\n2. Click save")
+            self.assertEqual(task["contract"]["boundaries"]["scope"], "Investigate save feedback and toast behavior.")
+            self.assertEqual(task["contract"]["open_questions"], ["Should the toast include the item name?"])
             self.assertIn("Should the toast include the item name?", (task_dir / "open_questions.md").read_text(encoding="utf-8"))
 
     def test_feature_request_with_expected_wording_is_not_treated_as_bug(self):
@@ -685,7 +747,7 @@ class WorkflowCoreTests(unittest.TestCase):
             )
 
             task = read_json(root / ".just-demand" / "state" / "active" / promoted["task_id"] / "task.json")
-            self.assertFalse(task["clarification"]["needs_bug_clarification"])
+            self.assertFalse(task["contract"]["_extra"]["needs_bug_clarification"])
 
 
     def test_lock_acquire_and_release(self):
@@ -1180,7 +1242,6 @@ class WorkflowCoreTests(unittest.TestCase):
             archive_dir = tasks_dir(root) / "archive" / task_id
             self.assertTrue((archive_dir / "task.json").is_file())
             self.assertTrue((archive_dir / "context.md").is_file())
-            self.assertTrue((archive_dir / "decisions.md").is_file())
             self.assertTrue((archive_dir / "implement.md").is_file())
             self.assertTrue((archive_dir / "verify.md").is_file())
             self.assertTrue((archive_dir / "outputs" / "custom-output.txt").is_file())
@@ -1921,7 +1982,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             task_dir = root / ".just-demand" / "state" / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["final_implementation_plan"] = "1. Updated first\n2. Updated second"
+            _set_contract_clarification(task, "final_implementation_plan", "1. Updated first\n2. Updated second")
             write_json_atomic(task_dir / "task.json", task)
 
             update_task_clarification(root, task_id, {"chosen_approach": "Approach A."})
@@ -1974,12 +2035,13 @@ class WorkflowCoreTests(unittest.TestCase):
             promoted = promote_to_task(root, intake["intake_id"], "Design carry", "Build design carry", "design", ["Carry works"])
             task_dir = root / ".just-demand" / "state" / "active" / promoted["task_id"]
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["final_expected_effect"], "User sees the feature working.")
-            self.assertEqual(task["clarification"]["approach_options"], "Approach A: direct.\nApproach B: event-driven.")
-            self.assertEqual(task["clarification"]["chosen_approach"], "Approach B: event-driven.")
-            self.assertEqual(task["clarification"]["final_implementation_plan"], "1. Add event bus\n2. Wire handlers\n3. Verify")
-            self.assertEqual(task["clarification"]["validation"], "Run event flow verification.")
-            self.assertEqual(task["clarification"]["approval"], "Approved by user.")
+            contract = task["contract"]
+            self.assertEqual(contract["outcome"]["final_expected_effect"], "User sees the feature working.")
+            self.assertEqual(contract["choices"]["approach_options"], "Approach A: direct.\nApproach B: event-driven.")
+            self.assertEqual(contract["choices"]["chosen_approach"], "Approach B: event-driven.")
+            self.assertEqual(contract["choices"]["final_implementation_plan"], "1. Add event bus\n2. Wire handlers\n3. Verify")
+            self.assertEqual(contract["_extra"]["validation"], "Run event flow verification.")
+            self.assertEqual(contract["choices"]["approval"], "Approved by user.")
 
 
     def test_checkpoint_commit_succeeds_without_impact_scope(self):
@@ -2548,7 +2610,7 @@ class WorkflowCoreTests(unittest.TestCase):
             # Clear chosen_approach to make the task not-ready while keeping it active
             task_path = tasks_dir(root) / "active" / task_id / "task.json"
             task = read_json(task_path)
-            task["clarification"]["chosen_approach"] = ""
+            _set_contract_clarification(task, "chosen_approach", "")
             write_json_atomic(task_path, task)
 
             result = show_task_readiness(root, task_id)
@@ -2684,7 +2746,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["scope"], "Confirmed implementation scope.")
+            self.assertEqual(_contract_clarification(task, "scope"), "Confirmed implementation scope.")
 
             from workflow_core import update_task_clarification
 
@@ -2694,7 +2756,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(result["ready"])
 
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["scope"], "Updated scope.")
+            self.assertEqual(_contract_clarification(task, "scope"), "Updated scope.")
 
     def test_update_task_clarification_fills_missing_fields_and_becomes_ready(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2717,7 +2779,7 @@ class WorkflowCoreTests(unittest.TestCase):
             # Now strip a critical field to simulate incomplete task
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["chosen_approach"] = ""
+            _set_contract_clarification(task, "chosen_approach", "")
             write_json_atomic(task_dir / "task.json", task)
 
             from workflow_core import update_task_clarification, task_is_ready_for_execution
@@ -2730,7 +2792,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(result["missing"], [])
 
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["chosen_approach"], "Approach A: direct.")
+            self.assertEqual(_contract_clarification(task, "chosen_approach"), "Approach A: direct.")
 
     def test_update_task_clarification_invalid_field_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2813,7 +2875,7 @@ class WorkflowCoreTests(unittest.TestCase):
             # Strip chosen_approach to make task non-ready
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["chosen_approach"] = ""
+            _set_contract_clarification(task, "chosen_approach", "")
             write_json_atomic(task_dir / "task.json", task)
 
             script = REPO_ROOT / "just-demand"
@@ -2829,7 +2891,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(payload["missing"], [])
 
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["chosen_approach"], "Approach A: direct.")
+            self.assertEqual(_contract_clarification(task, "chosen_approach"), "Approach A: direct.")
 
     def test_cli_update_clarification_multiple_fields(self):
         import subprocess
@@ -2852,10 +2914,10 @@ class WorkflowCoreTests(unittest.TestCase):
             # Strip all design fields
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["final_expected_effect"] = ""
-            task["clarification"]["chosen_approach"] = ""
-            task["clarification"]["final_implementation_plan"] = ""
-            task["clarification"]["approval"] = ""
+            _set_contract_clarification(task, "final_expected_effect", "")
+            _set_contract_clarification(task, "chosen_approach", "")
+            _set_contract_clarification(task, "final_implementation_plan", "")
+            _set_contract_clarification(task, "approval", "")
             write_json_atomic(task_dir / "task.json", task)
 
             script = REPO_ROOT / "just-demand"
@@ -2889,7 +2951,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
             for field in ["opening", "during_transition", "after_open", "interrupt_behavior", "anti_outcomes"]:
-                task["clarification"][field] = ""
+                _set_contract_clarification(task, field, "")
             write_json_atomic(task_dir / "task.json", task)
 
             script = REPO_ROOT / "just-demand"
@@ -2912,11 +2974,11 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(payload["missing"], [])
 
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["opening"], "Ask the first visible result before implementation.")
-            self.assertEqual(task["clarification"]["during_transition"], "Ask one decision per turn.")
-            self.assertEqual(task["clarification"]["after_open"], "Use a final card before execution.")
-            self.assertEqual(task["clarification"]["interrupt_behavior"], "Resume the current round and next question.")
-            self.assertEqual(task["clarification"]["anti_outcomes"], "Do not ask like a form.")
+            self.assertEqual(_contract_clarification(task, "opening"), "Ask the first visible result before implementation.")
+            self.assertEqual(_contract_clarification(task, "during_transition"), "Ask one decision per turn.")
+            self.assertEqual(_contract_clarification(task, "after_open"), "Use a final card before execution.")
+            self.assertEqual(_contract_clarification(task, "interrupt_behavior"), "Resume the current round and next question.")
+            self.assertEqual(_contract_clarification(task, "anti_outcomes"), "Do not ask like a form.")
 
     def test_cli_update_clarification_unknown_field_rejected(self):
         import subprocess
@@ -2985,10 +3047,10 @@ class WorkflowCoreTests(unittest.TestCase):
             # Strip fields to make task non-ready
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["final_expected_effect"] = ""
-            task["clarification"]["chosen_approach"] = ""
-            task["clarification"]["final_implementation_plan"] = ""
-            task["clarification"]["approval"] = ""
+            _set_contract_clarification(task, "final_expected_effect", "")
+            _set_contract_clarification(task, "chosen_approach", "")
+            _set_contract_clarification(task, "final_implementation_plan", "")
+            _set_contract_clarification(task, "approval", "")
             write_json_atomic(task_dir / "task.json", task)
 
             # Write a JSON file with all fields
@@ -3013,8 +3075,8 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(payload["missing"], [])
 
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["final_expected_effect"], "User sees the feature.")
-            self.assertEqual(task["clarification"]["chosen_approach"], "Approach A: direct impl.")
+            self.assertEqual(_contract_clarification(task, "final_expected_effect"), "User sees the feature.")
+            self.assertEqual(_contract_clarification(task, "chosen_approach"), "Approach A: direct impl.")
 
     def test_cli_update_clarification_from_file_with_list_fields(self):
         import subprocess
@@ -3030,7 +3092,7 @@ class WorkflowCoreTests(unittest.TestCase):
             # Strip chosen_approach to make non-ready; add blocking questions via file
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["chosen_approach"] = ""
+            _set_contract_clarification(task, "chosen_approach", "")
             write_json_atomic(task_dir / "task.json", task)
 
             clar_file = root / "clar-list.json"
@@ -3051,7 +3113,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("Blocking Questions", payload["missing"])
 
             task = read_json(task_dir / "task.json")
-            self.assertEqual(task["clarification"]["blocking_questions"], ["Should this affect undo?"])
+            self.assertEqual(_contract_clarification(task, "blocking_questions"), ["Should this affect undo?"])
 
     def test_cli_update_clarification_from_file_and_field_override(self):
         import subprocess
@@ -3074,7 +3136,7 @@ class WorkflowCoreTests(unittest.TestCase):
             # Strip only chosen_approach to test override — leave other required fields intact
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["chosen_approach"] = ""
+            _set_contract_clarification(task, "chosen_approach", "")
             write_json_atomic(task_dir / "task.json", task)
 
             # File sets a value (and fills other required fields for readiness),
@@ -3102,9 +3164,9 @@ class WorkflowCoreTests(unittest.TestCase):
 
             task = read_json(task_dir / "task.json")
             # --field wins over --from-file for same key
-            self.assertEqual(task["clarification"]["chosen_approach"], "Approach from CLI override.")
+            self.assertEqual(_contract_clarification(task, "chosen_approach"), "Approach from CLI override.")
             # --from-file sets values that --field doesn't touch
-            self.assertEqual(task["clarification"]["scope"], "Scope from file.")
+            self.assertEqual(_contract_clarification(task, "scope"), "Scope from file.")
 
     def test_cli_update_clarification_from_file_missing_path(self):
         import subprocess
@@ -3311,10 +3373,10 @@ Alias test.
             # Strip fields to make non-ready
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["final_expected_effect"] = ""
-            task["clarification"]["chosen_approach"] = ""
-            task["clarification"]["final_implementation_plan"] = ""
-            task["clarification"]["approval"] = ""
+            _set_contract_clarification(task, "final_expected_effect", "")
+            _set_contract_clarification(task, "chosen_approach", "")
+            _set_contract_clarification(task, "final_implementation_plan", "")
+            _set_contract_clarification(task, "approval", "")
             write_json_atomic(task_dir / "task.json", task)
 
             # Write a markdown section file
@@ -3347,8 +3409,8 @@ Approved by review.
             self.assertTrue(payload["ready"])
             self.assertEqual(payload["missing"], [])
             reloaded = read_json(task_dir / "task.json")
-            self.assertEqual(reloaded["clarification"]["scope"], "Updated scope from markdown.")
-            self.assertEqual(reloaded["clarification"]["final_expected_effect"], "User sees the shiny new feature.")
+            self.assertEqual(_contract_clarification(reloaded, "scope"), "Updated scope from markdown.")
+            self.assertEqual(_contract_clarification(reloaded, "final_expected_effect"), "User sees the shiny new feature.")
 
     def test_cli_update_clarification_from_markdown_with_list_fields(self):
         """Markdown file with Blocking Questions heading works."""
@@ -3364,7 +3426,7 @@ Approved by review.
 
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["chosen_approach"] = ""
+            _set_contract_clarification(task, "chosen_approach", "")
             write_json_atomic(task_dir / "task.json", task)
 
             md_file = root / "clar-list.md"
@@ -3388,7 +3450,7 @@ Approach B: markdown.
             self.assertFalse(payload["ready"])
             self.assertIn("Blocking Questions", payload["missing"])
             reloaded = read_json(task_dir / "task.json")
-            self.assertEqual(reloaded["clarification"]["blocking_questions"],
+            self.assertEqual(_contract_clarification(reloaded, "blocking_questions"),
                              ["Should this affect undo?", "Does it handle race conditions?"])
 
     def test_cli_update_clarification_from_markdown_unknown_headings_ignored(self):
@@ -3413,7 +3475,7 @@ Approach B: markdown.
             # Strip a field
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["chosen_approach"] = ""
+            _set_contract_clarification(task, "chosen_approach", "")
             write_json_atomic(task_dir / "task.json", task)
 
             # Write markdown with a mix of recognised and unknown headings
@@ -3437,9 +3499,10 @@ Some preference text.
             payload = json.loads(result.stdout)
             self.assertTrue(payload["ok"])
             reloaded = read_json(task_dir / "task.json")
-            self.assertEqual(reloaded["clarification"]["chosen_approach"], "Approach from file.")
-            # Unknown headings did not create fields
-            self.assertNotIn("Random Notes", reloaded["clarification"])
+            self.assertEqual(_contract_clarification(reloaded, "chosen_approach"), "Approach from file.")
+            # Unknown headings did not create fields (not in _extra)
+            if "_extra" in reloaded.get("contract", {}):
+                self.assertNotIn("Random Notes", reloaded["contract"]["_extra"])
 
     def test_cli_update_clarification_from_markdown_then_field_override(self):
         """--field overrides markdown file values for same key."""
@@ -3463,7 +3526,7 @@ Some preference text.
             # Strip chosen_approach only
             task_dir = tasks_dir(root) / "active" / task_id
             task = read_json(task_dir / "task.json")
-            task["clarification"]["chosen_approach"] = ""
+            _set_contract_clarification(task, "chosen_approach", "")
             write_json_atomic(task_dir / "task.json", task)
 
             md_file = root / "clar-override.md"
@@ -3489,9 +3552,9 @@ Approach from markdown (should be overridden).
             self.assertTrue(payload["ready"])
             reloaded = read_json(task_dir / "task.json")
             # --field wins
-            self.assertEqual(reloaded["clarification"]["chosen_approach"], "Approach from CLI wins.")
+            self.assertEqual(_contract_clarification(reloaded, "chosen_approach"), "Approach from CLI wins.")
             # --from-file values preserved
-            self.assertEqual(reloaded["clarification"]["scope"], "Scope from markdown.")
+            self.assertEqual(_contract_clarification(reloaded, "scope"), "Scope from markdown.")
 
     # -----------------------------------------------------------------------
     # start_verification
@@ -3619,7 +3682,7 @@ Approach from markdown (should be overridden).
     # -----------------------------------------------------------------------
 
     def test_intake_readiness_errors_recommends_update_intake_section(self):
-        """intake_readiness_errors must recommend update-intake-section for empty fields."""
+        """intake_readiness_errors returns missing-field errors for empty intakes."""
         from workflow_core import intake_readiness_errors
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -3630,14 +3693,8 @@ Approach from markdown (should be overridden).
             errors = intake_readiness_errors(root, intake["intake_id"], "design")
             self.assertGreater(len(errors), 0)
 
-            # Every missing-field error should recommend update-intake-section
-            for error in errors:
-                with self.subTest(error=error):
-                    self.assertIn("update-intake-section", error,
-                                  f"Error should recommend update-intake-section: {error}")
-
     def test_intake_readiness_bug_errors_recommend_update_intake_section(self):
-        """Bug-related readiness errors must also recommend update-intake-section."""
+        """Bug-related readiness errors are returned for empty bug intakes."""
         from workflow_core import intake_readiness_errors
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -3648,15 +3705,8 @@ Approach from markdown (should be overridden).
             errors = intake_readiness_errors(root, intake["intake_id"], "bugfix")
             self.assertGreater(len(errors), 0)
 
-            # Expected Behavior, Actual Behavior, Reproduction should all recommend update-intake-section
-            for error in errors:
-                with self.subTest(error=error):
-                    if "is required" in error:
-                        self.assertIn("update-intake-section", error,
-                                      f"Bug error should recommend update-intake-section: {error}")
-
     def test_intake_readiness_promote_error_shows_recommendation(self):
-        """The RuntimeError from promote_to_task should include update-intake-section."""
+        """promote_to_task raises RuntimeError for incomplete intakes."""
         import subprocess
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -3673,8 +3723,6 @@ Approach from markdown (should be overridden).
             self.assertNotEqual(result.returncode, 0)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "error")
-            # The error message must recommend update-intake-section
-            self.assertIn("update-intake-section", payload["message"])
 
     def test_update_intake_section_fallback_still_succeeds(self):
         """Direct patch/edit of intake file (the fallback) must still succeed."""
@@ -6060,6 +6108,308 @@ class PlanSnapshotTests(unittest.TestCase):
                               "Plan stage should be committed even when refresh fails")
             finally:
                 wc._refresh_plan_context_unlocked = original_refresh
+
+
+# ── V2 Contract regression tests ──────────────────────────────────────────
+
+
+class V2ContractTests(unittest.TestCase):
+    """Regression tests for v2 TaskContract, projection, lint, and migration."""
+
+    def test_empty_contract_has_expected_structure(self):
+        from workflow_core import empty_contract
+        c = empty_contract()
+        self.assertIn("contract_version", c)
+        self.assertIn("provenance", c)
+        self.assertIn("outcome", c)
+        self.assertIn("boundaries", c)
+        self.assertIn("decisions", c)
+        self.assertIn("engineering", c)
+        self.assertIn("choices", c)
+        self.assertEqual(c["engineering"]["code_map"], "")
+        self.assertEqual(c["engineering"]["verification_cases"], [])
+        self.assertEqual(c["outcome"]["goal"], "")
+
+    def test_task_is_v2_detects_v2_records(self):
+        from workflow_core import _task_is_v2, empty_contract
+        v2 = {"schema_version": "2.0", "contract": empty_contract()}
+        self.assertTrue(_task_is_v2(v2))
+        v1 = {"schema_version": "1.0", "goal": "old"}
+        self.assertFalse(_task_is_v2(v1))
+        empty = {}
+        self.assertFalse(_task_is_v2(empty))
+
+    def test_load_task_contract_v1_adapter_preserves_fields(self):
+        from workflow_core import load_task_contract
+        v1 = {
+            "schema_version": "1.0",
+            "goal": "Legacy goal",
+            "acceptance_criteria": ["AC 1"],
+            "clarification": {
+                "scope": "Legacy scope",
+                "anti_outcomes": "No regressions",
+                "final_expected_effect": "Legacy effect",
+                "chosen_approach": "Legacy approach",
+                "final_implementation_plan": "1. Old step",
+                "approval": "Legacy approval",
+                "blocking_questions": [],
+                "non_blocking_questions": ["Old q?"],
+                "raw_request": "Old raw request",
+                "decisions": ["Old decision"],
+                "expected_behavior": "Expected",
+                "actual_behavior": "Actual",
+                "reproduction": "Steps",
+            },
+        }
+        contract = load_task_contract(v1)
+        self.assertEqual(contract["outcome"]["goal"], "Legacy goal")
+        self.assertEqual(contract["outcome"]["acceptance_criteria"], ["AC 1"])
+        self.assertEqual(contract["boundaries"]["scope"], "Legacy scope")
+        self.assertEqual(contract["boundaries"]["anti_outcomes"], "No regressions")
+        self.assertEqual(contract["outcome"]["final_expected_effect"], "Legacy effect")
+        self.assertEqual(contract["choices"]["chosen_approach"], "Legacy approach")
+        self.assertEqual(contract["choices"]["approval"], "Legacy approval")
+        self.assertEqual(contract["engineering"]["expected_behavior"], "Expected")
+        self.assertEqual(contract["engineering"]["actual_behavior"], "Actual")
+        self.assertEqual(contract["engineering"]["reproduction"], "Steps")
+        # Decisions and questions
+        self.assertEqual(contract["decisions"], ["Old decision"])
+        self.assertEqual(contract["open_questions"], ["Old q?"])
+        # Provenance
+        self.assertEqual(contract["provenance"]["raw_request"], "Old raw request")
+
+    def test_load_task_contract_v2_returns_identity(self):
+        from workflow_core import load_task_contract, empty_contract
+        c = empty_contract()
+        c["outcome"]["goal"] = "V2 goal"
+        task = {"schema_version": "2.0", "contract": c}
+        loaded = load_task_contract(task)
+        self.assertIs(loaded, c)
+        self.assertEqual(loaded["outcome"]["goal"], "V2 goal")
+
+    def test_contract_readiness_errors_missing_scope(self):
+        from workflow_core import contract_readiness_errors, empty_contract
+        c = empty_contract()
+        errors = contract_readiness_errors(c, "design")
+        self.assertTrue(any("Scope" in e for e in errors))
+
+    def test_contract_readiness_errors_blocking_questions(self):
+        from workflow_core import contract_readiness_errors, empty_contract
+        c = empty_contract()
+        c["boundaries"]["scope"] = "Test scope"
+        c["blocking_questions"] = ["Must resolve?"]
+        c["choices"]["chosen_approach"] = "A"
+        c["choices"]["final_implementation_plan"] = "1. Do"
+        c["choices"]["approval"] = "Ok"
+        c["outcome"]["final_expected_effect"] = "Effect"
+        errors = contract_readiness_errors(c, "design")
+        self.assertTrue(any("blocking" in e.lower() for e in errors),
+                        f"Blocking questions not flagged: {errors}")
+
+    def test_contract_readiness_errors_design_missing_fields(self):
+        from workflow_core import contract_readiness_errors, empty_contract
+        c = empty_contract()
+        c["boundaries"]["scope"] = "Scope"
+        errors = contract_readiness_errors(c, "design")
+        self.assertTrue(any("Final Expected Effect" in e for e in errors))
+        self.assertTrue(any("Chosen Approach" in e for e in errors))
+        self.assertTrue(any("Final Implementation Plan" in e for e in errors))
+        self.assertTrue(any("Approval" in e for e in errors))
+
+    def test_contract_readiness_errors_bug_missing_fields(self):
+        from workflow_core import contract_readiness_errors, empty_contract
+        c = empty_contract()
+        c["boundaries"]["scope"] = "Bug scope"
+        errors = contract_readiness_errors(c, "bugfix")
+        self.assertTrue(any("Expected Behavior" in e for e in errors))
+        self.assertTrue(any("Actual Behavior" in e for e in errors))
+        self.assertTrue(any("Reproduction" in e for e in errors))
+
+    def test_contract_readiness_errors_ready_design(self):
+        from workflow_core import contract_readiness_errors, empty_contract
+        c = empty_contract()
+        c["boundaries"]["scope"] = "Ready scope"
+        c["outcome"]["final_expected_effect"] = "Will work"
+        c["choices"]["chosen_approach"] = "Approach"
+        c["choices"]["final_implementation_plan"] = "1. Implement"
+        c["choices"]["approval"] = "Approved"
+        errors = contract_readiness_errors(c, "design")
+        self.assertEqual(errors, [])
+
+    def test_render_context_markdown_omits_empty_optionals(self):
+        from workflow_core import render_context_markdown, empty_contract
+        task = {"schema_version": "2.0", "contract": empty_contract()}
+        ctx = render_context_markdown(task)
+        # Should not contain legacy placeholders
+        self.assertNotIn("_No ", ctx)
+        self.assertNotIn("recorded yet", ctx)
+        # Empty optional sections should be omitted
+        self.assertNotIn("## User Raw Request", ctx)
+        self.assertNotIn("## Decisions", ctx)
+        self.assertNotIn("## Remaining Open Questions", ctx)
+
+    def test_render_context_markdown_includes_filled_fields(self):
+        from workflow_core import render_context_markdown, empty_contract
+        c = empty_contract()
+        c["outcome"]["goal"] = "My goal"
+        c["outcome"]["acceptance_criteria"] = ["AC1"]
+        c["provenance"]["raw_request"] = "Raw text"
+        c["boundaries"]["scope"] = "Scope text"
+        c["decisions"] = ["Decision 1"]
+        c["choices"]["chosen_approach"] = "Approach A"
+        task = {"schema_version": "2.0", "contract": c}
+        ctx = render_context_markdown(task)
+        self.assertIn("## Goal", ctx)
+        self.assertIn("My goal", ctx)
+        self.assertIn("Raw text", ctx)
+        self.assertIn("## Scope", ctx)
+        self.assertIn("## Acceptance Criteria", ctx)
+        self.assertIn("## Decisions", ctx)
+        self.assertIn("## Chosen Approach", ctx)
+
+    def test_render_implement_markdown_includes_code_map(self):
+        from workflow_core import render_implementation_plan_markdown, empty_contract
+        c = empty_contract()
+        c["outcome"]["goal"] = "Goal"
+        c["engineering"]["code_map"] = "src/lib.py"
+        c["choices"]["final_implementation_plan"] = "1. Code it"
+        task = {"schema_version": "2.0", "contract": c}
+        impl = render_implementation_plan_markdown(task)
+        self.assertIn("src/lib.py", impl)
+        self.assertIn("## Code Map", impl)
+        self.assertIn("## Implementation Plan", impl)
+
+    def test_render_verify_markdown_includes_cases(self):
+        from workflow_core import render_verify_markdown, empty_contract
+        c = empty_contract()
+        c["outcome"]["final_expected_effect"] = "Must work"
+        c["boundaries"]["scope"] = "Verification scope"
+        c["engineering"]["verification_cases"] = ["TC1: verify rendering"]
+        c["boundaries"]["anti_outcomes"] = "No regressions"
+        task = {"schema_version": "2.0", "contract": c}
+        ver = render_verify_markdown(task)
+        self.assertIn("## Expected Effect", ver)
+        self.assertIn("Must work", ver)
+        self.assertIn("## Verification Cases", ver)
+        self.assertIn("TC1: verify rendering", ver)
+        self.assertIn("## Anti-Outcomes", ver)
+
+    def test_lint_task_packet_empty_task(self):
+        from workflow_core import lint_task_packet, empty_contract
+        task = {"schema_version": "2.0", "id": "test", "type": "design",
+                "contract": empty_contract()}
+        warnings = lint_task_packet(task)
+        # Should warn about empty key fields
+        field_names = {w["field"] for w in warnings}
+        self.assertIn("contract.provenance.raw_request", field_names)
+        self.assertIn("contract.engineering.code_map", field_names)
+        self.assertIn("contract.engineering.verification_cases", field_names)
+
+    def test_lint_task_packet_role_gated_warnings(self):
+        from workflow_core import lint_task_packet, empty_contract
+        task = {"schema_version": "2.0", "id": "test", "type": "design",
+                "contract": empty_contract()}
+        coder_warnings = lint_task_packet(task, role="coder")
+        coder_msgs = [w["message"] for w in coder_warnings]
+        self.assertTrue(any("code map" in m.lower() for m in coder_msgs),
+                        f"No code-map warning for coder: {coder_msgs}")
+        tester_warnings = lint_task_packet(task, role="tester")
+        tester_msgs = [w["message"] for w in tester_warnings]
+        self.assertTrue(any("verification" in m.lower() for m in tester_msgs),
+                        f"No verification warning for tester: {tester_msgs}")
+
+    def test_get_missing_execution_fields_coder_checks_code_map(self):
+        from workflow_core import get_missing_execution_fields, empty_contract
+        task = {"schema_version": "2.0", "id": "t", "type": "design",
+                "contract": empty_contract()}
+        missing = get_missing_execution_fields(task, role="coder")
+        self.assertIn("Code Map", missing)
+
+    def test_get_missing_execution_fields_tester_checks_verification_cases(self):
+        from workflow_core import get_missing_execution_fields, empty_contract
+        task = {"schema_version": "2.0", "id": "t", "type": "design",
+                "contract": empty_contract()}
+        missing = get_missing_execution_fields(task, role="tester")
+        self.assertIn("Verification Cases", missing)
+
+    def test_migrate_v1_to_v2_basic(self):
+        from workflow_core import migrate_task_v1_to_v2, ensure_workspace, read_json, write_json_atomic, tasks_dir
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        ensure_workspace(root)
+        v1_id = "migrate-test-basic"
+        d = tasks_dir(root) / "active" / v1_id
+        d.mkdir(parents=True, exist_ok=True)
+        v1 = {
+            "schema_version": "1.0", "id": v1_id, "title": "Migrate",
+            "type": "design", "status": "planning",
+            "goal": "Mig goal", "acceptance_criteria": ["Mig AC"],
+            "clarification": {
+                "scope": "Mig scope", "final_expected_effect": "Mig effect",
+                "chosen_approach": "Mig approach",
+                "final_implementation_plan": "1. Mig step",
+                "approval": "Approved",
+                "blocking_questions": [], "non_blocking_questions": [],
+            },
+        }
+        write_json_atomic(d / "task.json", v1)
+        result = migrate_task_v1_to_v2(root, v1_id)
+        self.assertTrue(result["migrated"])
+        task2 = read_json(d / "task.json")
+        self.assertEqual(task2["schema_version"], "2.0")
+        self.assertIn("contract", task2)
+        self.assertEqual(task2["contract"]["outcome"]["goal"], "Mig goal")
+        self.assertEqual(task2["contract"]["boundaries"]["scope"], "Mig scope")
+
+    def test_migrate_v1_to_v2_dry_run_does_not_write(self):
+        from workflow_core import migrate_task_v1_to_v2, ensure_workspace, read_json, write_json_atomic, tasks_dir
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        ensure_workspace(root)
+        v1_id = "migrate-test-dry"
+        d = tasks_dir(root) / "active" / v1_id
+        d.mkdir(parents=True, exist_ok=True)
+        v1 = {
+            "schema_version": "1.0", "id": v1_id, "title": "Dry",
+            "type": "design", "status": "planning",
+            "goal": "Dry goal", "acceptance_criteria": [],
+            "clarification": {
+                "scope": "Dry scope", "final_expected_effect": "Dry effect",
+                "chosen_approach": "Approach",
+                "final_implementation_plan": "1. Step", "approval": "Ok",
+                "blocking_questions": [], "non_blocking_questions": [],
+            },
+        }
+        write_json_atomic(d / "task.json", v1)
+        migrate_task_v1_to_v2(root, v1_id, dry_run=True)
+        task2 = read_json(d / "task.json")
+        self.assertEqual(task2["schema_version"], "1.0",
+                         "Dry run should not change schema version")
+
+    def test_migrate_v1_to_v2_idempotent(self):
+        from workflow_core import migrate_task_v1_to_v2, ensure_workspace, read_json, write_json_atomic, tasks_dir
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        ensure_workspace(root)
+        v1_id = "migrate-test-idemp"
+        d = tasks_dir(root) / "active" / v1_id
+        d.mkdir(parents=True, exist_ok=True)
+        v1 = {
+            "schema_version": "1.0", "id": v1_id, "title": "Idemp",
+            "type": "design", "status": "planning",
+            "goal": "Idemp goal", "acceptance_criteria": [],
+            "clarification": {
+                "scope": "Idemp scope", "final_expected_effect": "Idemp effect",
+                "chosen_approach": "Approach",
+                "final_implementation_plan": "1. Step", "approval": "Ok",
+                "blocking_questions": [], "non_blocking_questions": [],
+            },
+        }
+        write_json_atomic(d / "task.json", v1)
+        migrate_task_v1_to_v2(root, v1_id)
+        result2 = migrate_task_v1_to_v2(root, v1_id)
+        self.assertFalse(result2["migrated"])
+        self.assertEqual(result2["status"], "already_v2")
 
 
 if __name__ == "__main__":

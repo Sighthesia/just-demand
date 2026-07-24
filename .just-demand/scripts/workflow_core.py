@@ -8,12 +8,922 @@ import subprocess
 import tempfile
 import uuid
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 
 SCHEMA_VERSION = "1.0"
+
+# ---------------------------------------------------------------------------
+# TaskContract v2 — single semantic fact source for task context.
+#
+# Version scheme:
+#   TASK_RECORD_VERSION  — task.json envelope format ("2.0" for contract tasks)
+#   TASK_CONTRACT_VERSION — contract schema inside the "contract" field
+#   PROJECTION_VERSION    — rendered role-view format
+# ---------------------------------------------------------------------------
+TASK_RECORD_VERSION_V2 = "2.0"
+TASK_CONTRACT_VERSION = "1.0"
+PROJECTION_VERSION = "1.0"
+
+# Contract field names that form the shared semantic core.
+CONTRACT_SHARED_FIELDS = frozenset({
+    "goal",
+    "acceptance_criteria",
+    "scope",
+    "out_of_scope",
+    "invariants",
+    "anti_outcomes",
+    "decisions",
+    "open_questions",
+})
+
+# Contract field names that describe engineering / execution context.
+CONTRACT_ENGINEERING_FIELDS = frozenset({
+    "code_map",
+    "risks",
+    "verification_cases",
+    "work_items",
+    "dependencies",
+})
+
+# All known contract fields.
+CONTRACT_ALL_FIELDS = CONTRACT_SHARED_FIELDS | CONTRACT_ENGINEERING_FIELDS
+
+# Role-to-required-projection-files mapping.
+ROLE_PROJECTION_FILES: dict[str, list[str]] = {
+    "advisor":    ["context.md"],
+    "researcher": ["research.md"],
+    "coder":      ["context.md", "implement.md"],
+    "tester":     ["context.md", "verify.md"],
+}
+
+# Mapping from intake section heading -> contract field name.
+# Same semantics as MARKDOWN_TO_CLARIFICATION_FIELD but for v2.
+INTAKE_TO_CONTRACT_FIELD: dict[str, str] = {
+    "Goal": "goal",
+    "Raw Request": "raw_request",
+    "Current Understanding": "current_understanding",
+    "Expected Outcome": "expected_outcome",
+    "Scope": "scope",
+    "Out Of Scope": "out_of_scope",
+    "Anti-Outcomes": "anti_outcomes",
+    "Decisions": "decisions",
+    "Open Questions": "open_questions",
+    "Final Expected Effect": "final_expected_effect",
+    "Chosen Approach": "chosen_approach",
+    "Final Implementation Plan": "final_implementation_plan",
+    "Approach Options": "approach_options",
+    "Validation": "validation",
+    "Approval": "approval",
+    "Blocking Questions": "blocking_questions",
+    "Non-Blocking Questions": "non_blocking_questions",
+}
+
+# ---------------------------------------------------------------------------
+# Contract helpers
+# ---------------------------------------------------------------------------
+
+
+def empty_contract() -> dict[str, Any]:
+    """Return a blank v2 task contract."""
+    return {
+        "contract_version": TASK_CONTRACT_VERSION,
+        "provenance": {
+            "raw_request": "",
+            "intake_id": "",
+            "approved_at": "",
+        },
+        "outcome": {
+            "goal": "",
+            "acceptance_criteria": [],
+            "final_expected_effect": "",
+        },
+        "boundaries": {
+            "scope": "",
+            "out_of_scope": "",
+            "invariants": "",
+            "anti_outcomes": "",
+        },
+        "decisions": [],
+        "blocking_questions": [],
+        "open_questions": [],
+        "engineering": {
+            "code_map": "",
+            "risks": "",
+            "verification_cases": [],
+            "work_items": [],
+            "dependencies": [],
+            "expected_behavior": "",
+            "actual_behavior": "",
+            "reproduction": "",
+        },
+        "choices": {
+            "chosen_approach": "",
+            "final_implementation_plan": "",
+            "approach_options": "",
+            "approval": "",
+        },
+    }
+
+
+def _safe_str(value: Any) -> str:
+    return str(value).strip() if value else ""
+
+
+def _safe_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [line.strip() for line in value.strip().splitlines() if line.strip()]
+    return []
+
+
+def load_task_contract(task: dict[str, Any]) -> dict[str, Any]:
+    """Load the semantic contract from a task record.
+
+    v2 tasks have a top-level ``contract`` dict.
+    v1 tasks are adapted from the legacy ``clarification`` / ``goal`` /
+    ``acceptance_criteria`` fields — the adapter is read-only and does not
+    mutate the stored task data.
+    """
+    task_record_version = str(task.get("schema_version", "1.0"))
+    if task_record_version >= "2.0" and "contract" in task:
+        return task["contract"]
+
+    # v1 adapter — build a best-effort contract from legacy fields.
+    # Preserves original values faithfully (no fallback chaining) so that
+    # readiness checks detect genuinely missing fields.
+    clarification = task.get("clarification", {}) or {}
+    goal = _safe_str(task.get("goal", ""))
+    acceptance = _safe_list(task.get("acceptance_criteria", []))
+    scope = _safe_str(clarification.get("scope", ""))
+    anti_outcomes = _safe_str(clarification.get("anti_outcomes", ""))
+    final_expected_effect = _safe_str(clarification.get("final_expected_effect", ""))
+    chosen_approach = _safe_str(clarification.get("chosen_approach", ""))
+    impl_plan = _safe_str(clarification.get("final_implementation_plan", ""))
+    approach_options = _safe_str(clarification.get("approach_options", ""))
+    approval = _safe_str(clarification.get("approval", ""))
+    blocking = _safe_list(clarification.get("blocking_questions", []))
+    non_blocking = _safe_list(clarification.get("non_blocking_questions", []))
+    raw_req = _safe_str(clarification.get("raw_request", ""))
+    current_understanding = _safe_str(clarification.get("current_understanding", ""))
+
+    # Collect decisions from intake if possible
+    decisions: list[str] = _safe_list(clarification.get("decisions", []))
+
+    return {
+        "contract_version": TASK_CONTRACT_VERSION,
+        "provenance": {
+            "raw_request": raw_req,
+            "intake_id": _safe_str(task.get("source_intake_id", "")),
+            "approved_at": "",
+        },
+        "outcome": {
+            "goal": goal,
+            "acceptance_criteria": acceptance,
+            "final_expected_effect": final_expected_effect,
+        },
+        "boundaries": {
+            "scope": scope,
+            "out_of_scope": "",
+            "invariants": "",
+            "anti_outcomes": anti_outcomes,
+        },
+        "decisions": decisions,
+        "blocking_questions": blocking,
+        "open_questions": non_blocking,
+        "engineering": {
+            "code_map": "",
+            "risks": "",
+            "verification_cases": [],
+            "work_items": [],
+            "dependencies": [],
+            "expected_behavior": _safe_str(clarification.get("expected_behavior", "")),
+            "actual_behavior": _safe_str(clarification.get("actual_behavior", "")),
+            "reproduction": _safe_str(clarification.get("reproduction", "")),
+        },
+        "choices": {
+            "chosen_approach": chosen_approach,
+            "final_implementation_plan": impl_plan,
+            "approach_options": approach_options,
+            "approval": approval,
+        },
+    }
+
+
+def contract_readiness_errors(contract: dict[str, Any], task_type: str) -> list[str]:
+    """Check whether a contract has all required fields for execution readiness.
+
+    Returns a list of error messages (empty = ready).
+    Mirrors legacy ``intake_readiness_errors`` and ``task_is_ready_for_execution``.
+    """
+    errors: list[str] = []
+    boundaries = contract.get("boundaries", {}) or {}
+    outcome = contract.get("outcome", {}) or {}
+    choices = contract.get("choices", {}) or {}
+    provenance = contract.get("provenance", {}) or {}
+    engineering = contract.get("engineering", {}) or {}
+
+    if not _safe_str(boundaries.get("scope", "")):
+        errors.append("Scope is required before execution.")
+
+    blocking = contract.get("blocking_questions", contract.get("open_questions", []))
+    if isinstance(blocking, list) and len(blocking) > 0:
+        errors.append("Blocking questions must be cleared before execution.")
+
+    design_impl_types = {"design", "implementation", "feature", "feat", "refactor", "architecture"}
+    bug_fix_types = {"bug", "bugfix", "fix", "incident"}
+    task_type_lower = task_type.strip().lower()
+
+    if task_type_lower in bug_fix_types:
+        if not _safe_str(engineering.get("expected_behavior", "")):
+            errors.append("Expected Behavior is required for bug or mismatch work.")
+        if not _safe_str(engineering.get("actual_behavior", "")):
+            errors.append("Actual Behavior is required for bug or mismatch work.")
+        if not _safe_str(engineering.get("reproduction", "")):
+            errors.append("Reproduction is required for bug or mismatch work.")
+
+    if task_type_lower in design_impl_types:
+        if not _safe_str(outcome.get("final_expected_effect", "")):
+            errors.append("Final Expected Effect is required for design or implementation work.")
+        if not _safe_str(choices.get("chosen_approach", "")):
+            errors.append("Chosen Approach is required for design or implementation work.")
+        if not _safe_str(choices.get("final_implementation_plan", "")):
+            errors.append("Final Implementation Plan is required for design or implementation work.")
+        if not _safe_str(choices.get("approval", "")):
+            errors.append("Approval is required for design or implementation work.")
+
+    return errors
+
+
+def intake_readiness_errors(root: Path, intake_id: str, task_type: str) -> list[str]:
+    """Compatibility wrapper for tests and direct callers.
+
+    Reads the intake file and returns readiness errors via the new
+    contract-based function.
+    """
+    clarification = build_clarification_payload(root, intake_id, task_type)
+    temp_task = {
+        "schema_version": SCHEMA_VERSION,
+        "type": task_type,
+        "goal": "",
+        "acceptance_criteria": [],
+        "clarification": clarification,
+    }
+    contract = load_task_contract(temp_task)
+    return contract_readiness_errors(contract, task_type)
+
+
+# ---------------------------------------------------------------------------
+# Dual-access helpers (v1/v2 transparent)
+# ---------------------------------------------------------------------------
+
+
+def _task_is_v2(task: dict[str, Any]) -> bool:
+    """Return True if the task record uses v2 contract format."""
+    return str(task.get("schema_version", "1.0")) >= "2.0" and "contract" in task
+
+
+def _task_goal(task: dict[str, Any]) -> str:
+    """Read task goal from contract (v2) or top-level (v1)."""
+    if _task_is_v2(task):
+        return _safe_str(task.get("contract", {}).get("outcome", {}).get("goal", ""))
+    return _safe_str(task.get("goal", ""))
+
+
+def _task_acceptance(task: dict[str, Any]) -> list[str]:
+    """Read acceptance criteria from contract (v2) or top-level (v1)."""
+    if _task_is_v2(task):
+        return _safe_list(task.get("contract", {}).get("outcome", {}).get("acceptance_criteria", []))
+    return _safe_list(task.get("acceptance_criteria", []))
+
+
+def _task_clarification(task: dict[str, Any]) -> dict[str, Any]:
+    """Read clarification dict from contract (v2) or top-level (v1).
+
+    For v2 tasks, this maps the structured contract back to flat
+    clarification-style field names so callers work transparently.
+    """
+    if _task_is_v2(task):
+        contract = task.get("contract", {}) or {}
+        eng = contract.get("engineering", {}) or {}
+        choices = contract.get("choices", {}) or {}
+        outcome = contract.get("outcome", {}) or {}
+        boundaries = contract.get("boundaries", {}) or {}
+        return {
+            "scope": _safe_str(boundaries.get("scope", "")),
+            "anti_outcomes": _safe_str(boundaries.get("anti_outcomes", "")),
+            "raw_request": _safe_str(contract.get("provenance", {}).get("raw_request", "")),
+            "final_expected_effect": _safe_str(outcome.get("final_expected_effect", "")),
+            "chosen_approach": _safe_str(choices.get("chosen_approach", "")),
+            "final_implementation_plan": _safe_str(choices.get("final_implementation_plan", "")),
+            "approach_options": _safe_str(choices.get("approach_options", "")),
+            "approval": _safe_str(choices.get("approval", "")),
+            "blocking_questions": _safe_list(contract.get("blocking_questions", [])),
+            "non_blocking_questions": _safe_list(contract.get("open_questions", [])),
+            "expected_behavior": _safe_str(eng.get("expected_behavior", "")),
+            "actual_behavior": _safe_str(eng.get("actual_behavior", "")),
+            "reproduction": _safe_str(eng.get("reproduction", "")),
+            "decisions": _safe_list(contract.get("decisions", [])),
+            "code_map": _safe_str(eng.get("code_map", "")),
+            "verification_cases": _safe_list(eng.get("verification_cases", [])),
+        }
+    return dict(task.get("clarification", {}) or {})
+
+
+# ---------------------------------------------------------------------------
+# v1 → v2 migration
+# ---------------------------------------------------------------------------
+
+
+def migrate_task_v1_to_v2(root: Path, task_id: str, *, dry_run: bool = False) -> dict[str, Any]:
+    """Migrate a single active v1 task to v2 contract format.
+
+    The migration is idempotent — v2 tasks are silently skipped, v1 tasks
+    receive a ``contract`` field and are updated to ``schema_version = "2.0"``.
+    The original v1 fields (``goal``, ``acceptance_criteria``, ``clarification``)
+    are kept for backward-compatible reads but are no longer the authoritative
+    semantic source.
+
+    Archive tasks are always refused — use ``find_task_json_path`` to verify
+    the task is active before calling this function.
+
+    Args:
+        root: Project root.
+        task_id: Active task id (must be in active/ directory).
+        dry_run: When True, report what would change without writing.
+
+    Returns:
+        Dict with task_id, migrated (bool), status, and any warnings.
+
+    Raises:
+        FileNotFoundError: Task not found or not active.
+        RuntimeError: Task is in archive or has non-migratable status.
+    """
+    ensure_workspace(root)
+    active_dir = tasks_dir(root) / "active"
+    task_dir = active_dir / task_id
+    task_json_path = task_dir / "task.json"
+
+    if not task_json_path.is_file():
+        raise FileNotFoundError(f"Active task not found: {task_id}")
+
+    task = read_json(task_json_path)
+
+    # Already v2 — idempotent skip
+    if _task_is_v2(task):
+        return {"task_id": task_id, "migrated": False, "status": "already_v2"}
+
+    # Refuse done tasks that should be archived instead
+    status = str(task.get("status") or "").strip().lower()
+    if status == "done":
+        raise RuntimeError(f"Task {task_id} is 'done' — archive it before migration (or use --force to override)")
+
+    # Build contract from existing v1 fields.
+    contract = load_task_contract(task)
+
+    # Build the updated v2 record.
+    task["schema_version"] = TASK_RECORD_VERSION_V2
+    task["contract"] = contract
+    # Preserve original fields for backward compat but mark them secondary.
+
+    warnings: list[str] = []
+    # Detect gaps in the v1 source data
+    eng = contract.get("engineering", {}) or {}
+    if not _safe_str(eng.get("code_map", "")):
+        warnings.append("No code_map — coder will lack file-level guidance.")
+    if not _safe_list(eng.get("verification_cases", [])):
+        warnings.append("No verification_cases — tester will lack specific checks.")
+
+    if dry_run:
+        return {
+            "task_id": task_id,
+            "migrated": True,
+            "status": "dry_run",
+            "warnings": warnings,
+            "contract_version": TASK_CONTRACT_VERSION,
+        }
+
+    # Write the updated task record atomically.
+    write_json_atomic(task_json_path, task)
+
+    # Regenerate projections from the new contract.
+    (task_dir / "context.md").write_text(render_context_markdown(task), encoding="utf-8")
+    (task_dir / "research.md").write_text(render_research_markdown(task), encoding="utf-8")
+    (task_dir / "implement.md").write_text(render_implementation_plan_markdown(task), encoding="utf-8")
+    (task_dir / "verify.md").write_text(render_verify_markdown(task), encoding="utf-8")
+
+    append_task_event(
+        root, task_id, "task_migrated",
+        f"Migrated v1→v2 contract (schema_version={TASK_RECORD_VERSION_V2})",
+    )
+
+    return {
+        "task_id": task_id,
+        "migrated": True,
+        "status": "migrated",
+        "warnings": warnings,
+        "contract_version": TASK_CONTRACT_VERSION,
+    }
+
+
+def migrate_v1_tasks(root: Path, task_ids: list[str] | None = None, *, dry_run: bool = False) -> dict[str, Any]:
+    """Batch-migrate active v1 tasks to v2 contract format.
+
+    Args:
+        root: Project root.
+        task_ids: Optional list of task IDs to migrate. If None or empty,
+            all active v1 tasks are migrated.
+        dry_run: When True, report what would change without writing.
+
+    Returns:
+        Dict with:
+          - migrated: list of migrated task summaries
+          - skipped: list of skipped task summaries (already v2, not found, etc.)
+          - errors: list of error dicts with task_id and error message
+          - total_count: int
+          - dry_run: bool
+    """
+    ensure_workspace(root)
+    active_dir = tasks_dir(root) / "active"
+    if not active_dir.is_dir():
+        return {"migrated": [], "skipped": [], "errors": [], "total_count": 0, "dry_run": dry_run}
+
+    # Resolve task IDs if not provided or empty list
+    if not task_ids:
+        task_ids = sorted(
+            d.name for d in active_dir.iterdir()
+            if d.is_dir() and (d / "task.json").is_file()
+        )
+
+    migrated_list: list[dict[str, Any]] = []
+    skipped_list: list[dict[str, Any]] = []
+    errors_list: list[dict[str, Any]] = []
+
+    for tid in task_ids:
+        try:
+            result = migrate_task_v1_to_v2(root, tid, dry_run=dry_run)
+            if result.get("migrated") and result.get("status") in ("migrated", "dry_run"):
+                migrated_list.append(result)
+            else:
+                skipped_list.append(result)
+        except (FileNotFoundError, RuntimeError) as exc:
+            errors_list.append({"task_id": tid, "error": str(exc)})
+
+    return {
+        "migrated": migrated_list,
+        "skipped": skipped_list,
+        "errors": errors_list,
+        "total_count": len(task_ids),
+        "dry_run": dry_run,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Code-map readiness
+# ---------------------------------------------------------------------------
+
+
+def code_map_readiness_errors(contract: dict[str, Any]) -> list[str]:
+    """Check whether a code-dependent task has a usable code map."""
+    eng = contract.get("engineering", {}) or {}
+    code_map = _safe_str(eng.get("code_map", ""))
+    if not code_map:
+        return ["Code map is empty — coder will not have file-level guidance."]
+    return []
+
+
+def verification_readiness_errors(contract: dict[str, Any]) -> list[str]:
+    """Check whether verification cases are available."""
+    eng = contract.get("engineering", {}) or {}
+    cases = _safe_list(eng.get("verification_cases", []))
+    if not cases:
+        return ["No verification cases defined — tester cannot verify against specific checks."]
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Deterministic role projections
+# ---------------------------------------------------------------------------
+
+
+def _render_provenance_block(provenance: dict[str, Any]) -> str:
+    lines = []
+    raw = _safe_str(provenance.get("raw_request", ""))
+    if raw:
+        lines += ["## User Raw Request", "", raw, ""]
+    intake_id = _safe_str(provenance.get("intake_id", ""))
+    if intake_id:
+        lines += ["**Source intake:** " + intake_id]
+    return "\n".join(lines)
+
+
+def _render_outcome_block(outcome: dict[str, Any]) -> str:
+    lines = []
+    goal = _safe_str(outcome.get("goal", ""))
+    if goal:
+        lines += ["## Goal", "", goal, ""]
+    effect = _safe_str(outcome.get("final_expected_effect", ""))
+    if effect:
+        lines += ["## User Expected Effect", "", effect, ""]
+    acceptance = _safe_list(outcome.get("acceptance_criteria", []))
+    if acceptance:
+        lines += ["## Acceptance Criteria", ""]
+        for c in acceptance:
+            lines.append(f"- {c}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _render_boundaries_block(boundaries: dict[str, Any]) -> str:
+    lines = []
+    scope = _safe_str(boundaries.get("scope", ""))
+    if scope:
+        lines += ["## Scope", "", scope, ""]
+    oos = _safe_str(boundaries.get("out_of_scope", ""))
+    if oos:
+        lines += ["## Out Of Scope", "", oos, ""]
+    invariants = _safe_str(boundaries.get("invariants", ""))
+    if invariants:
+        lines += ["## Invariants", "", invariants, ""]
+    anti = _safe_str(boundaries.get("anti_outcomes", ""))
+    if anti:
+        lines += ["## Anti-Outcomes", "", anti, ""]
+    return "\n".join(lines)
+
+
+def _render_decisions_block(decisions: list[str]) -> str:
+    if not decisions:
+        return ""
+    lines = ["## Decisions", ""]
+    for d in decisions:
+        lines.append(f"- {_safe_str(d)}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_open_questions_block(questions: list[str]) -> str:
+    if not questions:
+        return ""
+    lines = ["## Remaining Open Questions", ""]
+    for q in questions:
+        lines.append(f"- {_safe_str(q)}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_engineering_block(eng: dict[str, Any], *, include_code_map: bool = True, include_verification: bool = True) -> str:
+    lines = []
+    code_map = _safe_str(eng.get("code_map", ""))
+    if include_code_map and code_map:
+        lines += ["## Code Map", "", code_map, ""]
+
+    # Bug/mismatch fields
+    expected = _safe_str(eng.get("expected_behavior", ""))
+    if expected:
+        lines += ["## Expected Behavior", "", expected, ""]
+    actual = _safe_str(eng.get("actual_behavior", ""))
+    if actual:
+        lines += ["## Actual Behavior", "", actual, ""]
+    reproduction = _safe_str(eng.get("reproduction", ""))
+    if reproduction:
+        lines += ["## Reproduction", "", reproduction, ""]
+
+    risks = _safe_str(eng.get("risks", ""))
+    if risks:
+        lines += ["## Known Risks", "", risks, ""]
+    work_items = _safe_list(eng.get("work_items", []))
+    if work_items:
+        lines += ["## Work Items", ""]
+        for item in work_items:
+            lines.append(f"- {item}")
+        lines.append("")
+    deps = _safe_list(eng.get("dependencies", []))
+    if deps:
+        lines += ["## Dependencies", ""]
+        for d in deps:
+            lines.append(f"- {d}")
+        lines.append("")
+    cases = _safe_list(eng.get("verification_cases", []))
+    if include_verification and cases:
+        lines += ["## Verification Cases", ""]
+        for case in cases:
+            lines.append(f"- [ ] {case}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _render_choices_block(choices: dict[str, Any]) -> str:
+    lines = []
+    approach = _safe_str(choices.get("chosen_approach", ""))
+    if approach:
+        lines += ["## Chosen Approach", "", approach, ""]
+    plan = _safe_str(choices.get("final_implementation_plan", ""))
+    if plan:
+        lines += ["## Implementation Plan", "", plan, ""]
+    options = _safe_str(choices.get("approach_options", ""))
+    if options:
+        lines += ["## Approach Options", "", options, ""]
+    approval = _safe_str(choices.get("approval", ""))
+    if approval:
+        lines += ["## Approval", "", approval, ""]
+    return "\n".join(lines)
+
+
+def render_contract_projection(contract: dict[str, Any], role: str, task: dict[str, Any] | None = None) -> str:
+    """Render the contract as a deterministic markdown view for the given role.
+
+    ``role`` is one of ``advisor``, ``researcher``, ``coder``, ``tester``.
+    Returns a self-contained markdown string.
+    """
+    provenance = contract.get("provenance", {}) or {}
+    outcome = contract.get("outcome", {}) or {}
+    boundaries = contract.get("boundaries", {}) or {}
+    decisions = _safe_list(contract.get("decisions", []))
+    open_questions = _safe_list(contract.get("open_questions", []))
+    engineering = contract.get("engineering", {}) or {}
+    choices = contract.get("choices", {}) or {}
+
+    parts = ["# Context\n"]
+
+    # Provenance -> only advisor/researcher see raw request
+    if role in ("advisor", "researcher"):
+        prov = _render_provenance_block(provenance)
+        if prov:
+            parts.append(prov)
+
+    # Outcome -> everyone sees goal and acceptance
+    parts.append(_render_outcome_block(outcome))
+
+    # Boundaries -> everyone sees scope and anti-outcomes
+    parts.append(_render_boundaries_block(boundaries))
+
+    # Decisions -> advisor/researcher see decisions
+    if role in ("advisor", "researcher"):
+        parts.append(_render_decisions_block(decisions))
+
+    # Open questions -> advisor (all), others (only non-empty)
+    if role == "advisor":
+        parts.append(_render_open_questions_block(open_questions))
+
+    # Engineering context
+    include_code_map = role in ("coder",)
+    include_verification = role in ("tester",)
+    parts.append(_render_engineering_block(engineering, include_code_map=include_code_map, include_verification=include_verification))
+
+    # Choices
+    if role in ("coder", "advisor"):
+        parts.append(_render_choices_block(choices))
+
+    result = "\n".join(part for part in parts if part.strip())
+    return result
+
+
+def render_context_markdown(task: dict[str, Any]) -> str:
+    """Render context.md for a task (advisor role view)."""
+    return render_contract_projection(load_task_contract(task), "advisor", task)
+
+
+def render_research_markdown(task: dict[str, Any]) -> str:
+    """Render research.md for a task (researcher role view)."""
+    contract = load_task_contract(task)
+    outcome = contract.get("outcome", {}) or {}
+    boundaries = contract.get("boundaries", {}) or {}
+
+    parts = [
+        "# Research Context\n",
+        "## Goal\n",
+        _safe_str(outcome.get("goal", "")) or "_No goal recorded._",
+        "",
+        "## Scope\n",
+        _safe_str(boundaries.get("scope", "")) or "_No scope recorded._",
+        "",
+        "## Open Questions\n",
+    ]
+    open_qs = _safe_list(contract.get("open_questions", []))
+    if open_qs:
+        for q in open_qs:
+            parts.append(f"- {q}")
+    else:
+        parts.append("_No open questions._")
+    parts.append("")
+
+    engineering = contract.get("engineering", {}) or {}
+    code_map = _safe_str(engineering.get("code_map", ""))
+    if code_map:
+        parts += ["## Code Map", "", code_map, ""]
+
+    return "\n".join(parts)
+
+
+def render_implementation_plan_markdown(task: dict[str, Any], subtasks: list[dict[str, Any]] | None = None) -> str:
+    """Render implement.md for a task (coder role view)."""
+    contract = load_task_contract(task)
+    outcome = contract.get("outcome", {}) or {}
+    boundaries = contract.get("boundaries", {}) or {}
+    choices = contract.get("choices", {}) or {}
+    engineering = contract.get("engineering", {}) or {}
+
+    plan_text = _safe_str(choices.get("final_implementation_plan", ""))
+    goal = _safe_str(outcome.get("goal", ""))
+    scope = _safe_str(boundaries.get("scope", ""))
+    anti = _safe_str(boundaries.get("anti_outcomes", ""))
+    code_map = _safe_str(engineering.get("code_map", ""))
+    chosen_approach = _safe_str(choices.get("chosen_approach", ""))
+
+    if subtasks is None:
+        subtasks = task.get("subtasks", []) or build_implementation_plan_subtasks(plan_text)
+
+    lines = [
+        "# Implement",
+        "",
+        "## Goal",
+        "",
+        goal or "_No goal recorded._",
+        "",
+        "## Scope",
+        "",
+        scope or "_No scope recorded._",
+        "",
+        "## Anti-Outcomes",
+        "",
+        anti or "_No anti-outcomes recorded._",
+        "",
+    ]
+    if chosen_approach:
+        lines += ["## Chosen Approach", "", chosen_approach, ""]
+    if code_map:
+        lines += ["## Code Map", "", code_map, ""]
+    lines += [
+        "## Implementation Plan",
+        "",
+        plan_text or "_No implementation plan recorded._",
+        "",
+        "## Ordered Todo",
+        "",
+    ]
+    if subtasks:
+        for sub in subtasks:
+            status = str(sub.get("status", "todo") or "todo").strip().lower()
+            marker = "x" if status == "done" else " "
+            lines.append(f"- [{marker}] {sub.get('title', '').strip()}")
+    else:
+        lines.append("- [ ] No ordered steps captured yet.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_verify_markdown(task: dict[str, Any]) -> str:
+    """Render verify.md for a task (tester role view)."""
+    contract = load_task_contract(task)
+    outcome = contract.get("outcome", {}) or {}
+    boundaries = contract.get("boundaries", {}) or {}
+    engineering = contract.get("engineering", {}) or {}
+
+    effect = _safe_str(outcome.get("final_expected_effect", ""))
+    scope = _safe_str(boundaries.get("scope", ""))
+    anti = _safe_str(boundaries.get("anti_outcomes", ""))
+    cases = _safe_list(engineering.get("verification_cases", []))
+    risks = _safe_str(engineering.get("risks", ""))
+
+    lines = [
+        "# Verify",
+        "",
+        "## Expected Effect",
+        "",
+        effect or "_No expected effect recorded._",
+        "",
+        "## Scope",
+        "",
+        scope or "_No scope recorded._",
+        "",
+    ]
+    if anti:
+        lines += ["## Anti-Outcomes", "", anti, ""]
+    if cases:
+        lines += ["## Verification Cases", ""]
+        for case in cases:
+            lines.append(f"- [ ] {case}")
+        lines.append("")
+    if risks:
+        lines += ["## Known Risks", "", risks, ""]
+    return "\n".join(lines)
+
+
+PLAN_STEP_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(?P<title>.+?)\s*$")
+
+
+def extract_ordered_plan_steps(plan_text: str) -> list[str]:
+    text = str(plan_text or "")
+    steps: list[str] = []
+    for line in text.splitlines():
+        match = PLAN_STEP_PATTERN.match(line)
+        if match:
+            title = match.group("title").strip()
+            if title:
+                steps.append(title)
+
+    if steps:
+        return steps
+
+    fallback = [line.strip() for line in text.splitlines() if line.strip()]
+    if fallback:
+        return fallback
+
+    stripped = text.strip()
+    return [stripped] if stripped else []
+
+
+def _render_open_questions_simple(questions: list[str]) -> str:
+    """Render a simple open-questions markdown block."""
+    if not questions:
+        return "# Open Questions\n\n"
+    lines = ["# Open Questions", "", "## Remaining Open Questions", ""]
+    lines.extend(f"- {q}" for q in questions)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_implementation_plan_subtasks(plan_text: str) -> list[dict[str, Any]]:
+    """Build ordered subtask list from implementation plan text."""
+    steps = extract_ordered_plan_steps(plan_text)
+    return [
+        {
+            "id": f"plan-step-{order}",
+            "order": order,
+            "title": title,
+            "status": "todo",
+        }
+        for order, title in enumerate(steps, start=1)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Packet-lint — structured validation of a task packet.
+# ---------------------------------------------------------------------------
+
+
+def lint_task_packet(task: dict[str, Any], role: str | None = None) -> list[dict[str, str]]:
+    """Run structured lint checks on a task packet.
+
+    Returns a list of warning dicts with keys:
+      - field: dotted path to the field
+      - severity: "error" or "warning"
+      - message: human-readable description
+    """
+    warnings: list[dict[str, str]] = []
+    contract = load_task_contract(task)
+    task_type = _safe_str(task.get("type", ""))
+    eng = contract.get("engineering", {}) or {}
+    provenance = contract.get("provenance", {}) or {}
+    outcome = contract.get("outcome", {}) or {}
+    boundaries = contract.get("boundaries", {}) or {}
+    choices = contract.get("choices", {}) or {}
+
+    # Envelope-level checks
+    if not task.get("id"):
+        warnings.append({"field": "id", "severity": "error", "message": "Task has no id."})
+    if not task_type:
+        warnings.append({"field": "type", "severity": "error", "message": "Task has no type."})
+
+    # Provenance
+    if not _safe_str(provenance.get("raw_request", "")):
+        warnings.append({"field": "contract.provenance.raw_request", "severity": "warning", "message": "No raw request recorded."})
+
+    # Outcome
+    if not _safe_str(outcome.get("goal", "")):
+        warnings.append({"field": "contract.outcome.goal", "severity": "warning", "message": "Goal is empty."})
+
+    # Boundaries
+    if not _safe_str(boundaries.get("scope", "")):
+        warnings.append({"field": "contract.boundaries.scope", "severity": "error", "message": "Scope is required."})
+
+    # Engineering
+    if not _safe_str(eng.get("code_map", "")):
+        warnings.append({"field": "contract.engineering.code_map", "severity": "warning", "message": "Code map is empty."})
+    if not _safe_list(eng.get("verification_cases", [])):
+        warnings.append({"field": "contract.engineering.verification_cases", "severity": "warning", "message": "No verification cases defined."})
+
+    # Choices for design/implementation
+    design_types = {"design", "implementation", "feature", "feat", "refactor", "architecture"}
+    if task_type.lower() in design_types:
+        if not _safe_str(choices.get("final_implementation_plan", "")):
+            warnings.append({"field": "contract.choices.final_implementation_plan", "severity": "error", "message": "Implementation plan is required for design/implementation tasks."})
+        if not _safe_str(choices.get("chosen_approach", "")):
+            warnings.append({"field": "contract.choices.chosen_approach", "severity": "error", "message": "Chosen approach is required for design/implementation tasks."})
+        if not _safe_str(choices.get("approval", "")):
+            warnings.append({"field": "contract.choices.approval", "severity": "error", "message": "Approval is required for design/implementation tasks."})
+
+    # Role-filtered warnings
+    if role == "coder" and not _safe_str(eng.get("code_map", "")):
+        warnings.append({"field": "contract.engineering.code_map", "severity": "warning", "message": "Coder will lack file-level guidance without a code map."})
+    if role == "tester" and not _safe_list(eng.get("verification_cases", [])):
+        warnings.append({"field": "contract.engineering.verification_cases", "severity": "warning", "message": "Tester will lack verification targets without verification cases."})
+
+    return warnings
 
 
 def utc_now() -> str:
@@ -157,6 +1067,181 @@ def append_workspace_event(root: Path, event_type: str, entity_type: str, entity
     with events_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event, ensure_ascii=False) + "\n")
     return event
+
+
+# ---------------------------------------------------------------------------
+# v2 contract builder from intake
+# ---------------------------------------------------------------------------
+
+
+def build_contract_from_intake(
+    root: Path,
+    intake_id: str,
+    title: str,
+    goal: str,
+    task_type: str,
+    acceptance_criteria: list[str],
+) -> dict[str, Any]:
+    """Build a v2 TaskContract by reading an intake markdown file.
+
+    Returns the ``contract`` dict ready to be stored in a v2 task record.
+    All fields are populated from intake sections; missing sections yield
+    empty defaults (not placeholders).
+    """
+    sections = read_intake_sections(root, intake_id)
+    raw_request = sections.get("Raw Request", "")
+    blocking_questions = parse_question_block(sections.get("Blocking Questions", ""))
+    non_blocking_questions = parse_question_block(
+        sections.get("Non-Blocking Questions", sections.get("Open Questions", ""))
+    )
+    decisions_raw = parse_question_block(sections.get("Decisions", "")) or []
+    # Handle Anti-Outcome / Anti-Outcomes alias
+    anti_outcomes = sections.get("Anti-Outcomes", "") or sections.get("Anti-Outcome", "")
+    expected_behavior = sections.get("Expected Behavior", sections.get("Expected Outcome", ""))
+    actual_behavior = sections.get("Actual Behavior", "")
+    reproduction = sections.get("Reproduction", "")
+    current_understanding = sections.get("Current Understanding", "")
+    final_expected_effect = sections.get("Final Expected Effect", "")
+    approach_options = sections.get("Approach Options", "")
+    chosen_approach = sections.get("Chosen Approach", "")
+    impl_plan = sections.get("Final Implementation Plan", "")
+    validation = sections.get("Validation", "")
+    approval = sections.get("Approval", "")
+    scope = sections.get("Scope", "")
+    out_of_scope = sections.get("Out Of Scope", "")
+    invariants = sections.get("Invariants", "")
+
+    # Collect extra fields (clarification fields not mapped to contract paths)
+    extra: dict[str, Any] = {}
+    extra_fields = {
+        "current_understanding": sections.get("Current Understanding", current_understanding),
+        "decision_card": sections.get("Decision Card", ""),
+        "user_action": sections.get("User Action", ""),
+        "recommended_default": sections.get("Recommended Default", ""),
+        "option_matrix": sections.get("Option Matrix", ""),
+        "minimum_viable_knowledge": sections.get("Minimum Viable Knowledge", ""),
+        "validation_card": sections.get("Validation Card", ""),
+        "diagram": sections.get("Diagram", ""),
+        "confidence": sections.get("Confidence", ""),
+        "escalation_reason": sections.get("Escalation Reason", ""),
+        "validation": sections.get("Validation", validation),
+        "needs_bug_clarification": intake_needs_bug_clarification(task_type, raw_request, sections),
+    }
+    for ek, ev in extra_fields.items():
+        if ev or ek in {"needs_bug_clarification"}:
+            extra[ek] = ev
+
+    contract: dict[str, Any] = {
+        "contract_version": TASK_CONTRACT_VERSION,
+        "provenance": {
+            "raw_request": raw_request,
+            "intake_id": intake_id,
+            "approved_at": "",
+        },
+        "outcome": {
+            "goal": goal,
+            "acceptance_criteria": acceptance_criteria,
+            "final_expected_effect": final_expected_effect,
+        },
+        "boundaries": {
+            "scope": scope,
+            "out_of_scope": out_of_scope,
+            "invariants": invariants,
+            "anti_outcomes": anti_outcomes,
+        },
+        "decisions": decisions_raw,
+        "blocking_questions": blocking_questions,
+        "open_questions": non_blocking_questions,
+        "engineering": {
+            "code_map": "",
+            "risks": "",
+            "verification_cases": [],
+            "work_items": [],
+            "dependencies": [],
+            "expected_behavior": expected_behavior,
+            "actual_behavior": actual_behavior,
+            "reproduction": reproduction,
+        },
+        "choices": {
+            "chosen_approach": chosen_approach,
+            "final_implementation_plan": impl_plan,
+            "approach_options": approach_options,
+            "approval": approval,
+        },
+    }
+    if extra:
+        contract["_extra"] = extra
+    return contract
+
+
+def default_task_json_v2(
+    task_id: str,
+    intake_id: str,
+    title: str,
+    task_type: str,
+    contract: dict[str, Any],
+    *,
+    parent_task_id: str | None = None,
+    root_task_id: str | None = None,
+    lineage_task_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Create a v2 task record with a ``contract`` field.
+
+    No top-level ``goal``, ``acceptance_criteria``, or ``clarification``
+    fields — the contract is the single semantic source.
+    """
+    now = utc_now()
+    return {
+        "schema_version": TASK_RECORD_VERSION_V2,
+        "id": task_id,
+        "source_intake_id": intake_id,
+        "parent_task_id": parent_task_id,
+        "root_task_id": root_task_id or task_id,
+        "lineage_task_ids": list(lineage_task_ids or []),
+        "title": title,
+        "type": task_type,
+        "status": "planning",
+        "current_step": "clarify",
+        "owner_session": "main",
+        "assigned_subagents": [],
+        "contract": contract,
+        "constraints": [],
+        "validation_revision": None,
+        "verification_status": "not_started",
+        "related_files": [],
+        "context_sources": [],
+        "decision_refs": [],
+        "deferred_option_refs": [],
+        "subtasks": [],
+        "plan_id": None,
+        "locks": [],
+        "progress": None,
+        "impact": [],
+        "checkpoint_pass_completed": False,
+        "last_note": None,
+        "last_event_seq": 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def read_latest_followup_text(root: Path, task_id: str) -> str | None:
+    """Read the latest follow-up markdown content for a task, if any."""
+    followups_dir = tasks_dir(root) / "active" / task_id / "followups"
+    if not followups_dir.is_dir():
+        return None
+    entries = sorted(followups_dir.glob("followup-???.md"))
+    if not entries:
+        return None
+    return entries[-1].read_text(encoding="utf-8").strip() or None
+
+
+def read_reflection_text(root: Path, task_id: str) -> str | None:
+    """Read the reflection.md content for a task, if any."""
+    path = tasks_dir(root) / "active" / task_id / "reflection.md"
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8").strip() or None
 
 
 def task_event_path(root: Path, task_id: str) -> Path:
@@ -511,272 +1596,15 @@ def parse_markdown_clarification_fields(text: str) -> dict[str, Any]:
     return fields
 
 
-def intake_readiness_errors(root: Path, intake_id: str, task_type: str) -> list[str]:
-    clarification = build_clarification_payload(root, intake_id, task_type)
-    errors: list[str] = []
-    if not clarification["scope"].strip():
-        errors.append(
-            "Scope is required before promotion. "
-            "Prefer `just-demand . update-intake-section <intake-id> \"Scope\" \"<value>\"` to fill it."
-        )
-    if clarification["needs_bug_clarification"]:
-        if not clarification["expected_behavior"].strip():
-            errors.append(
-                "Expected Behavior is required for bug or mismatch work before promotion. "
-                "Prefer `just-demand . update-intake-section <intake-id> \"Expected Behavior\" \"<value>\"` to fill it."
-            )
-        if not clarification["actual_behavior"].strip():
-            errors.append(
-                "Actual Behavior is required for bug or mismatch work before promotion. "
-                "Prefer `just-demand . update-intake-section <intake-id> \"Actual Behavior\" \"<value>\"` to fill it."
-            )
-        if not clarification["reproduction"].strip():
-            errors.append(
-                "Reproduction is required for bug or mismatch work before promotion. "
-                "Prefer `just-demand . update-intake-section <intake-id> \"Reproduction\" \"<value>\"` to fill it."
-            )
-    # Hard gate for design and implementation tasks: final expected effect,
-    # chosen approach, final implementation plan, and approval are required.
-    design_impl_types = {"design", "implementation", "feature", "feat", "refactor", "architecture"}
-    if task_type.strip().lower() in design_impl_types:
-        if not clarification["final_expected_effect"].strip():
-            errors.append(
-                "Final Expected Effect is required for design or implementation work before promotion. "
-                "Prefer `just-demand . update-intake-section <intake-id> \"Final Expected Effect\" \"<value>\"` to fill it."
-            )
-        if not clarification["chosen_approach"].strip():
-            errors.append(
-                "Chosen Approach is required for design or implementation work before promotion. "
-                "Prefer `just-demand . update-intake-section <intake-id> \"Chosen Approach\" \"<value>\"` to fill it."
-            )
-        if not clarification["final_implementation_plan"].strip():
-            errors.append(
-                "Final Implementation Plan is required for design or implementation work before promotion. "
-                "Prefer `just-demand . update-intake-section <intake-id> \"Final Implementation Plan\" \"<value>\"` to fill it."
-            )
-        if not clarification["approval"].strip():
-            errors.append(
-                "Approval is required for design or implementation work before promotion. "
-                "Prefer `just-demand . update-intake-section <intake-id> \"Approval\" \"<value>\"` to fill it."
-            )
-    if clarification["blocking_questions"]:
-        errors.append("Blocking Questions must be cleared before promotion.")
-    return errors
+def build_clarification_payload_from_intake(root: Path, intake_id: str) -> dict[str, Any]:
+    """Build a clarification payload by reading an intake file directly.
 
-
-def render_open_questions_markdown(non_blocking_questions: list[str]) -> str:
-    if not non_blocking_questions:
-        return "# Open Questions\n\n"
-    lines = ["# Open Questions", "", "## Remaining Open Questions", ""]
-    lines.extend([f"- {question}" for question in non_blocking_questions])
-    lines.append("")
-    return "\n".join(lines)
-
-
-def render_context_markdown(task: dict[str, Any]) -> str:
-    """Render context.md for a task, including user-expectation contract fields."""
-    clarification = task.get("clarification", {}) or {}
-    title = str(task.get("title", "") or "")
-    goal = str(task.get("goal", "") or "")
-    acceptance = task.get("acceptance_criteria", []) or []
-    status = str(task.get("status", "") or "")
-    progress = task.get("progress")
-
-    raw_request = str(clarification.get("raw_request", "") or "")
-    expected_effect = str(clarification.get("final_expected_effect", "") or "")
-    current_understanding = str(clarification.get("current_understanding", "") or "")
-    anti_outcomes = str(clarification.get("anti_outcomes", "") or "")
-    scope = str(clarification.get("scope", "") or "")
-
-    lines = [
-        "# Context",
-        "",
-        "## Task",
-        "",
-        title,
-        "",
-        "## User Raw Request",
-        "",
-        raw_request or "_No raw request recorded._",
-        "",
-        "## User Expected Effect",
-        "",
-        expected_effect or "_No expected effect recorded yet._",
-        "",
-        "## Clarified Design / Current Understanding",
-        "",
-        current_understanding or "_No current understanding recorded yet._",
-        "",
-        "## Visible Acceptance",
-        "",
-    ]
-    if acceptance:
-        for criterion in acceptance:
-            lines.append(f"- {criterion}")
-    else:
-        lines.append("_No acceptance criteria recorded yet._")
-    lines.append("")
-
-    lines += [
-        "## Anti-Outcomes",
-        "",
-        anti_outcomes or "_No anti-outcomes recorded yet._",
-        "",
-        "## Scope",
-        "",
-        scope or "_No scope recorded yet._",
-        "",
-        "## Out Of Scope",
-        "",
-        "_No out-of-scope items recorded yet._",
-        "",
-        "## Current Status",
-        "",
-        status,
-        "",
-        "## Progress",
-        "",
-    ]
-    if progress is not None:
-        lines.append(str(progress))
-    else:
-        lines.append("_No progress recorded yet._")
-    lines.append("")
-
-    lines += [
-        "## Known Risks",
-        "",
-        "_No known risks recorded yet._",
-        "",
-        "## Follow-Up Context",
-        "",
-        "_No follow-up context recorded yet._",
-        "",
-        "## Last User Feedback",
-        "",
-        "_No user feedback recorded yet._",
-        "",
-        "## Notes For Subagents",
-        "",
-        "_No specific subagent notes recorded yet._",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def render_verify_markdown(task: dict[str, Any]) -> str:
-    """Render verify.md for a task, including user-visible and functional checks."""
-    _ = task  # placeholder for future task-data driven checks
-    lines = [
-        "# Verify",
-        "",
-        "## User-Visible Checks",
-        "",
-        "_No user-visible checks recorded yet._",
-        "",
-        "## Functional Checks",
-        "",
-        "_No functional checks recorded yet._",
-        "",
-        "## Regression Checks",
-        "",
-        "_No regression checks recorded yet._",
-        "",
-        "## Mismatch Checks",
-        "",
-        "_No mismatch checks recorded yet._",
-        "",
-        "## Report Format",
-        "",
-        "_No report format specified yet._",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-PLAN_STEP_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(?P<title>.+?)\s*$")
-
-
-def extract_ordered_plan_steps(plan_text: str) -> list[str]:
-    text = str(plan_text or "")
-    steps: list[str] = []
-    for line in text.splitlines():
-        match = PLAN_STEP_PATTERN.match(line)
-        if match:
-            title = match.group("title").strip()
-            if title:
-                steps.append(title)
-
-    if steps:
-        return steps
-
-    fallback = [line.strip() for line in text.splitlines() if line.strip()]
-    if fallback:
-        return fallback
-
-    stripped = text.strip()
-    return [stripped] if stripped else []
-
-
-def build_implementation_plan_subtasks(plan_text: str) -> list[dict[str, Any]]:
-    subtasks: list[dict[str, Any]] = []
-    for order, title in enumerate(extract_ordered_plan_steps(plan_text), start=1):
-        subtasks.append(
-            {
-                "id": f"plan-step-{order}",
-                "order": order,
-                "title": title,
-                "status": "todo",
-            }
-        )
-    return subtasks
-
-
-def render_implementation_plan_markdown(task: dict[str, Any], subtasks: list[dict[str, Any]] | None = None) -> str:
-    clarification = task.get("clarification", {}) or {}
-    goal = str(task.get("goal", "") or "")
-    plan_text = str(clarification.get("final_implementation_plan", "") or "").strip()
-    plan_subtasks = subtasks if subtasks is not None else build_implementation_plan_subtasks(plan_text)
-
-    lines = [
-        "# Implement",
-        "",
-        "## Goal",
-        "",
-        goal or "_No goal recorded._",
-        "",
-        "## Must Preserve",
-        "",
-        "_No preservation constraints recorded yet._",
-        "",
-        "## Must Avoid",
-        "",
-        "_No specific avoidance constraints recorded yet._",
-        "",
-        "## Implementation Boundary",
-        "",
-        "_No explicit implementation boundary recorded yet._",
-        "",
-        "## Expected Output",
-        "",
-        "_No expected output format recorded yet._",
-        "",
-        "## Approved Plan",
-        "",
-        plan_text or "_No approved implementation plan recorded._",
-        "",
-        "## Ordered Todo",
-        "",
-    ]
-    if plan_subtasks:
-        for subtask in plan_subtasks:
-            status = str(subtask.get("status", "todo") or "todo").strip().lower()
-            marker = "x" if status == "done" else " "
-            lines.append(f"- [{marker}] {subtask.get('title', '').strip()}")
-    else:
-        lines.append("- [ ] No ordered steps captured yet.")
-    lines.append("")
-    return "\n".join(lines)
+    Used by `update-intake-section` flow to get current state before update.
+    """
+    intake_path = root / "state" / "intake" / f"{intake_id}.md"
+    if not intake_path.exists():
+        raise RuntimeError(f"Intake file not found: {intake_path}")
+    return parse_clarification_markdown_file(intake_path)
 
 
 def sync_implementation_plan_context(
@@ -796,7 +1624,7 @@ def sync_implementation_plan_context(
     if task_type not in {"design", "implementation", "feature", "feat", "refactor", "architecture"}:
         return task
 
-    clarification = task.get("clarification", {}) or {}
+    clarification = _task_clarification(task)
     plan_text = str(clarification.get("final_implementation_plan", "") or "").strip()
     if require_plan and not plan_text:
         raise RuntimeError(
@@ -836,7 +1664,7 @@ def build_completion_report(
             if str(subtask.get("title", "") or "").strip()
         ]
 
-    clarification = task.get("clarification", {}) or {}
+    clarification = _task_clarification(task)
     remaining_risks = [
         str(item).strip()
         for item in (clarification.get("non_blocking_questions", []) or [])
@@ -881,7 +1709,10 @@ def promote_to_task(
 ) -> dict[str, str]:
     ensure_workspace(root)
     now = utc_now()
-    readiness_errors = intake_readiness_errors(root, intake_id, task_type)
+
+    # Build a proper v2 contract from the intake for readiness checking.
+    contract = build_contract_from_intake(root, intake_id, title, goal, task_type, acceptance_criteria)
+    readiness_errors = contract_readiness_errors(contract, task_type)
     if readiness_errors:
         raise RuntimeError("Promotion blocked: " + " ".join(readiness_errors))
 
@@ -910,21 +1741,20 @@ def promote_to_task(
         f"{date_prefix}-{slugify(title)}-task",
     )
 
-    task_data = default_task_json(
+    # Build contract one final time (readiness check already validated).
+    contract = build_contract_from_intake(root, intake_id, title, goal, task_type, acceptance_criteria)
+    task_data = default_task_json_v2(
         task_id,
         intake_id,
         title,
-        goal,
         task_type,
-        acceptance_criteria,
+        contract,
         parent_task_id=parent_task_id,
         root_task_id=root_task_id,
         lineage_task_ids=lineage_task_ids,
     )
-    task_data["clarification"] = build_clarification_payload(root, intake_id, task_type)
-    task_data["subtasks"] = build_implementation_plan_subtasks(
-        str(task_data["clarification"].get("final_implementation_plan", "") or "")
-    )
+    impl_plan = str(contract.get("choices", {}).get("final_implementation_plan", "") or "")
+    task_data["subtasks"] = build_implementation_plan_subtasks(impl_plan)
     state_path = state_dir(root) / "state.json"
     state = read_json(state_path)
 
@@ -939,8 +1769,8 @@ def promote_to_task(
         write_json_atomic(tmp_path / "task.json", task_data)
         for name, content in {
             "context.md": render_context_markdown(task_data),
-            "decisions.md": "# Decisions\n\n",
-            "open_questions.md": render_open_questions_markdown(task_data["clarification"]["non_blocking_questions"]),
+            "research.md": render_research_markdown(task_data),
+            "open_questions.md": _render_open_questions_simple(contract.get("open_questions", [])),
             "implement.md": render_implementation_plan_markdown(task_data, task_data["subtasks"]),
             "verify.md": render_verify_markdown(task_data),
         }.items():
@@ -1178,10 +2008,11 @@ def create_intake(
 def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
     """Check if a task has all required clarification fields for execution.
 
+    Works with both v1 (clarification dict) and v2 (contract) task records.
     Mirrors the JS taskIsReadyForExecution logic so both runtimes agree
     on what execution readiness means.
     """
-    clarification = task.get("clarification", {}) or {}
+    clarification = _task_clarification(task)
     missing = []
 
     if not str(clarification.get("scope", "") or "").strip():
@@ -1217,13 +2048,17 @@ def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
     return len(missing) == 0
 
 
-def get_missing_execution_fields(task: dict[str, Any]) -> list[str]:
+def get_missing_execution_fields(task: dict[str, Any], role: str | None = None) -> list[str]:
     """Return list of missing required clarification field names for this task.
 
+    Works with both v1 (clarification dict) and v2 (contract) task records.
     Mirrors the JS getMissingExecutionGateFields logic so both runtimes agree
     on what is missing for execution readiness.
+
+    When ``role`` is ``"coder"``, also checks for a code map.
+    When ``role`` is ``"tester"``, also checks for verification cases.
     """
-    clarification = task.get("clarification", {}) or {}
+    clarification = _task_clarification(task)
     missing: list[str] = []
 
     if not str(clarification.get("scope", "") or "").strip():
@@ -1255,6 +2090,16 @@ def get_missing_execution_fields(task: dict[str, Any]) -> list[str]:
             missing.append("Final Implementation Plan")
         if not str(clarification.get("approval", "") or "").strip():
             missing.append("Approval")
+
+    # Code-map readiness (role-gated: coder)
+    if role == "coder" and not str(clarification.get("code_map", "") or "").strip():
+        missing.append("Code Map")
+
+    # Verification cases readiness (role-gated: tester)
+    if role == "tester":
+        cases = clarification.get("verification_cases", []) or []
+        if not isinstance(cases, list) or len(cases) == 0:
+            missing.append("Verification Cases")
 
     return missing
 
@@ -1352,6 +2197,64 @@ CLARIFICATION_UPDATE_FIELDS = frozenset({
     "non_blocking_questions",
 })
 
+# Mapping from clarification field name to contract nested path (list of keys).
+# Fields not in this map are stored in contract._extra.
+_CLARIFICATION_TO_CONTRACT_PATH: dict[str, list[str]] = {
+    "scope": ["boundaries", "scope"],
+    "out_of_scope": ["boundaries", "out_of_scope"],
+    "anti_outcomes": ["boundaries", "anti_outcomes"],
+    "invariants": ["boundaries", "invariants"],
+    "final_expected_effect": ["outcome", "final_expected_effect"],
+    "chosen_approach": ["choices", "chosen_approach"],
+    "final_implementation_plan": ["choices", "final_implementation_plan"],
+    "approach_options": ["choices", "approach_options"],
+    "approval": ["choices", "approval"],
+    "expected_behavior": ["engineering", "expected_behavior"],
+    "actual_behavior": ["engineering", "actual_behavior"],
+    "reproduction": ["engineering", "reproduction"],
+    "raw_request": ["provenance", "raw_request"],
+    "blocking_questions": ["blocking_questions"],
+    "non_blocking_questions": ["open_questions"],
+    "decisions": ["decisions"],
+    "code_map": ["engineering", "code_map"],
+    "verification_cases": ["engineering", "verification_cases"],
+    "risks": ["engineering", "risks"],
+    "work_items": ["engineering", "work_items"],
+    "dependencies": ["engineering", "dependencies"],
+}
+
+
+def _parse_clarification_value(key: str, value: Any) -> Any:
+    """Parse a clarification field value (list or scalar)."""
+    if key in {"blocking_questions", "non_blocking_questions", "decisions", "verification_cases", "work_items", "dependencies"}:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return parsed
+                return [value]
+            except (json.JSONDecodeError, TypeError):
+                return [value]
+        return [str(value)]
+    return str(value).strip() if value else ""
+
+
+def _set_contract_field(contract: dict[str, Any], key: str, value: Any) -> None:
+    """Set a field in the nested contract dict using the known path mapping."""
+    path = _CLARIFICATION_TO_CONTRACT_PATH.get(key)
+    if path is None:
+        # Store unknown fields in _extra
+        contract.setdefault("_extra", {})[key] = value
+        return
+    target = contract
+    for segment in path[:-1]:
+        if segment not in target:
+            target[segment] = {}
+        target = target[segment]
+    target[path[-1]] = value
+
 
 def update_task_clarification(root: Path, task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
     """Update clarification fields on an active task and refresh derived package files.
@@ -1386,40 +2289,74 @@ def update_task_clarification(root: Path, task_id: str, fields: dict[str, Any]) 
             f"Allowed statuses: {', '.join(sorted(WRITE_ALLOWED_STATUSES))}"
         )
 
-    clarification = dict(task.get("clarification", {}) or {})
+    is_v2 = _task_is_v2(task)
 
-    for key, value in fields.items():
-        if key not in CLARIFICATION_UPDATE_FIELDS:
-            raise ValueError(f"Unknown clarification field: {key}")
+    if is_v2:
+        # v2 path — write fields into the structured contract.
+        contract = deepcopy(task.get("contract", empty_contract()))
+        for key, value in fields.items():
+            if key not in CLARIFICATION_UPDATE_FIELDS:
+                raise ValueError(f"Unknown clarification field: {key}")
+            parsed = _parse_clarification_value(key, value)
 
-        if key in {"blocking_questions", "non_blocking_questions"}:
-            if isinstance(value, list):
-                parsed = value
-            elif isinstance(value, str):
-                try:
-                    parsed = json.loads(value)
-                    if not isinstance(parsed, list):
-                        parsed = [value]
-                except (json.JSONDecodeError, TypeError):
-                    parsed = [value]
-            else:
-                parsed = [str(value)]
+            # Map to contract path
+            _set_contract_field(contract, key, parsed)
+
+        update_task(root, task_id, {"contract": contract})
+    else:
+        # v1 path — write flat clarification dict.
+        clarification = dict(task.get("clarification", {}) or {})
+        for key, value in fields.items():
+            if key not in CLARIFICATION_UPDATE_FIELDS:
+                raise ValueError(f"Unknown clarification field: {key}")
+            parsed = _parse_clarification_value(key, value)
             clarification[key] = parsed
-        else:
-            clarification[key] = str(value).strip()
 
-    task["clarification"] = clarification
-    update_task(root, task_id, {"clarification": clarification})
+        task["clarification"] = clarification
+        update_task(root, task_id, {"clarification": clarification})
 
     task = sync_implementation_plan_context(root, task_id, task=task)
 
+    # Packet-level atomic write: pre-compute all projection content first,
+    # then write task.json + projections with rollback on failure.
+    task = read_json(task_json_path)
+    projection_contents: dict[str, str] = {
+        "context.md": render_context_markdown(task),
+        "research.md": render_research_markdown(task),
+        "implement.md": render_implementation_plan_markdown(task),
+        "verify.md": render_verify_markdown(task),
+    }
     # Regenerate open_questions.md from non_blocking_questions
+    clarification = _task_clarification(task)
     non_blocking = clarification.get("non_blocking_questions", []) or []
-    open_questions_path = tpath / "open_questions.md"
-    open_questions_path.write_text(
-        render_open_questions_markdown(non_blocking if isinstance(non_blocking, list) else []),
-        encoding="utf-8",
+    projection_contents["open_questions.md"] = _render_open_questions_simple(
+        non_blocking if isinstance(non_blocking, list) else []
     )
+
+    # Read originals for rollback
+    originals: dict[str, str | None] = {}
+    for name in projection_contents:
+        p = tpath / name
+        originals[name] = p.read_text(encoding="utf-8") if p.is_file() else None
+
+    written_files: list[str] = []
+    try:
+        for name, content in projection_contents.items():
+            (tpath / name).write_text(content, encoding="utf-8")
+            written_files.append(name)
+    except Exception as write_err:
+        # Rollback: restore originals for written files
+        for name in written_files:
+            p = tpath / name
+            original = originals.get(name)
+            if original is not None:
+                p.write_text(original, encoding="utf-8")
+            elif p.exists():
+                p.unlink()
+        raise RuntimeError(
+            f"Projection write failed after task.json update for task {task_id}: {write_err}. "
+            f"Files restored from originals: {', '.join(written_files)}"
+        ) from write_err
 
     append_task_event(
         root,

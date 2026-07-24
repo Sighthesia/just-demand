@@ -21,11 +21,17 @@ from workflow_core import (
     create_followup,
     create_intake,
     create_plan,
+    find_task_json_path,
+    lint_task_packet,
     list_plans,
     list_unfinished_tasks,
+    load_task_contract,
     mark_task,
+    migrate_v1_tasks,
     parse_markdown_clarification_fields,
     promote_to_task,
+    read_json,
+    render_contract_projection,
     read_plan,
     refresh_plan_context,
     select_task,
@@ -76,6 +82,9 @@ COMMANDS = {
     "update-clarification",
     "update-intake-section",
     "update-suggestion-status",
+    "migrate-task",
+    "render-context",
+    "lint-packet",
     "where",
 }
 
@@ -275,6 +284,27 @@ def build_parser() -> argparse.ArgumentParser:
     refresh_plan.add_argument("task_id", help="Task ID to refresh plan context for")
 
     sub.add_parser("where", help="Print the global CLI path and invocation example")
+
+    # --- Migration command ---
+    migrate = sub.add_parser("migrate-task", help="Migrate active v1 tasks to v2 contract format")
+    migrate.add_argument("task_ids", nargs="*", default=None, help="Task ID(s) to migrate (omit for all active v1 tasks)")
+    migrate.add_argument("--dry-run", action="store_true", help="Report what would change without writing")
+    migrate.add_argument("--force", action="store_true", help="Allow migration of done tasks (not recommended)")
+
+    # --- Execution packet commands (used by JS plugins) ---
+    render_ctx = sub.add_parser("render-context", help="Render deterministic context markdown for a task role")
+    render_ctx.add_argument("task_id", help="Task ID to render context for")
+    render_ctx.add_argument("--role", required=True, choices=["advisor", "researcher", "coder", "tester"],
+                            help="Role to render context for")
+    render_ctx.add_argument("--subtask-id", default=None, help="Optional subtask ID to focus on")
+    render_ctx.add_argument("--hint", action="append", default=[], help="Optional context hints (focus=..., recent_diff=...)")
+
+    lint_pkt = sub.add_parser("lint-packet", help="Run structured lint checks on a task packet")
+    lint_pkt.add_argument("task_id", help="Task ID to lint")
+    lint_pkt.add_argument("--role", default=None, choices=["advisor", "researcher", "coder", "tester"],
+                          help="Optional role to filter warnings for")
+    lint_pkt.add_argument("--subtask-id", default=None, help="Optional subtask ID to focus on")
+    lint_pkt.add_argument("--hint", action="append", default=[], help="Optional context hints")
 
     return parser
 
@@ -494,6 +524,40 @@ def execute_command(root: Path, args: list[str]) -> int:
             result = add_plan_evidence(root, parsed.plan_id, parsed.suggestion_id, parsed.evidence)
         elif parsed.command == "refresh-plan-context":
             result = refresh_plan_context(root, parsed.task_id)
+        elif parsed.command == "migrate-task":
+            result = migrate_v1_tasks(root, parsed.task_ids, dry_run=parsed.dry_run)
+        elif parsed.command == "render-context":
+            task_path = find_task_json_path(root, parsed.task_id)
+            if not task_path:
+                raise FileNotFoundError(f"Task not found: {parsed.task_id}")
+            task = read_json(task_path)
+            # v2 tasks: fail closed (no legacy file fallback)
+            from workflow_core import _task_is_v2
+            is_v2 = _task_is_v2(task)
+            try:
+                base = render_contract_projection(load_task_contract(task), parsed.role, task)
+            except Exception as exc:
+                if is_v2:
+                    raise RuntimeError(f"v2 render-context failed: {exc}") from exc
+                base = ""  # v1: allow fallback (empty means JS falls back to files)
+            if is_v2 and not base.strip():
+                raise RuntimeError(f"v2 render-context produced empty output for role={parsed.role}")
+            print(base)
+            return 0
+        elif parsed.command == "lint-packet":
+            task_path = find_task_json_path(root, parsed.task_id)
+            if not task_path:
+                raise FileNotFoundError(f"Task not found: {parsed.task_id}")
+            task = read_json(task_path)
+            from workflow_core import _task_is_v2
+            is_v2 = _task_is_v2(task)
+            try:
+                lint_result = lint_task_packet(task, role=parsed.role)
+            except Exception as exc:
+                if is_v2:
+                    raise RuntimeError(f"v2 lint-packet failed: {exc}") from exc
+                lint_result = []
+            result = {"ok": True, "lint": lint_result}
         else:
             raise RuntimeError(f"Unsupported command: {parsed.command}")
     except Exception as exc:
