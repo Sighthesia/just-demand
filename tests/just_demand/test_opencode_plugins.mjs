@@ -5,12 +5,14 @@ import { join } from "node:path"
 import test from "node:test"
 
 import {
+  appendDebugSessionAudit,
   buildExecutionGateError,
   buildReflectionGateError,
   consumeIntakeFallbackPending,
   clearToolGateSkipOverride,
   debugLog,
   enforceExecutionGate,
+  ensureDebugPerSessionDir,
   getActiveTask,
   getExecutionGateState,
   getMissingRequiredContextFiles,
@@ -3144,6 +3146,273 @@ test("state writes full chat turn dump when JUST_DEMAND_DEBUG_PROMPT_FULL is ena
     else process.env.JUST_DEMAND_DEBUG = originalDebug
     if (originalDebugFull === undefined) delete process.env.JUST_DEMAND_DEBUG_PROMPT_FULL
     else process.env.JUST_DEMAND_DEBUG_PROMPT_FULL = originalDebugFull
+  }
+})
+
+// ---------------------------------------------------------------------------
+// lib & plugins: per-session injection audit (JUST_DEMAND_DEBUG)
+// ---------------------------------------------------------------------------
+test("appendDebugSessionAudit creates per-session directory structure when JUST_DEMAND_DEBUG is enabled", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+
+  try {
+    process.env.JUST_DEMAND_DEBUG = "1"
+    const result = appendDebugSessionAudit(root, "audit-test-session", "visible", {
+      source: "test",
+      status: "applied",
+      content: "Hello world",
+    })
+    assert.ok(result)
+    assert.match(result, /session-audit-test-session\/visible\.md/)
+
+    const sessionDir = join(root, ".just-demand", "debug-prompts", "session-audit-test-session")
+    assert.equal(existsSync(sessionDir), true)
+    assert.equal(existsSync(join(sessionDir, "visible.md")), true)
+    assert.equal(existsSync(join(sessionDir, "subagents")), true)
+
+    const content = readFileSync(join(sessionDir, "visible.md"), "utf8")
+    assert.match(content, /## \d{4}/)
+    assert.match(content, /- source: test/)
+    assert.match(content, /Hello world/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+  }
+})
+
+test("appendDebugSessionAudit writes subagent file in subagents/ subdirectory", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+
+  try {
+    process.env.JUST_DEMAND_DEBUG = "1"
+    const result = appendDebugSessionAudit(root, "subagent-test", "subagent", {
+      source: "test",
+      agent: "just-demand-coder",
+      task_id: "task-42",
+      status: "applied",
+      content: "# Subagent prompt content",
+    })
+    assert.ok(result)
+    assert.match(result, /session-subagent-test\/subagents\/just-demand-coder-task-42\.md/)
+
+    const filePath = join(root, ".just-demand", "debug-prompts", "session-subagent-test", "subagents", "just-demand-coder-task-42.md")
+    assert.equal(existsSync(filePath), true)
+    const content = readFileSync(filePath, "utf8")
+    assert.match(content, /# Subagent prompt content/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+  }
+})
+
+test("appendDebugSessionAudit is quiet when JUST_DEMAND_DEBUG is not set", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+
+  try {
+    delete process.env.JUST_DEMAND_DEBUG
+    const result = appendDebugSessionAudit(root, "quiet-session", "visible", {
+      source: "test",
+      status: "applied",
+      content: "Should not appear",
+    })
+    assert.equal(result, null)
+
+    const sessionDir = join(root, ".just-demand", "debug-prompts")
+    assert.equal(existsSync(sessionDir), false)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+  }
+})
+
+test("session-start writes visible.md and complete.md audit files when JUST_DEMAND_DEBUG is enabled", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "executing" }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  process.env.JUST_DEMAND_DEBUG = "1"
+
+  try {
+    const plugin = await sessionStartFactory({ directory: root })
+    const output = { system: ["You are a helpful assistant.", "Custom system prompt."] }
+    await plugin["experimental.chat.system.transform"]({ sessionID: "audit-sess" }, output)
+
+    const sessionDir = join(root, ".just-demand", "debug-prompts", "session-audit-sess")
+    assert.equal(existsSync(join(sessionDir, "visible.md")), true)
+    assert.equal(existsSync(join(sessionDir, "complete.md")), true)
+
+    const visible = readFileSync(join(sessionDir, "visible.md"), "utf8")
+    assert.match(visible, /source: session-start/)
+    assert.match(visible, /- status: applied/)
+    // visible.md should NOT contain JUST_DEMAND_ tags
+    assert.equal(visible.includes("<JUST_DEMAND_"), false)
+
+    const complete = readFileSync(join(sessionDir, "complete.md"), "utf8")
+    assert.match(complete, /source: session-start/)
+    assert.match(complete, /<JUST_DEMAND_REMINDER>/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+  }
+})
+
+test("state chat.message writes visible.md, complete.md, and main-agent.md audit files when JUST_DEMAND_DEBUG is enabled", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", verification_status: "not_started", assigned_subagents: [] }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  process.env.JUST_DEMAND_DEBUG = "1"
+
+  try {
+    const plugin = await stateFactory({ directory: root })
+    const output = { parts: [{ type: "text", text: "I will implement the feature." }] }
+    await plugin["chat.message"]({ sessionID: "state-audit" }, output)
+
+    const sessionDir = join(root, ".just-demand", "debug-prompts", "session-state-audit")
+    const visiblePath = join(sessionDir, "visible.md")
+    const completePath = join(sessionDir, "complete.md")
+    const mainAgentPath = join(sessionDir, "main-agent.md")
+
+    assert.equal(existsSync(visiblePath), true)
+    assert.equal(existsSync(completePath), true)
+    assert.equal(existsSync(mainAgentPath), true)
+
+    const visible = readFileSync(visiblePath, "utf8")
+    assert.match(visible, /source: chat\.message/)
+    assert.match(visible, /I will implement the feature/)
+    // visible has the original text
+    assert.match(visible, /- status: observed/)
+
+    const mainAgent = readFileSync(mainAgentPath, "utf8")
+    assert.match(mainAgent, /source: chat\.message/)
+    assert.match(mainAgent, /- phase: execute/)
+    // main-agent text contains the original message
+    assert.match(mainAgent, /I will implement the feature/)
+
+    const complete = readFileSync(completePath, "utf8")
+    assert.match(complete, /source: chat\.message/)
+    assert.match(complete, /\[workflow-state\]/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+  }
+})
+
+test("subagent-context writes complete.md and subagents/<agent>-<task-id>.md audit files when JUST_DEMAND_DEBUG is enabled", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  process.env.JUST_DEMAND_DEBUG = "1"
+
+  try {
+    const plugin = await subagentContextFactory({ directory: root })
+    const input = { tool: "Task", sessionID: "subagent-audit" }
+    const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+    await plugin["tool.execute.before"](input, output)
+
+    const sessionDir = join(root, ".just-demand", "debug-prompts", "session-subagent-audit")
+    const completePath = join(sessionDir, "complete.md")
+    const subagentPath = join(sessionDir, "subagents", "just-demand-coder-task-a.md")
+
+    assert.equal(existsSync(completePath), true, "complete.md should exist")
+    assert.equal(existsSync(subagentPath), true, "subagent file should exist")
+
+    const complete = readFileSync(completePath, "utf8")
+    assert.match(complete, /source: subagent-injection/)
+    assert.match(complete, /- agent: just-demand-coder/)
+    assert.match(complete, /- task_id: task-a/)
+
+    const subagentFile = readFileSync(subagentPath, "utf8")
+    assert.match(subagentFile, /source: subagent-injection/)
+    assert.match(subagentFile, /- agent: just-demand-coder/)
+    assert.match(subagentFile, /# Subagent Prompt/)
+    assert.match(subagentFile, /# Just Demand Workflow/)
+    assert.match(subagentFile, /Do the work/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+  }
+})
+
+test("subagent-context writes audit entry for skipped injection (already_injected)", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  process.env.JUST_DEMAND_DEBUG = "1"
+
+  try {
+    const plugin = await subagentContextFactory({ directory: root })
+    const input = { tool: "Task", sessionID: "skip-audit" }
+    // Prompt already contains injection markers → should be skipped
+    const output = { args: { subagent_type: "just-demand-researcher", prompt: "# Just Demand Workflow\nAlready injected." } }
+    await plugin["tool.execute.before"](input, output)
+
+    const sessionDir = join(root, ".just-demand", "debug-prompts", "session-skip-audit")
+    const completePath = join(sessionDir, "complete.md")
+    assert.equal(existsSync(completePath), true)
+
+    const complete = readFileSync(completePath, "utf8")
+    assert.match(complete, /- status: skipped/)
+    assert.match(complete, /- reason: already_injected/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
+  }
+})
+
+test("subagent-context writes audit entry for blocked injection (missing context files)", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  // No context.md / implement.md → should block coder
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "planning", clarification: { scope: "Feature only." } }))
+
+  const originalDebug = process.env.JUST_DEMAND_DEBUG
+  process.env.JUST_DEMAND_DEBUG = "1"
+
+  try {
+    const plugin = await subagentContextFactory({ directory: root })
+    const input = { tool: "Task", sessionID: "block-audit" }
+    const output = { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } }
+
+    await assert.rejects(
+      () => plugin["tool.execute.before"](input, output),
+      /missing required task context files/,
+    )
+
+    const sessionDir = join(root, ".just-demand", "debug-prompts", "session-block-audit")
+    const completePath = join(sessionDir, "complete.md")
+    assert.equal(existsSync(completePath), true)
+
+    const complete = readFileSync(completePath, "utf8")
+    assert.match(complete, /- status: blocked/)
+    assert.match(complete, /- reason: missing_context_files/)
+  } finally {
+    if (originalDebug === undefined) delete process.env.JUST_DEMAND_DEBUG
+    else process.env.JUST_DEMAND_DEBUG = originalDebug
   }
 })
 
