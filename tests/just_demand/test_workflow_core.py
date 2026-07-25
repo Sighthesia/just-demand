@@ -75,6 +75,11 @@ _CLARIFICATION_TO_CONTRACT_PATH: dict[str, list[str]] = {
     "risks": ["engineering", "risks"],
     "work_items": ["engineering", "work_items"],
     "dependencies": ["engineering", "dependencies"],
+    # Visible-effect lifecycle fields (must stay in sync with workflow_core.py)
+    "opening": ["engineering", "lifecycle", "opening"],
+    "during_transition": ["engineering", "lifecycle", "during_transition"],
+    "after_open": ["engineering", "lifecycle", "after_open"],
+    "interrupt_behavior": ["engineering", "lifecycle", "interrupt_behavior"],
 }
 
 
@@ -6410,6 +6415,383 @@ class V2ContractTests(unittest.TestCase):
         result2 = migrate_task_v1_to_v2(root, v1_id)
         self.assertFalse(result2["migrated"])
         self.assertEqual(result2["status"], "already_v2")
+
+
+    # ####################################################################
+    # v2 lifecycle field regression tests (Fix 1–4)
+    # ####################################################################
+
+    def test__task_clarification_v2_lifecycle_fields(self):
+        """Fix 2: _task_clarification reads lifecycle fields from contract
+        engineering.lifecycle.* and falls back to _extra.*."""
+        from workflow_core import _task_clarification
+
+        # Build a task with canonical lifecycle fields
+        canonical = {
+            "schema_version": "2.0",
+            "contract": {
+                "engineering": {
+                    "lifecycle": {
+                        "opening": "Visible on load.",
+                        "during_transition": "Fades in over 300ms.",
+                        "after_open": "Stays visible.",
+                        "interrupt_behavior": "Pauses on hover.",
+                    },
+                },
+            },
+        }
+        cl = _task_clarification(canonical)
+        self.assertEqual(cl.get("opening"), "Visible on load.")
+        self.assertEqual(cl.get("during_transition"), "Fades in over 300ms.")
+        self.assertEqual(cl.get("after_open"), "Stays visible.")
+        self.assertEqual(cl.get("interrupt_behavior"), "Pauses on hover.")
+
+        # Fallback: lifecycle only in _extra (backward compat)
+        extra_fallback = {
+            "schema_version": "2.0",
+            "contract": {
+                "engineering": {},
+                "_extra": {
+                    "opening": "Shown immediately.",
+                    "during_transition": "Slides in.",
+                    "after_open": "Remains.",
+                    "interrupt_behavior": "No-op on hover.",
+                },
+            },
+        }
+        cl2 = _task_clarification(extra_fallback)
+        self.assertEqual(cl2.get("opening"), "Shown immediately.")
+        self.assertEqual(cl2.get("during_transition"), "Slides in.")
+        self.assertEqual(cl2.get("after_open"), "Remains.")
+        self.assertEqual(cl2.get("interrupt_behavior"), "No-op on hover.")
+
+        # Canonical wins over _extra when both present
+        both = {
+            "schema_version": "2.0",
+            "contract": {
+                "engineering": {
+                    "lifecycle": {
+                        "opening": "Canonical.",
+                    },
+                },
+                "_extra": {
+                    "opening": "Extra.",
+                },
+            },
+        }
+        cl3 = _task_clarification(both)
+        self.assertEqual(cl3.get("opening"), "Canonical.",
+                         "Canonical engineering.lifecycle must win over _extra")
+
+    def test_mark_task_advances_current_step_on_executing(self):
+        """Fix 4: mark_task advances current_step to 'execute' when
+        marking to 'executing' from 'clarify' or 'design'."""
+        import tempfile
+        from pathlib import Path
+        from workflow_core import (
+            mark_task, ensure_workspace,
+            read_json, write_json_atomic, tasks_dir,
+        )
+
+        root = Path(tempfile.mkdtemp())
+        ensure_workspace(root)
+        task_id = "mark-step-test"
+        d = tasks_dir(root) / "active" / task_id
+        d.mkdir(parents=True, exist_ok=True)
+
+        # Create a task at status=planning, current_step=clarify
+        task = {
+            "id": task_id, "status": "planning", "current_step": "clarify",
+            "type": "design", "contract": {},
+        }
+        write_json_atomic(d / "task.json", task)
+
+        # Mark to executing — should advance current_step
+        result = mark_task(root, task_id, "executing")
+        self.assertTrue(result["ok"])
+        task2 = read_json(d / "task.json")
+        self.assertEqual(task2["current_step"], "execute",
+                         "current_step should advance to 'execute' when marking to 'executing'")
+
+    def test_mark_task_does_not_advance_step_from_verify(self):
+        """Fix 4: mark_task does NOT change current_step when it's already
+        past 'design' (e.g. 'verify')."""
+        import tempfile
+        from pathlib import Path
+        from workflow_core import (
+            mark_task, ensure_workspace,
+            read_json, write_json_atomic, tasks_dir,
+        )
+
+        root = Path(tempfile.mkdtemp())
+        ensure_workspace(root)
+        task_id = "mark-step-verify"
+        d = tasks_dir(root) / "active" / task_id
+        d.mkdir(parents=True, exist_ok=True)
+
+        task = {
+            "id": task_id, "status": "verifying", "current_step": "verify",
+            "type": "design", "contract": {},
+        }
+        write_json_atomic(d / "task.json", task)
+
+        result = mark_task(root, task_id, "executing")
+        self.assertTrue(result["ok"])
+        task2 = read_json(d / "task.json")
+        self.assertEqual(task2["current_step"], "verify",
+                         "current_step should stay 'verify' when already past 'design'")
+
+    def test_get_missing_execution_fields_v2_lifecycle_filled(self):
+        """Fix 2: get_missing_execution_fields returns empty for v2 visible-effect
+        task with all lifecycle fields filled (including opening)."""
+        from workflow_core import get_missing_execution_fields
+        task = {
+            "type": "design",
+            "clarification": {
+                "scope": "Button animation.",
+                "blocking_questions": [],
+                "final_expected_effect": "Button fades in smoothly.",
+                "chosen_approach": "A: CSS transition.",
+                "final_implementation_plan": "1. Add class.",
+                "approval": "Approved.",
+                "opening": "Button hidden until load.",
+                "during_transition": "Fade in over 300ms.",
+                "after_open": "Button stays visible.",
+                "interrupt_behavior": "Pause on hover.",
+            },
+        }
+        missing = get_missing_execution_fields(task)
+        # Opening is a lifecycle field, not a standard execution gate field,
+        # so it should not appear in missing list.
+        self.assertNotIn("Opening", missing)
+
+    def test_render_engineering_block_includes_lifecycle(self):
+        """Fix 3: _render_engineering_block includes lifecycle fields when present."""
+        from workflow_core import _render_engineering_block
+        eng = {
+            "code_map": "src/button.js",
+            "lifecycle": {
+                "opening": "Visible on load.",
+                "during_transition": "Fades in 300ms.",
+                "after_open": "Stays.",
+                "interrupt_behavior": "No-op.",
+            },
+        }
+        result = _render_engineering_block(eng)
+        self.assertIn("Visible Effect Lifecycle", result)
+        self.assertIn("Opening:", result)
+        self.assertIn("During Transition:", result)
+        self.assertIn("After Open:", result)
+        self.assertIn("Interrupt Behavior:", result)
+        self.assertIn("Visible on load.", result)
+        self.assertIn("Fades in 300ms.", result)
+
+    def test_render_engineering_block_omits_lifecycle_when_empty(self):
+        """Fix 3: _render_engineering_block omits lifecycle section when empty."""
+        from workflow_core import _render_engineering_block
+        eng = {"code_map": "src/button.js", "lifecycle": {}}
+        result = _render_engineering_block(eng)
+        self.assertNotIn("Visible Effect Lifecycle", result)
+
+    # ####################################################################
+    # v2 visible-effect lifecycle readiness regressions
+    # ####################################################################
+
+    def test_get_missing_execution_fields_v2_visible_effect_ready(self):
+        """Fix 5: get_missing_execution_fields returns empty for a v2 contract
+        task with visible-effect signal and all lifecycle fields filled."""
+        from workflow_core import get_missing_execution_fields
+        task = {
+            "schema_version": "2.0",
+            "type": "design",
+            "title": "Button fade animation",
+            "contract": {
+                "contract_version": "1.0",
+                "outcome": {
+                    "goal": "Animate button fade-in",
+                    "acceptance_criteria": ["Button fades in."],
+                    "final_expected_effect": "Button fades in smoothly.",
+                },
+                "boundaries": {
+                    "scope": "Button animation only.",
+                    "anti_outcomes": "No flickering or jarring transitions.",
+                },
+                "engineering": {
+                    "lifecycle": {
+                        "opening": "Button hidden until page load.",
+                        "during_transition": "Fade in over 300ms.",
+                        "after_open": "Button stays visible.",
+                        "interrupt_behavior": "Fade pauses on hover.",
+                    },
+                },
+                "choices": {
+                    "chosen_approach": "CSS transition.",
+                    "final_implementation_plan": "1. Add CSS class.",
+                    "approval": "Approved.",
+                },
+                "blocking_questions": [],
+            },
+        }
+        missing = get_missing_execution_fields(task)
+        self.assertEqual(missing, [],
+                         f"v2 visible-effect task with all lifecycle fields should be ready, got missing={missing}")
+        for lifecycle_field in ("Opening", "During Transition", "After Open", "Interrupt Behavior", "Anti-Outcomes"):
+            self.assertNotIn(lifecycle_field, missing,
+                             f"{lifecycle_field} should not be missing when filled")
+
+    def test_get_missing_execution_fields_v2_visible_effect_missing_opening(self):
+        """Fix 5: get_missing_execution_fields reports Opening for a v2
+        visible-effect task that is missing the opening field."""
+        from workflow_core import get_missing_execution_fields
+        task = {
+            "schema_version": "2.0",
+            "type": "design",
+            "title": "Button fade animation",
+            "contract": {
+                "contract_version": "1.0",
+                "outcome": {
+                    "goal": "Animate button fade-in",
+                    "acceptance_criteria": ["Button fades in."],
+                    "final_expected_effect": "Button fades in smoothly.",
+                },
+                "boundaries": {
+                    "scope": "Button animation only.",
+                },
+                "engineering": {
+                    "lifecycle": {
+                        # opening intentionally omitted
+                        "during_transition": "Fade in over 300ms.",
+                        "after_open": "Button stays visible.",
+                        "interrupt_behavior": "Fade pauses on hover.",
+                    },
+                },
+                "choices": {
+                    "chosen_approach": "CSS transition.",
+                    "final_implementation_plan": "1. Add CSS class.",
+                    "approval": "Approved.",
+                },
+                "blocking_questions": [],
+            },
+        }
+        missing = get_missing_execution_fields(task)
+        self.assertIn("Opening", missing,
+                      "Opening should be missing for visible-effect task without opening field")
+
+    def test_get_missing_execution_fields_v2_visible_effect_anti_outcomes_missing(self):
+        """Fix 5: get_missing_execution_fields reports Anti-Outcomes for a v2
+        visible-effect task that is missing the anti_outcomes field."""
+        from workflow_core import get_missing_execution_fields
+        task = {
+            "schema_version": "2.0",
+            "type": "design",
+            "title": "Button fade animation",
+            "contract": {
+                "contract_version": "1.0",
+                "outcome": {
+                    "goal": "Animate button fade-in",
+                    "acceptance_criteria": ["Button fades in."],
+                    "final_expected_effect": "Button fades in smoothly.",
+                },
+                "boundaries": {
+                    "scope": "Button animation only.",
+                },
+                "engineering": {
+                    "lifecycle": {
+                        "opening": "Button hidden until page load.",
+                        "during_transition": "Fade in over 300ms.",
+                        "after_open": "Button stays visible.",
+                        "interrupt_behavior": "Fade pauses on hover.",
+                        # anti_outcomes intentionally omitted (it's in boundaries, but
+                        # the visible-effect contract reads it from clarification.anti_outcomes)
+                    },
+                },
+                "choices": {
+                    "chosen_approach": "CSS transition.",
+                    "final_implementation_plan": "1. Add CSS class.",
+                    "approval": "Approved.",
+                },
+                "blocking_questions": [],
+            },
+        }
+        missing = get_missing_execution_fields(task)
+        self.assertIn("Anti-Outcomes", missing,
+                      "Anti-Outcomes should be missing for visible-effect task without anti_outcomes")
+
+    def test_task_is_ready_for_execution_v2_visible_effect_ready(self):
+        """Fix 5: task_is_ready_for_execution returns True for a v2
+        visible-effect task with all lifecycle fields filled."""
+        from workflow_core import task_is_ready_for_execution
+        task = {
+            "schema_version": "2.0",
+            "type": "design",
+            "title": "Slide panel animation",
+            "contract": {
+                "contract_version": "1.0",
+                "outcome": {
+                    "goal": "Animate slide panel",
+                    "acceptance_criteria": ["Panel slides open."],
+                    "final_expected_effect": "Panel slides open from the right.",
+                },
+                "boundaries": {
+                    "scope": "Panel slide animation.",
+                    "anti_outcomes": "No jarring transitions.",
+                },
+                "engineering": {
+                    "lifecycle": {
+                        "opening": "Panel hidden off-screen right.",
+                        "during_transition": "Slides left over 400ms with easing.",
+                        "after_open": "Panel rests at left=0.",
+                        "interrupt_behavior": "Reverse slide on close button.",
+                    },
+                },
+                "choices": {
+                    "chosen_approach": "CSS transform translateX.",
+                    "final_implementation_plan": "1. Add panel div. 2. Toggle class.",
+                    "approval": "Approved.",
+                },
+                "blocking_questions": [],
+            },
+        }
+        self.assertTrue(task_is_ready_for_execution(task),
+                        "v2 visible-effect task with all lifecycle fields should be ready")
+
+    def test_task_is_ready_for_execution_v2_visible_effect_missing_opening(self):
+        """Fix 5: task_is_ready_for_execution returns False for a v2
+        visible-effect task missing Opening."""
+        from workflow_core import task_is_ready_for_execution
+        task = {
+            "schema_version": "2.0",
+            "type": "design",
+            "title": "Slide panel animation",
+            "contract": {
+                "contract_version": "1.0",
+                "outcome": {
+                    "goal": "Animate slide panel",
+                    "acceptance_criteria": ["Panel slides open."],
+                    "final_expected_effect": "Panel slides open from the right.",
+                },
+                "boundaries": {
+                    "scope": "Panel slide animation.",
+                    "anti_outcomes": "No jarring transitions.",
+                },
+                "engineering": {
+                    "lifecycle": {
+                        "during_transition": "Slides left over 400ms with easing.",
+                        "after_open": "Panel rests at left=0.",
+                        "interrupt_behavior": "Reverse slide on close button.",
+                        # opening intentionally omitted
+                    },
+                },
+                "choices": {
+                    "chosen_approach": "CSS transform translateX.",
+                    "final_implementation_plan": "1. Add panel div. 2. Toggle class.",
+                    "approval": "Approved.",
+                },
+                "blocking_questions": [],
+            },
+        }
+        self.assertFalse(task_is_ready_for_execution(task),
+                         "v2 visible-effect task missing Opening should not be ready")
 
 
 if __name__ == "__main__":

@@ -4672,3 +4672,183 @@ test("reflection gate does not block tester dispatch for active state", async ()
     plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-tester", prompt: "Test" } }),
   )
 })
+
+// ####################################################################
+// v2 lifecycle field regression tests (Fix 2, 5)
+// ####################################################################
+
+test("getMissingExecutionGateFields returns empty for v2 visible-effect task with lifecycle fields", () => {
+  // Uses _contractToClarification internally to map v2 contract ->
+  // flat clarification. All lifecycle fields should be filled.
+  const v2VisibleTask = {
+    id: "v2-ui",
+    title: "Animate launcher rows",
+    goal: "Smooth reveal.",
+    type: "implementation",
+    schema_version: "2.0",
+    contract: {
+      engineering: {
+        code_map: "src/Launcher.jsx",
+        lifecycle: {
+          opening: "Rows hidden on mount.",
+          during_transition: "Staggered fade + slide over 300ms.",
+          after_open: "Rows remain visible.",
+          interrupt_behavior: "Pause animation on hover.",
+        },
+      },
+      choices: {
+        chosen_approach: "CSS stagger transition.",
+        final_implementation_plan: "1. Add lifecycle class",
+        approval: "Approved.",
+      },
+      outcome: {
+        final_expected_effect: "Rows reveal with the launcher.",
+      },
+      boundaries: {
+        scope: "Launcher rows only.",
+        anti_outcomes: "No layout shift.",
+      },
+      blocking_questions: [],
+      open_questions: [],
+    },
+  }
+
+  const missing = getMissingExecutionGateFields(v2VisibleTask)
+  assert.equal(missing.includes("Opening"), false,
+    "Opening should NOT be missing when filled via v2 contract")
+  assert.equal(missing.includes("During Transition"), false,
+    "During Transition should NOT be missing when filled via v2 contract")
+  assert.equal(missing.includes("After Open"), false,
+    "After Open should NOT be missing when filled via v2 contract")
+  assert.equal(missing.includes("Interrupt Behavior"), false,
+    "Interrupt Behavior should NOT be missing when filled via v2 contract")
+})
+
+test("getMissingExecutionGateFields lifecycle fallback from _extra", () => {
+  // When engineering.lifecycle is absent but _extra has lifecycle fields,
+  // _contractToClarification should fall back to _extra.
+  const v2Fallback = {
+    id: "v2-fallback",
+    title: "UI animation",
+    goal: "Smooth reveal.",
+    type: "implementation",
+    schema_version: "2.0",
+    contract: {
+      engineering: {},
+      _extra: {
+        opening: "Hidden at start.",
+        during_transition: "Fade in 300ms.",
+        after_open: "Stays.",
+        interrupt_behavior: "No-op.",
+      },
+      choices: {
+        chosen_approach: "CSS transition.",
+        final_implementation_plan: "1. Do it",
+        approval: "Approved.",
+      },
+      outcome: {
+        final_expected_effect: "Rows reveal.",
+      },
+      boundaries: {
+        scope: "Launcher rows.",
+        anti_outcomes: "No shift.",
+      },
+      blocking_questions: [],
+      open_questions: [],
+    },
+  }
+  const missing = getMissingExecutionGateFields(v2Fallback)
+  assert.equal(missing.includes("Opening"), false,
+    "Opening should fallback from _extra")
+  assert.equal(missing.includes("During Transition"), false,
+    "During Transition should fallback from _extra")
+})
+
+test("getMissingExecutionGateFields returns empty for v2 visible-effect task with all lifecycle fields", () => {
+  // The execution gate should not reject a v2 visible-effect task
+  // when all lifecycle fields are filled in the contract.
+  const v2Ready = {
+    id: "v2-ready",
+    title: "Animate launcher rows",
+    goal: "Smooth reveal.",
+    type: "implementation",
+    schema_version: "2.0",
+    contract: {
+      engineering: {
+        lifecycle: {
+          opening: "Hidden.",
+          during_transition: "Fade 300ms.",
+          after_open: "Visible.",
+          interrupt_behavior: "None.",
+        },
+      },
+      choices: {
+        chosen_approach: "CSS.",
+        final_implementation_plan: "1. CSS.",
+        approval: "OK.",
+      },
+      outcome: {
+        final_expected_effect: "Reveal.",
+      },
+      boundaries: {
+        scope: "Launcher.",
+        anti_outcomes: "No shift.",
+      },
+      blocking_questions: [],
+      open_questions: [],
+    },
+  }
+  const missing = getMissingExecutionGateFields(v2Ready)
+  assert.equal(missing.length, 0,
+    "v2 visible-effect task with all lifecycle fields should have no missing fields")
+})
+
+test("getMissingExecutionGateFields reports empty lifecycle for v2 visible-effect task with signal", () => {
+  // Regression: a v2 visible-effect task with visible_effect _signal
+  // but WITHOUT lifecycle fields filled should still report them missing.
+  const v2MissingLifecycle = {
+    id: "v2-missing-lifecycle",
+    title: "Animate launcher",
+    goal: "Smooth.",
+    type: "implementation",
+    schema_version: "2.0",
+    contract: {
+      engineering: {},
+      choices: {
+        chosen_approach: "CSS.",
+        final_implementation_plan: "1. CSS.",
+        approval: "OK.",
+      },
+      outcome: {
+        final_expected_effect: "Reveal.",
+      },
+      boundaries: {
+        scope: "Launcher.",
+        anti_outcomes: "No shift.",
+      },
+      blocking_questions: [],
+      open_questions: [],
+    },
+  }
+  // needs_ui_visible_lifecycle_clarification is not set, so lifecycle
+  // fields are not required. Gate should pass.
+  // But if we add the signal, they become required.
+  const v2WithSignal = {
+    ...v2MissingLifecycle,
+    contract: {
+      ...v2MissingLifecycle.contract,
+      _signal: "visible_effect",
+    },
+  }
+  const missing = getMissingExecutionGateFields(v2WithSignal)
+  assert.notEqual(missing.length, 0,
+    "v2 visible-effect task with signal but empty lifecycle should have missing fields")
+  assert.ok(missing.includes("Opening"),
+    "Opening should be missing for v2 visible-effect task with signal")
+  assert.ok(missing.includes("During Transition"),
+    "During Transition should be missing")
+  assert.ok(missing.includes("After Open"),
+    "After Open should be missing")
+  assert.ok(missing.includes("Interrupt Behavior"),
+    "Interrupt Behavior should be missing")
+})

@@ -313,7 +313,11 @@ def _task_clarification(task: dict[str, Any]) -> dict[str, Any]:
         choices = contract.get("choices", {}) or {}
         outcome = contract.get("outcome", {}) or {}
         boundaries = contract.get("boundaries", {}) or {}
-        return {
+        extra = contract.get("_extra", {}) or {}
+        # Read lifecycle fields from canonical location (engineering.lifecycle)
+        # with fallback to _extra for backward-compatible migration.
+        lifecycle = eng.get("lifecycle", {}) or {}
+        result = {
             "scope": _safe_str(boundaries.get("scope", "")),
             "anti_outcomes": _safe_str(boundaries.get("anti_outcomes", "")),
             "raw_request": _safe_str(contract.get("provenance", {}).get("raw_request", "")),
@@ -330,7 +334,13 @@ def _task_clarification(task: dict[str, Any]) -> dict[str, Any]:
             "decisions": _safe_list(contract.get("decisions", [])),
             "code_map": _safe_str(eng.get("code_map", "")),
             "verification_cases": _safe_list(eng.get("verification_cases", [])),
+            # Visible-effect lifecycle fields: canonical location, then _extra fallback
+            "opening": _safe_str(lifecycle.get("opening", extra.get("opening", ""))),
+            "during_transition": _safe_str(lifecycle.get("during_transition", extra.get("during_transition", ""))),
+            "after_open": _safe_str(lifecycle.get("after_open", extra.get("after_open", ""))),
+            "interrupt_behavior": _safe_str(lifecycle.get("interrupt_behavior", extra.get("interrupt_behavior", ""))),
         }
+        return result
     return dict(task.get("clarification", {}) or {})
 
 
@@ -580,6 +590,23 @@ def _render_engineering_block(eng: dict[str, Any], *, include_code_map: bool = T
     code_map = _safe_str(eng.get("code_map", ""))
     if include_code_map and code_map:
         lines += ["## Code Map", "", code_map, ""]
+
+    # Visible-effect lifecycle fields (render for coder and advisor; tester sees them implicitly)
+    lifecycle = eng.get("lifecycle", {}) or {}
+    opening = _safe_str(lifecycle.get("opening", ""))
+    during_transition = _safe_str(lifecycle.get("during_transition", ""))
+    after_open = _safe_str(lifecycle.get("after_open", ""))
+    interrupt_behavior = _safe_str(lifecycle.get("interrupt_behavior", ""))
+    if opening or during_transition or after_open or interrupt_behavior:
+        lines += ["## Visible Effect Lifecycle", ""]
+        if opening:
+            lines += ["- **Opening:** " + opening, ""]
+        if during_transition:
+            lines += ["- **During Transition:** " + during_transition, ""]
+        if after_open:
+            lines += ["- **After Open:** " + after_open, ""]
+        if interrupt_behavior:
+            lines += ["- **Interrupt Behavior:** " + interrupt_behavior, ""]
 
     # Bug/mismatch fields
     expected = _safe_str(eng.get("expected_behavior", ""))
@@ -2001,6 +2028,108 @@ def create_intake(
 
 
 # ---------------------------------------------------------------------------
+# Risk-shaped contract registry (mirrors just-demand-lib.js CONTRACT_REGISTRY)
+# ---------------------------------------------------------------------------
+CONTRACT_SIGNAL_PATTERNS: dict[str, list[re.Pattern]] = {
+    "visible_effect": [
+        re.compile(r"\b(ui|ux|animation|animated|animate|motion|reveal|stagger|fade|slide)\b", re.I),
+        re.compile(r"(动效|动画|淡入|淡出|展开|收起|错峰|闪烁|抖动|过渡|首帧|打断|结束状态)"),
+    ],
+    "safety_boundary": [
+        re.compile(r"\b(safety|destructive|irreversible|irreversibl|data\s+loss|rollback|revert|permission|authorization|auth[sz]|权限)\b", re.I),
+        re.compile(r"(安全|破坏性|不可逆|数据丢失|回滚|恢复|授权)"),
+    ],
+}
+
+CONTRACT_REGISTRY: list[dict[str, Any]] = [
+    {
+        "name": "visible_effect",
+        "label": "Visible Effect",
+        "gate_level": "hard",
+        "signal_keys": ["visible_effect"],
+        "execution_fields": [
+            ("opening", "Opening"),
+            ("during_transition", "During Transition"),
+            ("after_open", "After Open"),
+            ("interrupt_behavior", "Interrupt Behavior"),
+            ("anti_outcomes", "Anti-Outcomes"),
+        ],
+    },
+    {
+        "name": "safety_boundary",
+        "label": "Safety Boundary",
+        "gate_level": "soft",
+        "signal_keys": ["safety_boundary"],
+        "execution_fields": [
+            ("anti_outcomes", "Anti-Outcomes"),
+        ],
+    },
+]
+
+
+def detect_contract_triggers(text: str) -> set[str]:
+    """Detect which contract types are triggered by text signals.
+
+    Mirrors JS ``detectContractTriggers`` in just-demand-lib.js.
+    """
+    value = str(text or "").strip()
+    if not value:
+        return set()
+    active: set[str] = set()
+    for contract_name, patterns in CONTRACT_SIGNAL_PATTERNS.items():
+        if any(p.search(value) for p in patterns):
+            active.add(contract_name)
+    return active
+
+
+def detect_active_contracts_for_task(task: dict[str, Any]) -> set[str]:
+    """Detect which risk-shaped contracts are active for a task.
+
+    Mirrors JS ``detectActiveContractsForTask`` in just-demand-lib.js.
+    Reads active_contracts from ``clarification.active_contracts``,
+    legacy ``needs_ui_visible_lifecycle_clarification``, and text-based
+    signal detection for visible_effect.
+    """
+    if not task:
+        return set()
+    clarification = _task_clarification(task)
+    active: set[str] = set()
+
+    # Read stored active_contracts array (v2 contract._extra or v1 clarification)
+    stored = task.get("contract", {}).get("_extra", {}).get("active_contracts",
+               clarification.get("active_contracts", None))
+    if isinstance(stored, list):
+        for name in stored:
+            if isinstance(name, str):
+                active.add(name.strip())
+
+    # Legacy boolean flag
+    if clarification.get("needs_ui_visible_lifecycle_clarification", False):
+        active.add("visible_effect")
+
+    # Text-based detection for visible_effect
+    if "visible_effect" not in active:
+        text_parts = [
+            _safe_str(task.get("title", "")),
+            _safe_str(clarification.get("goal", "")),
+            _safe_str(clarification.get("current_understanding", "")),
+            _safe_str(clarification.get("scope", "")),
+            _safe_str(clarification.get("final_expected_effect", "")),
+        ]
+        combined = "\n".join(p for p in text_parts if p)
+        if combined:
+            text_triggers = detect_contract_triggers(combined)
+            active.update(text_triggers)
+
+    return active
+
+
+def task_has_visible_effect_contract(task: dict[str, Any]) -> bool:
+    """Return True if the task has an active visible-effect contract."""
+    return "visible_effect" in detect_active_contracts_for_task(task)
+
+
+# ---------------------------------------------------------------------------
 # Execution readiness
 # ---------------------------------------------------------------------------
 
@@ -2044,6 +2173,21 @@ def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
             missing.append("Final Implementation Plan")
         if not str(clarification.get("approval", "") or "").strip():
             missing.append("Approval")
+
+    # Contract-based execution checks (visible effect, safety boundary, etc.)
+    # Mirrors JS getMissingExecutionGateFields contract loop.
+    active_contracts = detect_active_contracts_for_task(task)
+    for contract_def in CONTRACT_REGISTRY:
+        cname = contract_def["name"]
+        gate = contract_def.get("gate_level", "")
+        if cname not in active_contracts:
+            continue
+        if gate not in ("hard", "soft"):
+            continue
+        for field_name, heading in contract_def.get("execution_fields", []):
+            if not str(clarification.get(field_name, "") or "").strip():
+                if heading not in missing:
+                    missing.append(heading)
 
     return len(missing) == 0
 
@@ -2100,6 +2244,21 @@ def get_missing_execution_fields(task: dict[str, Any], role: str | None = None) 
         cases = clarification.get("verification_cases", []) or []
         if not isinstance(cases, list) or len(cases) == 0:
             missing.append("Verification Cases")
+
+    # Contract-based execution checks (visible effect, safety boundary, etc.)
+    # Mirrors JS getMissingExecutionGateFields contract loop.
+    active_contracts = detect_active_contracts_for_task(task)
+    for contract_def in CONTRACT_REGISTRY:
+        cname = contract_def["name"]
+        gate = contract_def.get("gate_level", "")
+        if cname not in active_contracts:
+            continue
+        if gate not in ("hard", "soft"):
+            continue
+        for field_name, heading in contract_def.get("execution_fields", []):
+            if not str(clarification.get(field_name, "") or "").strip():
+                if heading not in missing:
+                    missing.append(heading)
 
     return missing
 
@@ -2221,6 +2380,11 @@ _CLARIFICATION_TO_CONTRACT_PATH: dict[str, list[str]] = {
     "risks": ["engineering", "risks"],
     "work_items": ["engineering", "work_items"],
     "dependencies": ["engineering", "dependencies"],
+    # Visible-effect lifecycle fields — stored canonically in engineering.lifecycle
+    "opening": ["engineering", "lifecycle", "opening"],
+    "during_transition": ["engineering", "lifecycle", "during_transition"],
+    "after_open": ["engineering", "lifecycle", "after_open"],
+    "interrupt_behavior": ["engineering", "lifecycle", "interrupt_behavior"],
 }
 
 
@@ -2560,6 +2724,13 @@ def mark_task(
     pre_verification_statuses = {"planning", "executing", "verifying", "changes_requested", "tweaking", "debugging"}
     if status in pre_verification_statuses:
         updates["checkpoint_pass_completed"] = False
+    # When marking to executing, also advance current_step from clarify/design to execute
+    # so the plugin gate sees consistent state. This prevents self-locking where
+    # status=executing but current_step=clarify causes soft-step fallback.
+    if status == "executing":
+        current_step = _safe_str(task.get("current_step", ""))
+        if current_step in ("clarify", "design", ""):
+            updates["current_step"] = "execute"
     if progress is not None:
         updates["progress"] = progress
     if impact is not None:
