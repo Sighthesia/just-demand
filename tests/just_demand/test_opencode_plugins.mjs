@@ -860,9 +860,9 @@ test("controller decision shape exposes phase action reason and rewrite", () => 
     subagent_unavailable_pending: false,
   })
   assert.equal(executionDecision.phase, CONTROLLER_PHASE.execute)
-  assert.equal(executionDecision.action, CONTROLLER_ACTION.block)
-  assert.equal(executionDecision.reason_code, "execution_needed")
-  assert.deepEqual(executionDecision.rewrite, { mode: "replace", preserve_original: true })
+  assert.equal(executionDecision.action, CONTROLLER_ACTION.allow)
+  assert.equal(executionDecision.reason_code, "main_session_execution")
+  assert.equal(executionDecision.rewrite, null)
 })
 
 test("controller decision allows workflow-entry narration before select-task hint when active tasks exist", () => {
@@ -976,20 +976,20 @@ test("state does not append first-screen reminder when response is short", async
   assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/)
 })
 
-test("state does not append first-screen reminder when controller has already blocked the text", async () => {
+test("state applies first-screen reminder without blocking ready main-agent execution", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "task.json"), JSON.stringify({ id: "task-a", status: "executing", current_step: "execute", assigned_subagents: [] }))
   const plugin = await stateFactory({ directory: root })
-  // Long execution intent text should be blocked by the controller, not the first-screen gate
+  // Ready execution is allowed; ordinary output-quality reminders still apply.
   const body = "I will implement the feature and debug the bug inline. " + "Analysis:. ".repeat(40)
   assert.ok(body.length > 400)
   const output = { parts: [{ type: "text", text: body }] }
   await plugin["chat.message"]({ sessionID: "first-screen-blocked" }, output)
-  assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.doesNotMatch(output.parts[0].text, /Lead with the result/)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
+  assert.match(output.parts[0].text, /Lead with the result/)
 })
 
 test("state does not append first-screen reminder on consecutive long-context turns (dedup)", async () => {
@@ -1301,7 +1301,7 @@ test("controller decision allows script-verifiable high-confidence work via smal
   }
 })
 
-test("controller decision blocks large execution requests with execution_needed (not small_work_bypass)", () => {
+test("controller decision allows large main-agent execution requests on ready tasks", () => {
   const samples = [
     "I will implement the new feature.",
     "Let me refactor the entire module.",
@@ -1324,9 +1324,9 @@ test("controller decision blocks large execution requests with execution_needed 
     })
 
     assert.equal(decision.phase, CONTROLLER_PHASE.execute, `Expected execute phase for: "${sample}"`)
-    assert.equal(decision.action, CONTROLLER_ACTION.block, `Expected block action for: "${sample}"`)
-    assert.equal(decision.reason_code, "execution_needed", `Expected execution_needed for: "${sample}"`)
-    assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true }, `Expected replace rewrite for: "${sample}"`)
+    assert.equal(decision.action, CONTROLLER_ACTION.allow, `Expected allow action for: "${sample}"`)
+    assert.equal(decision.reason_code, "main_session_execution", `Expected main_session_execution for: "${sample}"`)
+    assert.equal(decision.rewrite, null, `Expected null rewrite for: "${sample}"`)
   }
 })
 
@@ -1341,8 +1341,8 @@ test("injectWorkflowStateBanner appends active task banner", () => {
   assert.match(result, /task=task-a \(executing\)/)
   assert.match(result, /phase=execution/)
   assert.match(result, /title: My Task/)
-  assert.match(result, /next: continue execution, dispatch subagent/)
-  assert.match(result, /blocked: start, complete, skip workflow/)
+  assert.match(result, /next: main-agent execution, selective subagent dispatch/)
+  assert.match(result, /blocked: start, complete before verification/)
 })
 
 test("injectWorkflowStateBanner keeps active task title compact", () => {
@@ -1423,7 +1423,7 @@ test("controller decision allows explicit workflow skip override when no active 
   assert.deepEqual(decision.rewrite, null)
 })
 
-test("controller decision allows explicit workflow skip override with active task (bypasses execution_needed)", () => {
+test("controller decision keeps explicit workflow override compatibility with active task", () => {
   const decision = buildControllerDecision(
     "I will skip the workflow and implement this inline.",
     {
@@ -1777,7 +1777,7 @@ test("state appends clarification reminder for concrete request turns", async ()
   assert.match(output.parts[0].text, /^Please fix the bug in the API\./)
   assert.match(output.parts[0].text, /Load using-just-demand first/i)
   assert.match(output.parts[0].text, /socratic-clarification second/i)
-  assert.match(output.parts[0].text, /Use just-demand subagents proactively/i)
+  assert.match(output.parts[0].text, /all six eligibility gates and all three net-benefit questions/i)
   assert.match(output.parts[0].text, /\[just-demand reminder\]/)
   assert.match(output.parts[0].text, /\[workflow-state\].*task-a/)
 })
@@ -2222,7 +2222,7 @@ test("state stays quiet for ordinary analysis and status-summary language", asyn
   }
 })
 
-test("subagent skip applies only to the current turn and later code edits block again", async () => {
+test("subagent unavailable reminder clears and later ready work executes in main session", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -2239,11 +2239,12 @@ test("subagent skip applies only to the current turn and later code edits block 
 
   assert.match(first.parts[0].text, /retry now, or skip one turn/i)
   assert.match(first.parts[0].text, /\[workflow-state\]/)
-  assert.match(second.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(second.parts[0].text, /six eligibility gates/i)
+  assert.match(second.parts[0].text, /I will inspect the codebase and implement the fix inline/i)
+  assert.match(second.parts[0].text, /\[workflow-state\]/i)
+  assert.doesNotMatch(second.parts[0].text, /\[just-demand execution blocked\]/i)
 })
 
-test("workflow failure golden transcript keeps approval, skip scope, pivot gate, and closeout gate intact", async () => {
+test("workflow failure golden transcript keeps approval, takeover, and closeout gate intact", async () => {
   const [analysisTurn, approvalTurn, skipTurn, pivotTurn, closeoutTurn] = readWorkflowFailureGoldenTranscript()
 
   assert.deepEqual(
@@ -2282,8 +2283,9 @@ test("workflow failure golden transcript keeps approval, skip scope, pivot gate,
 
   const pivot = { parts: [{ type: "text", text: pivotTurn.text }] }
   await plugin["chat.message"]({ sessionID: "golden-transcript" }, pivot)
-  assert.match(pivot.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(pivot.parts[0].text, /six eligibility gates/i)
+  assert.ok(pivot.parts[0].text.includes(pivotTurn.text))
+  assert.match(pivot.parts[0].text, /\[workflow-state\]/i)
+  assert.doesNotMatch(pivot.parts[0].text, /\[just-demand execution blocked\]/i)
   assert.doesNotMatch(pivot.parts[0].text, /retry now, or skip one turn/i)
 
   const closeout = { parts: [{ type: "text", text: closeoutTurn.text }] }
@@ -2316,7 +2318,7 @@ test("transcript drift keeps start execute complete phrasing pinned to workflow 
   assert.match(turns[0].text, /start/)
 })
 
-test("analysis-to-implementation pivot re-enters execution gating", async () => {
+test("analysis-to-implementation pivot proceeds on a ready formal task", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -2328,8 +2330,9 @@ test("analysis-to-implementation pivot re-enters execution gating", async () => 
 
   await plugin["chat.message"]({ sessionID: "pivot-reset" }, output)
 
-  assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(output.parts[0].text, /six eligibility gates/i)
+  assert.match(output.parts[0].text, /After the analysis, I will implement the fix inline/i)
+  assert.match(output.parts[0].text, /\[workflow-state\]/i)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
 })
 
 test("completion claims are blocked until verification closeout", async () => {
@@ -2428,7 +2431,7 @@ test("execution gate error points contract tasks to recovery fields", () => {
   assert.match(error, /update-clarification task-ui/i)
 })
 
-test("state blocks obvious execution-needed replies on unrouted active tasks", async () => {
+test("state allows main-agent execution on ready active tasks without subagents", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -2438,7 +2441,7 @@ test("state blocks obvious execution-needed replies on unrouted active tasks", a
   const plugin = await stateFactory({ directory: root })
   const samples = [
     "I will implement the feature and debug the bug inline.",
-    "I'll just finish this in the main session.",
+    "I'll continue implementing this in the main session.",
     "先说明一下：I will implement the fix and debug the bug inline, 然后我再整理结果。",
     "中文说明一下，we should build this in the main session and keep the rest for later.",
     "我打算直接在主会话里实现这个修复并调试一下。",
@@ -2449,17 +2452,14 @@ test("state blocks obvious execution-needed replies on unrouted active tasks", a
 
     await plugin["chat.message"]({ sessionID: `execution-${index}` }, output)
 
-    assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-    assert.match(output.parts[0].text, /six eligibility gates/i)
-    assert.match(output.parts[0].text, /six eligibility gates/i)
-    assert.match(output.parts[0].text, /skip workflow/i)
-    assert.match(output.parts[0].text, /Original response:/i)
-    assert.match(output.parts[0].text, /> /)
-    assert.notEqual(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/i)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
+    assert.doesNotMatch(output.parts[0].text, /To explicitly override/i)
   }
 })
 
-test("state blocks additional common execution phrasings on unrouted active tasks", async () => {
+test("state allows common main-agent execution phrasings on ready active tasks", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -2495,15 +2495,13 @@ test("state blocks additional common execution phrasings on unrouted active task
 
     await plugin["chat.message"]({ sessionID: `broad-execution-${index}` }, output)
 
-    assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected block for: "${sample}"`)
-    assert.match(output.parts[0].text, /six eligibility gates/i)
-    assert.match(output.parts[0].text, /skip workflow/i)
-    assert.match(output.parts[0].text, /Original response:/i)
-    assert.notEqual(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/i)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected allow for: "${sample}"`)
   }
 })
 
-test("state blocks code investigation intent inside active execution task without subagents", async () => {
+test("state allows code investigation inside active execution task without subagents", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -2523,8 +2521,9 @@ test("state blocks code investigation intent inside active execution task withou
     const output = { parts: [{ type: "text", text: sample }] }
     await plugin["chat.message"]({ sessionID: `code-investigation-exec-${index}` }, output)
 
-    assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected block for: "${sample}"`)
-    assert.match(output.parts[0].text, /six eligibility gates/i)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/i)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected allow for: "${sample}"`)
   }
 })
 
@@ -2595,7 +2594,7 @@ test("explicit workflow skip overrides execution block for new patterns and code
   }
 })
 
-test("state still blocks execution-needed text after workflow subagents were previously assigned", async () => {
+test("state allows main-agent execution after workflow subagents were previously assigned", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -2607,11 +2606,12 @@ test("state still blocks execution-needed text after workflow subagents were pre
 
   await plugin["chat.message"]({}, output)
 
-  assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(output.parts[0].text, /six eligibility gates/i)
+  assert.match(output.parts[0].text, /I will implement the feature/i)
+  assert.match(output.parts[0].text, /\[workflow-state\]/i)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
 })
 
-test("controller decision still blocks execution intent after workflow subagents were previously assigned", () => {
+test("controller decision allows main-agent execution after workflow subagents were previously assigned", () => {
   const decision = buildControllerDecision("I will implement the feature and debug the bug inline.", {
     activeTask: {
       id: "task-a",
@@ -2625,9 +2625,9 @@ test("controller decision still blocks execution intent after workflow subagents
   })
 
   assert.equal(decision.phase, CONTROLLER_PHASE.execute)
-  assert.equal(decision.action, CONTROLLER_ACTION.block)
-  assert.equal(decision.reason_code, "execution_needed")
-  assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true })
+  assert.equal(decision.action, CONTROLLER_ACTION.allow)
+  assert.equal(decision.reason_code, "main_session_execution")
+  assert.equal(decision.rewrite, null)
 })
 
 // ---------------------------------------------------------------------------
@@ -2690,7 +2690,7 @@ test("controller decision reminds (not blocks) code investigation intent when cu
   assert.deepEqual(decision.rewrite, { mode: "append" })
 })
 
-test("controller decision still blocks execution intent when current_step is execute (no soften)", () => {
+test("controller decision allows execution intent when current_step is execute", () => {
   const decision = buildControllerDecision("I will implement the feature inline.", {
     activeTask: {
       id: "task-a",
@@ -2704,12 +2704,12 @@ test("controller decision still blocks execution intent when current_step is exe
   })
 
   assert.equal(decision.phase, CONTROLLER_PHASE.execute)
-  assert.equal(decision.action, CONTROLLER_ACTION.block)
-  assert.equal(decision.reason_code, "execution_needed")
-  assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true })
+  assert.equal(decision.action, CONTROLLER_ACTION.allow)
+  assert.equal(decision.reason_code, "main_session_execution")
+  assert.equal(decision.rewrite, null)
 })
 
-test("controller decision still blocks code investigation intent when current_step is execute (no soften)", () => {
+test("controller decision allows code investigation intent when current_step is execute", () => {
   const decision = buildControllerDecision("Let me inspect the codebase to find the bug.", {
     activeTask: {
       id: "task-a",
@@ -2723,9 +2723,9 @@ test("controller decision still blocks code investigation intent when current_st
   })
 
   assert.equal(decision.phase, CONTROLLER_PHASE.execute)
-  assert.equal(decision.action, CONTROLLER_ACTION.block)
-  assert.equal(decision.reason_code, "execution_needed")
-  assert.deepEqual(decision.rewrite, { mode: "replace", preserve_original: true })
+  assert.equal(decision.action, CONTROLLER_ACTION.allow)
+  assert.equal(decision.reason_code, "main_session_execution")
+  assert.equal(decision.rewrite, null)
 })
 
 test("state reminds (not blocks) execution intent in clarify step", async () => {
@@ -2746,7 +2746,7 @@ test("state reminds (not blocks) execution intent in clarify step", async () => 
   assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
 })
 
-test("state still blocks execution intent in execute step (P0 safety preserved)", async () => {
+test("state allows execution intent in execute step", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -2758,8 +2758,9 @@ test("state still blocks execution intent in execute step (P0 safety preserved)"
 
   await plugin["chat.message"]({ sessionID: "execute-block" }, output)
 
-  assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(output.parts[0].text, /six eligibility gates/i)
+  assert.match(output.parts[0].text, /I will implement the feature now/i)
+  assert.match(output.parts[0].text, /\[workflow-state\]/i)
+  assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i)
 })
 
 test("state blocks obvious verification closeout claims until complete-verification", async () => {
@@ -3120,11 +3121,11 @@ test("state writes full chat turn dump when JUST_DEMAND_DEBUG_PROMPT_FULL is ena
     assert.equal(files.length, 1)
     const dump = readFileSync(join(debugPromptDir, files[0]), "utf8")
     assert.match(dump, /# Chat Turn Debug Dump/)
-    assert.match(dump, /reason_code: execution_needed/)
+    assert.match(dump, /reason_code: main_session_execution/)
     assert.match(dump, /## Original Text/)
     assert.match(dump, /I will implement the feature inline\./)
     assert.match(dump, /## After Controller/)
-    assert.match(dump, /\[just-demand execution blocked\]/)
+    assert.doesNotMatch(dump, /\[just-demand execution blocked\]/)
     assert.match(dump, /## Final Text/)
     assert.match(dump, /\[workflow-state\]/)
 
@@ -3138,7 +3139,7 @@ test("state writes full chat turn dump when JUST_DEMAND_DEBUG_PROMPT_FULL is ena
     assert.match(transcript, /## Original Text/)
     assert.match(transcript, /I will implement the feature inline\./)
     assert.match(transcript, /## After Controller/)
-    assert.match(transcript, /\[just-demand execution blocked\]/)
+    assert.doesNotMatch(transcript, /\[just-demand execution blocked\]/)
     assert.match(transcript, /## Final Text/)
     assert.match(transcript, /\[workflow-state\]/)
   } finally {
@@ -4057,7 +4058,8 @@ test("buildReflectionGateError produces correct messages", () => {
   const activeError = buildReflectionGateError("apply_patch", "task-a", "reflection_active")
   assert.match(activeError, /reflection is active/)
   assert.match(activeError, /task-a/)
-  assert.match(activeError, /just-demand-advisor/)
+  assert.match(activeError, /main agent owns takeover/)
+  assert.match(activeError, /advisor optional/)
 })
 
 // ---------------------------------------------------------------------------
@@ -4552,14 +4554,14 @@ test("reflection active blocks coder task dispatch", async () => {
   const plugin = await stateFactory({ directory: root })
   await assert.rejects(
     plugin["tool.execute.before"]({ tool: "Task" }, { args: { subagent_type: "just-demand-coder", prompt: "Do work" } }),
-    /Blocked Task: reflection is active for task task-a.*just-demand-advisor/,
+    /Blocked Task: reflection is active for task task-a.*main agent owns takeover/,
   )
 })
 
 // ---------------------------------------------------------------------------
 // Reflection gate: active blocks apply_patch
 // ---------------------------------------------------------------------------
-test("reflection active blocks apply_patch", async () => {
+test("reflection active allows main-agent apply_patch takeover", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -4574,16 +4576,15 @@ test("reflection active blocks apply_patch", async () => {
   }))
 
   const plugin = await stateFactory({ directory: root })
-  await assert.rejects(
+  await assert.doesNotReject(
     plugin["tool.execute.before"]({ tool: "apply_patch" }, { args: { patchText: "*** Update File: src/app.js\n*** End Patch" } }),
-    /Blocked apply_patch: reflection is active for task task-a/,
   )
 })
 
 // ---------------------------------------------------------------------------
 // Reflection gate: active blocks write-like bash
 // ---------------------------------------------------------------------------
-test("reflection active blocks write-like bash", async () => {
+test("reflection active allows main-agent write-like bash takeover", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   const taskDir = join(root, ".just-demand", "state", "active", "task-a")
@@ -4598,9 +4599,8 @@ test("reflection active blocks write-like bash", async () => {
   }))
 
   const plugin = await stateFactory({ directory: root })
-  await assert.rejects(
+  await assert.doesNotReject(
     plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
-    /Blocked bash: reflection is active for task task-a/,
   )
 })
 

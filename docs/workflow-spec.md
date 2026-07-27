@@ -37,18 +37,29 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
     5. **Capability match**: the subagent's role (researcher/coder/tester/advisor) cleanly fits the work shape — no need for cross-role improvisation.
     6. **Failure recoverability**: a failed or drifted subagent result can be detected cheaply and costs at most one retry before the main agent can safely take over.
 
-    ### Three Net-Benefit Questions (at least one must be "yes")
+    ### Three Net-Benefit Questions (ALL must be "yes")
     1. Does subagent dispatch save meaningful main-session tokens or execution effort?
     2. Does subagent dispatch reduce the risk of main-session context drift on this work?
     3. Does subagent dispatch produce a cleanly separable artifact (a file, a test report, a research summary)?
 
-    Any gate failure or uncertain benefit → the main agent keeps the work.
+    Any gate failure, any "no", or any uncertain answer → the main agent keeps the work. A separable artifact alone is not enough if dispatch does not save total effort or reduce drift risk.
+
+    ### Conservative Capability Defaults
+    - Fast or weak models handle only mechanical work such as renames, bounded replacements, routine commands, and deterministic checks.
+    - Architecture, product interpretation, cross-module judgment, and frontend visual/interaction/copy quality remain with the main agent by default.
+    - Quality-sensitive work may be dispatched only when its observable target is explicit and the selected model has demonstrated the required capability.
+
+    ### Minimum Dispatch Package
+    Every dispatched unit contains only six sections: **Goal**, **Scope**, **Decided approach**, **Constraints**, **Acceptance**, and **Return format**. If those sections cannot stay short without losing critical context, narrow the unit or keep it in the main session.
+
+    ### Drift Recovery
+    If a result drifts because one small fact was omitted, allow one precise retry. Capability mismatch, poor quality, or a second drift ends delegation for that unit and the main agent takes over. Do not grow a weak prompt through repeated append-only corrections.
 
 8. **Small work stays in the main session.** Reading or editing roughly tens of lines of code, or tasks that can be reliably verified by a local script (high-confidence bug detection, scriptable data analysis), remain in the main session by default. They do not require subagent dispatch.
 
 9. **Mismatch feedback is optionized before re-implementation.** When the user reports a deviation (vague or precise), the agent does not guess the root cause and patch blindly. Instead it leads with options: locate the deviation dimension, then pin the target state via contrastive choices. The user click-selects rather than writing prose.
 
-10.  **Repeated mismatch triggers reflection.** If the same issue fails twice consecutively, the workflow stops blind patching, enters reflection, and routes to the `advisor` subagent for fresh-context analysis before any more implementation.
+10.  **Repeated mismatch triggers reflection.** If the same issue fails twice consecutively, the workflow stops blind patching and reassesses the premise, context, and task boundary. The main agent takes over by default; an `advisor` is optional only when the selective-dispatch gates and all net-benefit questions pass.
 
 11. **Risk-triggered confirmation.** Confirmation is not universal — it is proportional to risk. Low-risk work that does not change user-visible behavior, architecture, compatibility, security, cost, or long-term maintenance proceeds by default with a concise description and no permission request. Only decisions that affect those dimensions require explicit user choice with a recommended default.
 
@@ -111,9 +122,9 @@ The main agent is the **workflow owner, delivery lead, and dispatcher**. The mai
 - Reveals the expected visible effect before task promotion or execution — the user approves what they will see, not how it will be built.
 - Owns task shaping, routing, recovery, verification closeout, summaries, and the user-expectation contract.
 - Reports in effect-first style: visible result, scope, acceptance cues, and next user choice — not implementation details.
-- Dispatches subagents only when all six eligibility gates pass and net benefit is positive; otherwise owns the work directly, even for long-context or multi-file tasks.
+- Dispatches subagents only when all six eligibility gates and all three net-benefit questions pass; otherwise owns the work directly, even for long-context or multi-file tasks.
 - Routes vague mismatch feedback into optionized deviation resolution before re-implementing.
-- Escalates consecutive failures to reflection/advisor instead of blind patching.
+- Takes over after a failed precise retry and uses reflection or an advisor selectively instead of blind patching.
 
 ### Subagents
 
@@ -123,6 +134,8 @@ Subagents execute focused role contracts inside a task boundary. They do not cre
 - **Coder**: scoped implementation inside the task boundary.
 - **Tester**: acceptance verification and low-risk local fixes.
 - **Advisor**: fresh-context framing and cross-boundary tradeoff analysis.
+
+Fast-model assignments are limited to mechanical work. Frontend visual, interaction, and copy quality remain with the main agent unless the target is explicit and the selected model is capable of meeting it.
 
 ## Lifecycle And State Transitions
 
@@ -178,9 +191,9 @@ If the same issue produces meaningful correction feedback twice consecutively:
 
 1. **Stop modifying code directly.**
 2. Exit the current execution loop.
-3. Route to the `advisor` subagent for fresh-context analysis.
-4. The advisor examines the full chain: user intent, clarification artifacts, coder context, tester output, and actual observed effect — without inheriting the main session's accumulated context.
-5. Only resume implementation after the advisor recommends a path forward that the user approves.
+3. The main agent takes over and examines the full chain: user intent, clarification artifacts, delegated context, verification output, and actual observed effect.
+4. Use an `advisor` only when its independent perspective passes all selective-dispatch gates and all three net-benefit questions.
+5. Resume implementation only after the revised path is clear and approved when it changes the visible effect or architecture.
 
 ## Execution And Context Packages
 
@@ -191,8 +204,8 @@ Before implementation or verification:
 1. Confirm the intended task is active.
 2. Run `just-demand . list-active` and inspect unfinished tasks for conflict risk.
 3. Select or resume the intended task if another unfinished task is current.
-4. Ensure the task context package exists for the intended subagent.
-5. Apply the six eligibility gates and three net-benefit questions before dispatching a subagent. The main agent may execute any work — including long-context or multi-file work — when any gate fails or benefit is uncertain. Small work (roughly tens of lines of code read or edited, or tasks verifiable by a local script) may proceed in the main session without subagent dispatch.
+4. Ensure the task context package exists when a subagent is selected.
+5. Apply the six eligibility gates and three net-benefit questions before dispatching a subagent. Dispatch only when all nine answers pass. The main agent executes when any answer fails or is uncertain, including for long-context or multi-file work. Small work stays in the main session.
 
 Required task context files:
 

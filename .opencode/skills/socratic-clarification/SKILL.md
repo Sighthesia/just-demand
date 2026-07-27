@@ -8,7 +8,7 @@ description: Use when the user proposes a need, request, feature, design/refacto
 - **Effect first**: lead with the expected user-visible result, not implementation steps.
 - **Defaults first**: recommend before asking; options only when the choice changes behavior, architecture, compatibility, security, cost, or maintenance.
 - **Clarify before execute**: no edits or dispatch until the final effect, approach, and plan are approved.
-- **Subagents are selective accelerators**: dispatch only when all six eligibility gates pass and net benefit is positive. The main agent may execute any work when a gate fails or benefit is uncertain.
+- **Subagents are selective accelerators**: dispatch only when all six eligibility gates and all three net-benefit questions pass. The main agent may execute any work when an answer fails or is uncertain.
 - **Closeout is a real step**: wording does not replace `complete-verification`.
 
 # Socratic Clarification
@@ -588,7 +588,7 @@ If a task only needs a light check, keep the round small and stop at the minimum
 
 ## Routing Rule
 
-After clarification, apply the six eligibility gates and three net-benefit questions to decide dispatch: subagents are selective accelerators, not mandatory sinks. The main agent may execute any work — including long-context work — when any gate fails or benefit is uncertain. If dispatch is the right choice, promote to a formal work item and route execution through `just-demand-*` subagents.
+After clarification, dispatch only when all six eligibility gates and all three net-benefit questions pass. The main agent may execute any work — including long-context work — when an answer fails or is uncertain. If dispatch passes all nine checks, promote to a formal work item and route that bounded unit through a `just-demand-*` subagent.
 
 ## No Main-Session Injection
 

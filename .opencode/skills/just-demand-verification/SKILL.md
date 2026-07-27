@@ -18,7 +18,7 @@ Canonical workflow spec: `docs/workflow-spec.md`. The spec is the reference for 
 - When `just-demand-tester` is used, treat its report as the active verification record: it should name findings, any low-risk fixes applied, verification results, and residual risk.
 - Lead verification reports with the user-visible effect or outcome. Place routine tests, build, and lint detail below the fold unless they failed or the user asked.
 - If correction feedback is vague, proactively present deviation options (Stage 1: dimension, Stage 2: contrast) before re-implementing. See `socratic-clarification`'s Proactive Deviation Options and `docs/workflow-spec.md` for the full model.
-- If two consecutive attempts fail on the same issue, stop patching and route to the `advisor` subagent for fresh-context analysis before any more implementation.
+- If a delegated result drifts, allow one precise retry only for a small omitted fact. Capability mismatch, poor quality, or a second drift means the main agent takes over; an advisor remains optional under the selective-dispatch gates.
 
 ## Status Flow
 

@@ -5,18 +5,18 @@ description: Use when a formal work item is ready to execute, when dispatching j
 
 # Workflow Execution
 
-Execute formal work items through focused subagents and script-owned state.
+Execute formal work items in the main session or through selectively dispatched subagents, with script-owned state.
 
 ## Core Rules
 
-- Main agent coordinates; subagents execute focused work.
+- Main agent owns execution and may use subagents as selective accelerators.
 - Subagents do not inherit full chat history.
 - Scripts are the only write path for workflow machine state under `.just-demand/`.
 - Plugins and agents may read state, but lifecycle transitions must go through scripts.
 - Do not dispatch implementation before the user has confirmed the direction and the task is ready.
-- Subagent dispatch is governed by six hard eligibility gates (goal stability, boundary independence, context compressibility, result verifiability, capability match, failure recoverability) and three quick net-benefit questions (token/effort savings, context-drift risk, separable artifact). Dispatch only when all six gates pass AND at least one benefit question is "yes". Otherwise, the main agent executes — even for long-context or multi-file work.
+- Subagent dispatch requires all six hard eligibility gates and all three net-benefit questions to pass. Any failed or uncertain answer means the main agent executes, even for long-context or multi-file work.
 - Small reads/edits (~几十行) and script-verifiable checks (bug detection, data analysis) remain in the main session without subagent dispatch.
-- A one-turn subagent skip is not a persistent permission; new broad work requires reassessment of the gates unless the user gives a fresh explicit override.
+- Main-session execution needs no dispatch override once the formal task is ready.
 - When reporting progress or a result, lead with the user-visible effect or the decision the user needs to make; treat task state, mark commands, and checkpoint mechanics as supporting detail.
 - If a suitable subagent is unavailable, ask the user to retry now or skip one turn rather than silently falling back.
 - Implementation or verification must not start unless the current formal task already has the required task context files. Do not treat missing task context as a recoverable inline shortcut.
@@ -29,6 +29,8 @@ Execute formal work items through focused subagents and script-owned state.
 - `just-demand-coder`: use for scoped implementation once the task is clarified and the chosen approach is explicit.
 - `just-demand-tester`: use for validation against the task brief, visible-effect checks, and low-risk local fixes after implementation or when a result needs review.
 - `just-demand-advisor`: use for fresh-context diagnosis, repeated failures, cross-boundary framing, or when the main session needs an independent recommendation before choosing a path.
+
+Fast models handle only mechanical work. Architecture, product interpretation, cross-module judgment, and frontend visual/interaction/copy quality stay with the main agent by default unless the target is explicit and the selected model can meet it.
 
 ## Output Handoff Rules
 
@@ -153,13 +155,20 @@ List the main directories, modules, or files affected. Use short user-readable p
 
 ## Dispatch Prompt
 
-Start workflow subagent prompts with:
+Use this minimum dispatch package:
 
 ```text
 Active task: <task-id>
+
+Goal: <local result>
+Scope: <allowed reads and writes>
+Decided approach: <decisions to follow>
+Constraints: <what must not change>
+Acceptance: <objective checks>
+Return: <changes, checks, deviations, blockers>
 ```
 
-This is a fallback for context injection failures. Keep the manual Requested Work short: state the role-specific request, target repository or paths if needed, and any turn-specific instruction. Do not paste the full task package, full clarification artifact, approach options, approval text, or repeated context sections; the plugin injects the task context automatically.
+Do not duplicate injected context. If these sections cannot stay short without losing critical signal, narrow the unit or keep it in the main session.
 
 ## Progressive Clarification Routing
 
@@ -194,7 +203,7 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 4. If `list-active` shows unfinished tasks but no current task is selected, pick the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
 5. Ensure the current task package has the required files for the intended subagent.
 6. Verify the clarification gate above passes. If not, route back to clarification.
-7. Apply the six eligibility gates and three net-benefit questions. Dispatch the narrowest suitable subagent only when all gates pass and benefit is clear. The main agent may execute any work — including substantial code reading, multi-file editing, or extended verification — when any gate fails or benefit is uncertain. Small reads/edits (~几十行) and script-verifiable checks always proceed inline in the main session.
+7. Dispatch only when all six gates and all three net-benefit questions pass. Otherwise the main agent executes; small work always stays inline.
 8. Review subagent output before moving to the next phase.
 9. Run verification before claiming completion.
 

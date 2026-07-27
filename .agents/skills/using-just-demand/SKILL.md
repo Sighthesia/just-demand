@@ -98,7 +98,7 @@ Use this reset when the user keeps providing new samples, when the conversation 
 - Subagents execute focused work from injected task context.
 - Scripts are the write path for `.just-demand/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
-- Subagent dispatch is governed by six hard eligibility gates (goal stability, boundary independence, context compressibility, result verifiability, capability match, failure recoverability) and three quick net-benefit questions (token/effort savings, context-drift risk reduction, separable artifact output). Dispatch only when all six gates pass AND at least one benefit question is "yes". Any gate failure or uncertain benefit → the main agent executes, even for long-context or multi-file work. The plugin's execution block enforces readiness, not mandatory dispatch.
+- Subagent dispatch requires all six hard eligibility gates and all three net-benefit questions to pass. Any failed or uncertain answer means the main agent executes. The plugin enforces workflow readiness, not the execution-owner choice.
 - Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
 
 ## Subagent Availability Rule
@@ -219,7 +219,7 @@ Route 2 is the default when concrete work, bug reports, or implementation reques
 
 ### Selective Subagent Dispatch
 
-Subagent dispatch is governed by **six hard eligibility gates** (goal stability, boundary independence, context compressibility, result verifiability, capability match, failure recoverability) and **three quick net-benefit questions** (token/effort savings, context-drift risk reduction, separable artifact output). Dispatch only when **all six gates pass AND at least one benefit question is "yes"**. Any gate failure or uncertain benefit → the main agent executes, even for long-context or multi-file work. The plugin enforces task readiness (formal task + context files), not mandatory subagent routing.
+Subagent dispatch requires **all six eligibility gates** and **all three net-benefit questions** to pass. Any failed or uncertain answer means the main agent executes. Fast models are limited to mechanical tasks; frontend visual/interaction/copy quality stays with the main agent by default. The plugin enforces workflow readiness, not mandatory dispatch.
 
 ## Commands
 

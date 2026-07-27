@@ -103,7 +103,7 @@ request
   -> clarify
   -> promote to formal task
   -> attach task context
-  -> dispatch the right subagent
+  -> main agent executes, or selectively dispatches when every gate passes
   -> verify against acceptance criteria
   -> complete-verification
   -> archive
@@ -114,13 +114,15 @@ request
 | Role           | Owns                                                              | Does not own                                                                   |
 | -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | **User**       | Goals, constraints, tradeoff preferences, final approval          | Internal routing mechanics, subagent orchestration, workflow state writes      |
-| **Main agent** | Clarification, task shaping, dispatch, closure, summaries         | Broad implementation work that should be delegated when a task boundary exists |
-| **Researcher** | Evidence gathering, problem mapping, source comparison            | Code changes, task promotion, verification closeout                            |
+| **Main agent** | Clarification, task shaping, implementation ownership, routing, closure, summaries | Delegation when its total cost or quality risk is uncertain |
+| **Researcher** | Scoped source collection and factual summarization                | Analysis, recommendations, code changes, task promotion, verification closeout |
 | **Coder**      | Scoped implementation inside the task boundary                    | Workflow ownership, task lifecycle decisions, cross-task re-planning           |
 | **Tester**     | Acceptance verification, failure discovery, regression checking   | Rewriting the implementation plan or reassigning ownership                     |
 | **Advisor**    | Fresh-context framing, tradeoff analysis, cross-boundary judgment | Executing the task or closing it unilaterally                                  |
 
 The user defines goals, constraints, and final approval. The main agent owns workflow shape, routing, and closure. Subagents execute focused role contracts inside the task boundary.
+
+Subagents are selective accelerators. Dispatch requires six eligibility gates and all three net-benefit checks to pass; otherwise the main agent executes directly, regardless of context length or file count. Fast models are limited to mechanical tasks, while frontend quality and other judgment-heavy work stay with the main agent by default.
 
 ### Main Agent Output Style
 

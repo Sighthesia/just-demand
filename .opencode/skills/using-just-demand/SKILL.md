@@ -8,7 +8,7 @@ description: "Load this skill first for repo work so the correct just-demand rou
 - **Effect first**: lead every reply with the result, conclusion, or recommendation.
 - **Defaults first**: recommend the path before asking; options only when the choice matters.
 - **Clarify before execute**: no edits or subagent dispatch until the final effect, approach, and plan are approved.
-- **Subagents are selective accelerators**: dispatch only when all six eligibility gates pass AND net benefit is positive. The main agent may execute any work — including broad reading, multi-file changes, or extended verification — when a gate fails or benefit is uncertain. Small reads/edits (~几十行) and script-verifiable checks also stay in the main session.
+- **Subagents are selective accelerators**: dispatch only when all six eligibility gates and all three net-benefit questions pass. The main agent may execute any work — including broad reading, multi-file changes, or extended verification — when an answer fails or is uncertain. Small reads/edits (~几十行) and script-verifiable checks also stay in the main session.
 - **Closeout is a real step**: completion wording does not replace `complete-verification`.
 
 # Skill Priority
@@ -112,7 +112,7 @@ Use this reset when the user keeps providing new samples, when the conversation 
 - Scripts are the write path for `.just-demand/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
 - Approval words such as `批准`, `继续`, `同意`, `approved`, and `go ahead` are workflow-entry signals, not execution permission.
-- Subagent dispatch is governed by six hard eligibility gates and three quick net-benefit questions. Any gate failure or uncertain benefit means the main agent executes — even for long-context or multi-file work. The plugin's execution block enforces readiness, not mandatory dispatch.
+- Subagent dispatch requires all six hard eligibility gates and all three net-benefit questions to pass. Any failed or uncertain answer means the main agent executes. The plugin enforces workflow readiness, not the execution-owner choice.
 - Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
 
 ## Subagent Availability Rule
@@ -221,7 +221,7 @@ These skills describe routing; runtime plugins enforce workflow entry and task-g
 - Task context is injected only for supported `just-demand-*` subagents.
 - Execution must not start until the current task context files exist and the intake is actually ready. Promotion is blocked when required clarification fields are still missing or blocking questions remain. Use `just-demand . list-active` to inspect unfinished tasks before dispatch.
 - `create-intake` is not the same as `promote`: `list-active` should remain empty until a formal task is promoted.
-- A one-time subagent skip is only for the current turn. Later long-context work or code edits must route again unless there is an explicit new override.
+- Ready formal tasks may execute in the main session without a dispatch override. Reassess only when considering a new subagent unit.
 - Restart OpenCode after changing `.opencode/plugins/`, `.opencode/agent/`, `.opencode/skills/`, or `.opencode/package.json`.
 
 ### No-Active-Task Three-Route Model
@@ -236,7 +236,7 @@ Route 2 is the default when concrete work, bug reports, or implementation reques
 
 ### Selective Subagent Dispatch
 
-Subagent dispatch is governed by **six hard eligibility gates** (goal stability, boundary independence, context compressibility, result verifiability, capability match, failure recoverability) and **three quick net-benefit questions** (token/effort savings, context-drift risk reduction, separable artifact output). Dispatch only when **all six gates pass AND at least one benefit question is "yes"**. Any gate failure or uncertain benefit → the main agent executes, even for long-context or multi-file work. The plugin enforces task readiness (formal task + context files), not mandatory subagent routing.
+Subagent dispatch requires **all six eligibility gates** and **all three net-benefit questions** to pass. Any failed or uncertain answer means the main agent executes, even for long-context or multi-file work. Fast models are limited to mechanical tasks; frontend visual/interaction/copy quality stays with the main agent by default. The plugin enforces workflow readiness, not mandatory subagent routing.
 
 ## Commands
 

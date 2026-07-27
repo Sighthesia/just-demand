@@ -289,7 +289,7 @@ When the user proposes a need, request, feature, design/refactor, bug report, sy
 
 ## Routing Rule
 
-Apply the six eligibility gates and three net-benefit questions to decide dispatch after shaping. The main agent may execute any work — including multi-file or long-context work — when any gate fails or benefit is uncertain. If dispatch is the right choice, promote to a formal work item and route execution through `just-demand-*` subagents.
+After shaping, dispatch only when all six eligibility gates and all three net-benefit questions pass. The main agent may execute any work — including multi-file or long-context work — when an answer fails or is uncertain. Route only a bounded unit that passes all nine checks through a `just-demand-*` subagent.
 
 Before any later implementation or verification phase begins, the promoted task must have its current task context files written. The main agent must not improvise by directly editing code from intake context alone.
 

@@ -1,1 +1,1819 @@
-/home/Sighthesia/.config/opencode/plugins/just-demand-lib.js
+import { execFileSync } from "node:child_process"
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { join, relative, resolve } from "node:path"
+
+const REMINDER_STATE = new Map()
+const PLUGIN_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)))
+const REPO_ROOT = resolve(PLUGIN_DIR, "..", "..")
+
+const WORKFLOW_SUBAGENT_PREFIX = "just-demand-"
+const WORKFLOW_SUBAGENTS = new Set(["just-demand-researcher", "just-demand-coder", "just-demand-tester", "just-demand-advisor"])
+const EXECUTION_GATED_SUBAGENTS = new Set(["just-demand-coder", "just-demand-tester"])
+const LAST_SUBAGENT_DISPATCH_FILE = "last_subagent_dispatch.json"
+const DEBUG_ENV_VALUES = new Set(["1", "true", "yes", "on"])
+const WORKFLOW_STATE_MARKER = "[workflow-state]"
+export const WORKFLOW_PHASE = Object.freeze({
+  noTask: "no-task",
+  clarification: "clarification/intake",
+  execution: "execution",
+  verification: "verification",
+  closeout: "closeout",
+})
+const WORKFLOW_PHASE_ACTIONS = Object.freeze({
+  [WORKFLOW_PHASE.noTask]: {
+    allowed: ["enter workflow", "direct answer", "skip workflow"],
+    blocked: ["start", "continue", "complete"],
+  },
+  [WORKFLOW_PHASE.clarification]: {
+    allowed: ["continue clarification", "start execution"],
+    blocked: ["complete", "skip workflow"],
+  },
+  [WORKFLOW_PHASE.execution]: {
+    allowed: ["main-agent execution", "selective subagent dispatch"],
+    blocked: ["start", "complete before verification"],
+  },
+  [WORKFLOW_PHASE.verification]: {
+    allowed: ["complete-verification", "continue verification"],
+    blocked: ["start", "continue", "skip workflow"],
+  },
+  [WORKFLOW_PHASE.closeout]: {
+    allowed: ["checkpoint-commit", "archive"],
+    blocked: ["start", "continue", "complete-verification"],
+  },
+})
+const DESIGN_OR_IMPLEMENTATION_TASK_TYPES = new Set([
+  "design",
+  "implementation",
+  "feature",
+  "feat",
+  "refactor",
+  "architecture",
+])
+const BUG_OR_MISMATCH_TASK_TYPES = new Set(["bug", "bugfix", "fix", "incident"])
+// ---------------------------------------------------------------------------
+// Risk-shaped contract registry (mirrors workflow_core.py CONTRACT_REGISTRY)
+// ---------------------------------------------------------------------------
+const CONTRACT_SIGNAL_PATTERNS = {
+  visible_effect: [
+    // English keywords: \b word boundaries work fine
+    /\b(ui|ux|animation|animated|animate|motion|reveal|stagger|fade|slide)\b/i,
+    // CJK keywords: \b is unreliable between CJK chars, so omit it
+    /(动效|动画|淡入|淡出|展开|收起|错峰|闪烁|抖动|过渡|首帧|打断|结束状态)/,
+  ],
+  ordered_flow: [
+    /\b(sequential|strict\s+order|ordered\s+sequence|ordered\s+flow|step\s+by\s+step|ordered|must\s+complete|before\s+proceeding|dependency\s+chain)\b/i,
+    /(顺序|串行|依赖|先后|步骤|前置|条件|串行执行|按顺序)/,
+  ],
+  safety_boundary: [
+    /\b(safety|destructive|irreversible|irreversibl|data\s+loss|rollback|revert|permission|authorization|auth[sz]|权限)\b/i,
+    /(安全|破坏性|不可逆|数据丢失|回滚|恢复|授权)/,
+  ],
+  observability: [
+    /\b(logging|monitoring|observability|telemetry|tracing|trace|metric|metrics|instrumentation|dashboard|alert|告警)\b/i,
+    /(日志|监控|可观测|指标|链路|遥测|看板)/,
+  ],
+}
+
+const CONTRACT_REGISTRY = Object.freeze([
+  {
+    name: "visible_effect",
+    label: "Visible Effect",
+    gate_level: "hard",
+    signal_keys: ["visible_effect"],
+    legacy_flag: "needs_ui_visible_lifecycle_clarification",
+    promotion_fields: [
+      ["opening", "Opening"],
+      ["during_transition", "During Transition"],
+      ["after_open", "After Open"],
+      ["interrupt_behavior", "Interrupt Behavior"],
+      ["anti_outcomes", "Anti-Outcomes"],
+    ],
+    execution_fields: [
+      ["opening", "Opening"],
+      ["during_transition", "During Transition"],
+      ["after_open", "After Open"],
+      ["interrupt_behavior", "Interrupt Behavior"],
+      ["anti_outcomes", "Anti-Outcomes"],
+    ],
+  },
+  {
+    name: "ordered_flow",
+    label: "Ordered Flow",
+    gate_level: "reminder",
+    signal_keys: ["ordered_flow"],
+    promotion_fields: [],
+    execution_fields: [],
+  },
+  {
+    name: "safety_boundary",
+    label: "Safety Boundary",
+    gate_level: "soft",
+    signal_keys: ["safety_boundary"],
+    promotion_fields: [],
+    execution_fields: [
+      ["anti_outcomes", "Anti-Outcomes"],
+    ],
+  },
+  {
+    name: "observability",
+    label: "Observability",
+    gate_level: "reminder",
+    signal_keys: ["observability"],
+    promotion_fields: [],
+    execution_fields: [],
+  },
+])
+const WRITE_TOOL_RULES = Object.freeze([
+  {
+    name: "apply_patch",
+    label: "apply_patch",
+    match: (toolName) => toolName === "apply_patch",
+    needsExecutionGate: () => true,
+  },
+  {
+    name: "task:workflow-subagent",
+    label: "Task",
+    match: (toolName, args) => toolName === "task" && WORKFLOW_SUBAGENTS.has(getWorkflowSubagentName(args)),
+    needsExecutionGate: (args) => EXECUTION_GATED_SUBAGENTS.has(getWorkflowSubagentName(args)),
+  },
+  {
+    name: "bash:write-like",
+    label: "bash",
+    match: (toolName, args) => {
+      if (toolName !== "bash") return false
+      const cmd = String(args?.command || "")
+      // Workflow-control CLI commands are not execution writes
+      if (isWorkflowControlCommand(cmd)) return false
+      return looksLikeBashWriteCommand(cmd)
+    },
+    needsExecutionGate: () => true,
+  },
+])
+
+const INTAKE_PATH_MARKER = ".just-demand/state/intake/"
+
+const WRITE_ALLOWED_STATUSES = new Set([
+  "planning",
+  "executing",
+  "verifying",
+  "changes_requested",
+  "tweaking",
+  "debugging",
+])
+
+const WORKFLOW_CONTROL_CLI_COMMANDS = new Set([
+  "mark",
+  "select-task",
+  "resume",
+  "complete-verification",
+  "update-clarification",
+  "checkpoint-commit",
+  "create-intake",
+  "promote",
+  "list-active",
+  "--help",
+  "-h",
+  "start-reflection",
+  "archive",
+  "cleanup",
+  "status",
+  "create-session",
+])
+
+const BASH_WRITE_PATTERNS = [
+  /(^|[;&|])\s*(?:mkdir|touch|rm|mv|cp|ln|install|chmod|chown)\b/i,
+  /(^|[;&|])\s*git\s+(?:add|commit|amend|reset|clean|stash|checkout|switch|merge|rebase)\b/i,
+  /(^|[;&|])\s*(?:sed|perl)\s+-i\b/i,
+  /(^|[;&|])\s*tee\b/i,
+  /(^|[;&|])\s*truncate\b/i,
+  /(^|[;&|])\s*apply_patch\b/i,
+]
+
+// Git subcommand patterns that are read-only or low-risk (branch switching).
+// These git commands look like write patterns above but are actually safe.
+const GIT_READONLY_SUBCOMMAND_PATTERNS = [
+  // Purely read-only: status, log, diff, show, help, version, blame, grep, etc.
+  /^git\s+(?:status|log|diff|show|help|version|blame|grep|describe|rev-parse|rev-list|ls-files|ls-tree|cat-file|shortlog|config)\b/i,
+  // Stash list/show (read-only forms)
+  /^git\s+stash\s+(?:list|show)\b/i,
+  // Branch listing
+  /^git\s+branch\s+(?:--list|-a|-r|--remotes|--all)\b/i,
+]
+
+// Low-risk git write commands: branch switching without destructive path arguments.
+// Checkout branch switching is safe; checkout -- <path> and checkout . are not.
+const GIT_LOW_RISK_PATTERNS = [
+  // Checkout creating new branch: git checkout -b <name> or -B <name>
+  /^git\s+checkout\s+-[bB]\s+\S+(\s|$)/i,
+  // Checkout existing branch: branch name starts with alphanumeric
+  /^git\s+checkout\s+[a-zA-Z0-9][\w.\/-]*(\s|$)/i,
+  // Switch branch (always safe)
+  /^git\s+switch\s+(?:-c\s+)?\S+/i,
+]
+
+const GIT_WRITE_PATTERN = /(?:^|[;&|])\s*git\s+(?:add|commit|amend|reset|clean|stash|checkout|switch|merge|rebase)\b/i
+
+// One-shot skip-workflow override flag: set by chat.message on skip, cleared
+// by the next tool gate invocation.
+const _toolGateSkipOverride = new Map()
+const COMPLETION_CLAIM_PATTERNS = [
+  /\b(done|finished|complete(?:d)?|implemented|shipped|resolved|wrapped up)\b/i,
+  /\b(all set|good to go|ready to close|ready to ship|that'?s it|we'?re done)\b/i,
+  /\b(should be good|looks good|nothing else to do|no further changes)\b/i,
+  /\b(in a good place|close this out|wrap this up)\b/i,
+  /(?:已经)?(?:做完了?|完成了?)/,
+]
+
+const NEGATED_COMPLETION_PATTERNS = [
+  /\b(not yet|no(?:t)?\s+closing|not\s+closing\s+it\s+out|not\s+closing\s+out|not\s+done|not\s+finished|not\s+complete(?:d)?|not\s+ready\s+to\s+ship)\b/i,
+  /\b(not\s+ready\s+to\s+close(?:\s+it\s+out)?\s+yet|hold\s+off\s+on\s+closing(?:\s+it\s+out)?|not\s+closing(?:\s+it\s+out)?\s+yet|can't\s+close(?:\s+it\s+out)?\s+yet|won't\s+close(?:\s+it\s+out)?\s+yet)\b/i,
+  /\b(暂不|先不|还不|还不能|不能|不打算|不准备)\s*(?:收尾|结束|关闭|close|close\s+out|ship|done|完成|结束)/i,
+]
+
+const NEGATED_EXECUTION_PATTERNS = [
+  /\b(still\s+want\s+to\s+confirm|want\s+to\s+confirm\s+.*\s+first|need\s+to\s+confirm\s+.*\s+first|hold\s+off\s+on|not\s+yet|before\s+i\s+(?:say|do)|before\s+we\s+(?:say|do))\b/i,
+  /\b(暂时|先|还要|还需要)\s*(?:确认|核对|确认一下|核对一下|再确认|再核对)\b/i,
+]
+
+const EXPLICIT_WORKFLOW_SKIP_PATTERNS = [
+  /\b(skip(?:ping)?\s+the?\s+workflow|bypass(?:ing)?\s+the?\s+workflow|workflow\s+(?:skip|bypass|override)|explicit(?:ly)?\s+(?:skip(?:ping)?|bypass(?:ing)?)\s+workflow|doing\s+this\s+(?:outside|without)\s+the?\s+workflow|proceed(?:ing)?\s+(?:outside|without)\s+the?\s+workflow)\b/i,
+  /(?:跳过工作流|绕过工作流|不经过工作流)/,
+]
+
+const LOW_RISK_ANALYSIS_PATTERNS = [
+  // Read-only investigation: analyze, investigate, inspect, trace (without "implement/fix")
+  // Includes code, source, and common analysis targets
+  /\b(analy[sz]e|investigate|trace|inspect|examine|review)\s+(the\s+)?(debug\s+)?(?:\w+\s+)?(log|logs|pattern|structure|behavior|issue|problem|code|source|implementation|flow|data|test|tests)\b/i,
+  /\b(run|execute)\s+(the\s+)?(test|tests|check|verification|suite)\b/i,
+  /\b(compile|gather|collect|summarize)\s+(the\s+)?(evidence|information|data|result|findings)\b/i,
+  /\b(just\s+)?(read|look|check)\s+(?:(?:through|at|over)\s+)?(?:the\s+)?(?:\w+\s+)*(?:code|source|reports?|tests?|logs?|lint)\b/i,
+  /\bsearch\s+(?:through\s+)?(?:the\s+)?(?:\w+\s+)*(?:codebase|source|code|logs?|files?|repo|documentation)\b/i,
+  /\bgrep\s+(?:the\s+)?(?:\w+\s+)*(?:source|code|logs?|files?)\b/i,
+  /\b(standard|routine)\s+(verification|check|audit|review)\b/i,
+  /(只读|只检查|只看|只分析|只跑|只收集)\s*(?:一下|一遍|一次)?\s*(?:代码|测试|日志|报告|审计|验证|结构|流程|行为|情况|问题|调试)/i,
+]
+
+// Signals that the work is small-scope (tens of lines or script-verifiable)
+// and may proceed in the main session without subagent routing.
+const SMALL_WORK_SIGNAL_PATTERNS = [
+  // English: adjective + action  (e.g. "small edit", "quick fix", "tiny adjustment")
+  /\b(small|minor|tiny|quick|simple|brief|narrow|focused|tight|localized)\s+(edit|change|fix|read|update|adjust(?:ment)?|tweak|check|verify|analysis|scan|run)\b/i,
+  // English: high-confidence / script-verifiable + optional noun + action
+  // e.g. "high-confidence bug detection", "script-verifiable analysis", "reliable verification"
+  /\b(script[-\s]?verifiable|high[-\s]?confidence|deterministic|reliable)\s+(?:\w+\s+)?(check|analysis|test|verification|diagnosis|detection|scan|audit)\b/i,
+  // Line-count signals: "X lines of code", "~N-line fix", "N行代码的读取", "约N行"
+  /(?:^|[^\w])(?:\d{1,2}|几十)\s*[-]?\s*(?:lines?|行)(?:\s+(?:of\s+)?(?:\S+\s+)*(?:code|read|edit|change|fix|update))?(?:\s+的\s*(?:\S+\s*)*(?:读|取|改|修|检|查|分析|看))?/i,
+  // Chinese small-work keyword + optional noun + optional action
+  // e.g. "小修改", "快速检查", "简单看一下", "小修复一个typo"
+  /(小改动|小修改|小修复|小调整|简单|快速|本地脚本|可脚本验证|高置信度)(?:\s*(?:的\s*)?(?:\S+?)?(?:读|取|改|修|检|查|分析|看))?/i,
+  // Chinese tens-of-lines keyword + optional parts  (e.g. "几十行的代码读取")
+  /几十行\s*(?:的\s*)?(?:\S+?)?(?:读|取|改|修|检|查|分析|看)?/i,
+  // English: "just read/check the logs/files/code" (small scope)
+  /\b(just|只|仅)\s+(read|look|check|verify|run|review|scan)\s+(the\s+)?(log|logs|file|files|code|output|result|report|data)\b/i,
+  // English: "I'll/let me read/check a few/small files/lines"
+  /\b(i'[gl]l|let\s+me)\s+(read|look|check|verify|run|review|scan)\s+(a\s+)?(few|couple|small|tiny|quick)\s+(lines?|files?)\b/i,
+]
+
+const EXECUTION_CANDIDATE_PATTERNS = [
+  /\b(i|we)\s+(am|'m|are|will|can|should|need to|need)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  /\b(i|we)\s+(should|will|can|need to)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  /\b(i|we)\s+(implemented|built|added|removed|refactored|updated|fixed|debugged|investigated|traced|analy[sz]ed|designed|reworked|extended|patched|changed)\b/i,
+  /\b(i(?:'ll)?|we)\s+just\s+finish(?:\s+this)?\s+in\s+the\s+main\s+session\b/i,
+  // "let me/us" patterns — common agent phrasing for inline execution intent
+  /\b(let\s+me|let's|lets)\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  // "I'll" patterns
+  /\bi'[gl]l\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  // "I'm going to" patterns
+  /\bi'm\s+going\s+to\s+(implement|build|add|remove|refactor|update|fix|debug|investigate|trace|analy[sz]e|design|rework|extend|patch|change)\b/i,
+  // Chinese: "让我/我来" patterns
+  /(?:让我|我来|我们来)\s*(?:实现|修复|调试|排查|添加|修改|重构|更新|构建|创建|配置)/i,
+  /直接在主会话里(?:实现|修复|调试|处理|修改)/,
+]
+
+const defaultReminderState = () => ({
+  same_topic_turns: 0,
+  last_reminder_type: null,
+  subagent_unavailable_pending: false,
+  intake_fallback_warning_shown: false,
+})
+
+const _intakeFallbackRecentlyUsed = new Map()
+
+export const consumeIntakeFallbackPending = (directory) => {
+  const key = workflowRoot(directory)
+  if (_intakeFallbackRecentlyUsed.has(key)) {
+    _intakeFallbackRecentlyUsed.delete(key)
+    return true
+  }
+  return false
+}
+
+const reminderStateKey = (directory, sessionID) => `${workflowRoot(directory)}::${sessionID || "main"}`
+
+export const workflowRoot = (directory) => join(directory, ".just-demand")
+
+export const readJson = (path) => {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"))
+  } catch {
+    return null
+  }
+}
+
+export const readTextIfExists = (path) => existsSync(path) ? readFileSync(path, "utf8") : ""
+
+export const debugLog = (event, fields = {}, directory = null) => {
+  const enabled = DEBUG_ENV_VALUES.has(String(globalThis.process?.env?.JUST_DEMAND_DEBUG || "").toLowerCase())
+  if (!enabled) return
+
+  let line
+  try {
+    line = JSON.stringify({ event, ...fields })
+  } catch {
+    line = event
+  }
+
+  console.error(`[just-demand debug] ${line}`)
+
+  if (directory) {
+    try {
+      const logPath = join(workflowRoot(directory), "debug.log")
+      appendFileSync(logPath, `${line}\n`, "utf8")
+    } catch {
+      // best-effort file log
+    }
+  }
+}
+
+export const getReminderState = (directory, sessionID) => {
+  const key = reminderStateKey(directory, sessionID)
+  if (!REMINDER_STATE.has(key)) {
+    REMINDER_STATE.set(key, defaultReminderState())
+  }
+  return REMINDER_STATE.get(key)
+}
+
+export const getWorkflowSubagentName = (args) => {
+  const candidates = [
+    args?.subagent_type,
+    args?.subagent,
+    args?.agent,
+    args?.agentName,
+    args?.agent_name,
+  ]
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim()
+    if (value.startsWith(WORKFLOW_SUBAGENT_PREFIX)) return value
+  }
+  return ""
+}
+
+export const markSubagentUnavailablePending = (directory, sessionID) => {
+  const state = getReminderState(directory, sessionID)
+  state.subagent_unavailable_pending = true
+  state.last_reminder_type = null
+  return state
+}
+
+export const clearSubagentUnavailablePending = (directory, sessionID) => {
+  const state = getReminderState(directory, sessionID)
+  state.subagent_unavailable_pending = false
+  return state
+}
+
+const getLastSubagentDispatchPath = (directory) => join(workflowRoot(directory), "state", LAST_SUBAGENT_DISPATCH_FILE)
+
+const readLastSubagentDispatchState = (directory) => readJson(getLastSubagentDispatchPath(directory)) || {}
+
+const dedupeStrings = (values) => {
+  const seen = new Set()
+  const result = []
+  for (const value of values) {
+    const text = String(value || "").trim()
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    result.push(text)
+  }
+  return result
+}
+
+const getTaskDispatchLookupTaskIds = (directory, workflowTaskId) => {
+  if (!workflowTaskId) return []
+  const task = readTaskJson(directory, workflowTaskId)
+  if (!task) return [workflowTaskId]
+
+  const lineage = [
+    task.parent_task_id,
+    ...(Array.isArray(task.lineage_task_ids) ? task.lineage_task_ids : []),
+    task.root_task_id,
+  ]
+  return dedupeStrings([workflowTaskId, ...lineage])
+}
+
+const extractTaskIdFromValue = (value, depth = 0) => {
+  if (depth > 4 || value == null) return null
+
+  if (typeof value === "string") {
+    const text = value.trim()
+    if (!text) return null
+
+    if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+      try {
+        return extractTaskIdFromValue(JSON.parse(text), depth + 1)
+      } catch {
+        // fall through to pattern matching
+      }
+    }
+
+    const directMatch = text.match(/\b(?:task[_-]?id|session[_-]?id)\s*[:=]\s*([A-Za-z0-9._:-]+)/i)
+    if (directMatch) return directMatch[1]
+    return null
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractTaskIdFromValue(item, depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+
+  if (typeof value === "object") {
+    for (const key of ["task_id", "taskId", "session_id", "sessionId"]) {
+      if (key in value) {
+        const raw = value[key]
+        if (typeof raw === "string") {
+          const trimmed = raw.trim()
+          if (trimmed) return trimmed
+        }
+        const found = extractTaskIdFromValue(raw, depth + 1)
+        if (found) return found
+      }
+    }
+
+    for (const key of ["result", "output", "response", "data", "message", "parts", "content"]) {
+      if (key in value) {
+        const found = extractTaskIdFromValue(value[key], depth + 1)
+        if (found) return found
+      }
+    }
+
+    for (const nested of Object.values(value)) {
+      const found = extractTaskIdFromValue(nested, depth + 1)
+      if (found) return found
+    }
+  }
+
+  return null
+}
+
+export const getLastSubagentDispatchTaskId = (directory, workflowTaskId, subagentName) => {
+  if (!workflowTaskId || !subagentName) return null
+  const state = readLastSubagentDispatchState(directory)
+  for (const taskId of getTaskDispatchLookupTaskIds(directory, workflowTaskId)) {
+    const taskDispatch = state?.[taskId]?.[subagentName]?.task_id
+    if (taskDispatch) return taskDispatch
+  }
+  return null
+}
+
+export const recordLastSubagentDispatchTaskId = (directory, workflowTaskId, subagentName, taskId) => {
+  if (!workflowTaskId || !subagentName || !taskId) return null
+
+  const path = getLastSubagentDispatchPath(directory)
+  const state = readLastSubagentDispatchState(directory)
+  const current = state[workflowTaskId] || {}
+  current[subagentName] = {
+    task_id: taskId,
+    recorded_at: new Date().toISOString(),
+  }
+  state[workflowTaskId] = current
+
+  mkdirSync(join(workflowRoot(directory), "state"), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf8")
+  return current[subagentName]
+}
+
+export const getRecoveredSubagentTaskId = (directory, workflowTaskId, subagentName, input = null, output = null) => {
+  const fromInput = extractTaskIdFromValue(input)
+  if (fromInput) return fromInput
+  const fromOutput = extractTaskIdFromValue(output)
+  if (fromOutput) return fromOutput
+  return getLastSubagentDispatchTaskId(directory, workflowTaskId, subagentName)
+}
+
+export const updateReminderState = (directory, sessionID, updater) => {
+  const state = getReminderState(directory, sessionID)
+  updater(state)
+  return state
+}
+
+export const hasAssignedWorkflowSubagents = (task) => {
+  const subagents = task?.assigned_subagents
+  return Array.isArray(subagents) && subagents.some((subagent) => typeof subagent === "string" && subagent.startsWith(WORKFLOW_SUBAGENT_PREFIX))
+}
+
+export const detectContractTriggers = (text) => {
+  const value = String(text || "")
+  if (!value.trim()) return new Set()
+  const active = new Set()
+  for (const [contractName, patterns] of Object.entries(CONTRACT_SIGNAL_PATTERNS)) {
+    if (patterns.some((pattern) => pattern.test(value))) {
+      active.add(contractName)
+    }
+  }
+  return active
+}
+
+export const detectActiveContractsForTask = (task) => {
+  if (!task) return new Set()
+  const clarification = task?.clarification || {}
+  const active = new Set()
+
+  // Read stored active_contracts array
+  const stored = clarification.active_contracts
+  if (Array.isArray(stored)) {
+    for (const name of stored) {
+      active.add(name)
+    }
+  }
+
+  // Legacy boolean flag
+  if (clarification.needs_ui_visible_lifecycle_clarification) {
+    active.add("visible_effect")
+  }
+
+  // Text-based detection for visible_effect
+  if (!active.has("visible_effect")) {
+    const text = [
+      task.title,
+      task.goal,
+      clarification.current_understanding,
+      clarification.scope,
+      clarification.final_expected_effect,
+    ]
+      .filter((value) => typeof value === "string" && value.trim())
+      .join("\n")
+    if (text.trim()) {
+      const textTriggers = detectContractTriggers(text)
+      for (const name of textTriggers) {
+        active.add(name)
+      }
+    }
+  }
+
+  return active
+}
+
+export const taskLooksLikeUIVisibleLifecycleWork = (task) => {
+  const active = detectActiveContractsForTask(task)
+  return active.has("visible_effect")
+}
+
+export const textLooksLikeCompletionClaim = (text) => {
+  const value = String(text || "").trim()
+  if (!value) return false
+  if (NEGATED_COMPLETION_PATTERNS.some((pattern) => pattern.test(value))) return false
+  return COMPLETION_CLAIM_PATTERNS.some((pattern) => pattern.test(value))
+}
+
+export const textLooksLikeExplicitWorkflowSkip = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  return EXPLICIT_WORKFLOW_SKIP_PATTERNS.some((pattern) => pattern.test(body))
+}
+
+export const textLooksLikeSmallWork = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  return SMALL_WORK_SIGNAL_PATTERNS.some((pattern) => pattern.test(body))
+}
+
+export const textLooksLikeReadOnlyWork = (text) => {
+  const body = String(text || "")
+  if (!body.trim()) return false
+  // Must match a low-risk analysis pattern
+  if (!LOW_RISK_ANALYSIS_PATTERNS.some((pattern) => pattern.test(body))) return false
+  // Must NOT contain high-risk modification intent
+  // Check for "implement/build/fix/change/add/remove/refactor" verbs (not in analysis context)
+  const HIGH_RISK_PATTERNS = [
+    /\b(implement|build|fix|change|edit|modify|patch|refactor|rework|add|remove|delete|create|update|rewrite)\b/i,
+    /(实现|修复|修改|重构|更改|添加|删除|创建|更新)/,
+  ]
+  if (HIGH_RISK_PATTERNS.some((pattern) => pattern.test(body))) return false
+  return true
+}
+
+export const taskLooksLikeLongContextExecutionCandidate = (task, text) => {
+  if (!task || task.status === "done") return false
+
+  const currentStep = String(task.current_step || "").toLowerCase()
+  const status = String(task.status || "").toLowerCase()
+  const body = String(text || "")
+  if (NEGATED_EXECUTION_PATTERNS.some((pattern) => pattern.test(body))) return false
+  const hasTaskSignal = EXECUTION_CANDIDATE_PATTERNS.some((pattern) => pattern.test(body))
+  const taskSignalsExecution = ["execut", "implement", "verify", "changes_requested"].some((fragment) => currentStep.includes(fragment) || status.includes(fragment))
+
+  return hasTaskSignal && taskSignalsExecution
+}
+
+export const taskNeedsVerificationCloseout = (task) => {
+  if (!task) return false
+  return String(task.verification_status || "").toLowerCase() !== "passed"
+}
+
+export const taskNeedsCheckpointFollowUp = (task) => {
+  if (!task) return false
+  if (String(task.verification_status || "").toLowerCase() !== "passed") return false
+  return !(task.checkpoint_commit && task.checkpoint_commit.created)
+}
+
+export const isWorkflowControlCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+  // Must match a just-demand CLI workflow-control command
+  const match = trimmed.match(/^just-demand\s+\.\s+(\S+)/)
+  if (!match || !WORKFLOW_CONTROL_CLI_COMMANDS.has(match[1])) return false
+  // Must not also be a write-like command (composite commands like "mark && touch x" still gate)
+  return !BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed)) && !hasUnquotedShellRedirection(trimmed)
+}
+
+export const impactsOverlap = (impactsA, impactsB) => {
+  if (!Array.isArray(impactsA) || !Array.isArray(impactsB)) return false
+  if (impactsA.length === 0 || impactsB.length === 0) return false
+  for (const a of impactsA) {
+    if (typeof a !== "string") continue
+    for (const b of impactsB) {
+      if (typeof b !== "string") continue
+      // Path-prefix overlap: one impact scope starts with the other
+      if (a.startsWith(b) || b.startsWith(a) || a === b) return true
+    }
+  }
+  return false
+}
+
+export const looksLikeBashWriteCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+
+  // Git commands that look write-like but are actually safe should not
+  // trigger the write gate. Check this before raw pattern matching.
+  if (looksLikeGitWriteCommand(trimmed) && isProbablySafeGitCommand(trimmed)) return false
+
+  return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed)) || hasUnquotedShellRedirection(trimmed)
+}
+
+export const hasUnquotedShellRedirection = (command) => {
+  const shellText = stripHeredocBodies(command)
+  let inSingleQuote = false
+  let inDoubleQuote = false
+
+  for (let index = 0; index < shellText.length; index += 1) {
+    const char = shellText[index]
+
+    if (char === "\\") {
+      if (!inSingleQuote && index + 1 < shellText.length) index += 1
+      continue
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote
+      continue
+    }
+
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote
+      continue
+    }
+
+    if (char === ">" && !inSingleQuote && !inDoubleQuote) return true
+  }
+
+  return false
+}
+
+const stripHeredocBodies = (command) => {
+  const lines = String(command || "").split(/\r?\n/)
+  const kept = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    kept.push(line)
+
+    const marker = extractHeredocMarker(line)
+    if (!marker) continue
+
+    index += 1
+    while (index < lines.length && lines[index].trim() !== marker) index += 1
+    if (index < lines.length) kept.push(lines[index])
+  }
+
+  return kept.join("\n")
+}
+
+const extractHeredocMarker = (line) => {
+  const match = String(line || "").match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1(?:\s|$)/)
+  return match ? match[2] : null
+}
+
+// ---------------------------------------------------------------------------
+// Git safety helpers: prevent false-positive write-gate triggers for
+// read-only or low-risk git commands.
+// ---------------------------------------------------------------------------
+
+// Check if a command contains a git subcommand that BASH_WRITE_PATTERNS would
+// flag as write-like.
+const looksLikeGitWriteCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+  return GIT_WRITE_PATTERN.test(trimmed)
+}
+
+// Determine if a git command that looks write-like is actually read-only or
+// low-risk (e.g. branch switching). Returns true for safe commands.
+export const isProbablySafeGitCommand = (command) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed) return false
+
+  // Extract the git invocation — strip leading prefix like "cmd1 && "
+  const gitMatch = trimmed.match(/(?:^|[;&|])\s*(git\s+.+)/i)
+  if (!gitMatch) return false
+  const gitCmd = gitMatch[1].trim()
+
+  // Check read-only subcommand patterns
+  if (GIT_READONLY_SUBCOMMAND_PATTERNS.some((pattern) => pattern.test(gitCmd))) return true
+
+  // For checkout, check destructive forms BEFORE low-risk patterns.
+  // The low-risk branch-switching patterns would otherwise match
+  // something like "git checkout HEAD -- src/app.js" because HEAD
+  // starts with an alphanumeric character, incorrectly treating a
+  // file-restore as safe.
+  if (/^git\s+checkout\b/i.test(gitCmd)) {
+    // -- <path> overwrites working tree files (destructive)
+    if (/\s--\s/.test(gitCmd)) return false
+    // checkout . or .. restores all files from index (destructive)
+    if (/^git\s+checkout\s+(\.\.?)(\s|$)/i.test(gitCmd)) return false
+  }
+
+  // Check low-risk patterns (branch switching, etc.)
+  if (GIT_LOW_RISK_PATTERNS.some((pattern) => pattern.test(gitCmd))) return true
+
+  // For remaining checkout commands that did not match low-risk
+  // patterns (e.g. bare `git checkout`, or `git checkout --track`),
+  // assume they are branch-related and safe.
+  if (/^git\s+checkout\b/i.test(gitCmd)) {
+    return true
+  }
+
+  // For stash, bare `git stash` or `git stash push/pop/drop/apply` is destructive
+  if (/^git\s+stash\b/i.test(gitCmd)) {
+    const afterStash = gitCmd.replace(/^git\s+stash\s*/i, "").trim()
+    // Only stash list/show are safe
+    if (/^(list|show)(\s|$)/i.test(afterStash)) return true
+    return false
+  }
+
+  return false
+}
+
+// Detect git commands that target a repository outside the workflow root
+// (e.g. `git -C /other/repo ...`). When true, the command should not be
+// subject to this repo's active-task write gate.
+export const isExternalGitRepoCommand = (command, directory) => {
+  const trimmed = String(command || "").trim()
+  if (!trimmed || !directory) return false
+
+  // Match git -C <path> commands
+  const match = trimmed.match(/(?:^|[;&|])\s*git\s+-C\s+(\S+)\b/i)
+  if (!match) return false
+
+  try {
+    const targetPath = resolve(directory, match[1])
+    const repoRoot = resolve(directory)
+    const rel = relative(repoRoot, targetPath)
+    // External if the resolved path is outside the repo root
+    return rel.startsWith("..")
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Skip-workflow tool gate override: one-shot per directory, set by
+// chat.message on explicit skip, consumed by next tool gate invocation.
+// ---------------------------------------------------------------------------
+
+export const setToolGateSkipOverride = (directory) => {
+  if (!directory) return
+  _toolGateSkipOverride.set(workflowRoot(directory), true)
+}
+
+export const clearToolGateSkipOverride = (directory) => {
+  if (!directory) return
+  _toolGateSkipOverride.delete(workflowRoot(directory))
+}
+
+export const isIntakeFilePath = (filePath) => {
+  if (!filePath || typeof filePath !== "string") return false
+  const normalized = filePath.replace(/\\/g, "/")
+  return normalized.includes(INTAKE_PATH_MARKER)
+}
+
+export const getApplyPatchTargetPath = (args) => {
+  const patchText = String(args?.patchText || args?.patches || args?.diff || "").trim()
+  if (!patchText) return null
+
+  // Standard format: "*** Update File: path/to/file"
+  const standardMatch = patchText.match(/\*\*\*\s*Update\s+File:\s+(.+?)(?:\n|$)/)
+  if (standardMatch) return standardMatch[1].trim()
+
+  // Unified diff format: "--- a/path/to/file"
+  const unifiedMatch = patchText.match(/^---\s+(?:a\/)?(.+?)$/m)
+  if (unifiedMatch) return unifiedMatch[1].trim()
+
+  return null
+}
+
+export const looksLikeIntakeOperation = (toolName, args) => {
+  if (!args || typeof args !== "object") return false
+
+  if (toolName === "apply_patch") {
+    const targetPath = getApplyPatchTargetPath(args)
+    return isIntakeFilePath(targetPath)
+  }
+
+  if (toolName === "bash") {
+    const command = String(args?.command || "").trim()
+    if (!command) return false
+    // Check for shell redirection to an intake file
+    const redirectMatch = command.match(/[>]\s*(['"]?)((?:\.\.\/)*\.just-demand\/state\/intake\/[^'">\s]+)\1/)
+    if (redirectMatch) return isIntakeFilePath(redirectMatch[2])
+    // Broader match: command references intake path directly
+    if (command.includes(INTAKE_PATH_MARKER)) return true
+  }
+
+  return false
+}
+
+export const getWriteToolRule = (toolName, args) => WRITE_TOOL_RULES.find((rule) => rule.match(toolName, args)) || null
+
+export const enforceExecutionGate = (directory, toolName, args, logPrefix = "state.tool.before") => {
+  const normalizedToolName = String(toolName || "").toLowerCase()
+  debugLog(logPrefix, {
+    tool: normalizedToolName,
+    args_keys: args && typeof args === "object" ? Object.keys(args).sort() : [],
+    workflow_subagent: getWorkflowSubagentName(args),
+  }, directory)
+
+  // Lightweight skill tool validation: malformed usage (missing name) is caught
+  // before the write-rule gate, since the skill tool does not need execution gating.
+  if (normalizedToolName === "skill") {
+    const skillName = String(args?.name || "").trim()
+    if (!skillName) {
+      throw new Error(
+        "Blocked skill: no skill name provided. Use the skill tool with a valid 'name' parameter.",
+      )
+    }
+    debugLog(`${logPrefix}.allow`, { reason: "skill_tool_allowed", tool: normalizedToolName, skill: skillName }, directory)
+    return null
+  }
+
+  const rule = getWriteToolRule(normalizedToolName, args)
+  if (!rule) {
+    debugLog(`${logPrefix}.allow`, { reason: "no_write_rule", tool: normalizedToolName }, directory)
+    return null
+  }
+
+  // Intake file operations bypass the execution gate entirely as a fallback path.
+  // The preferred intake editing path is `update-intake-section` via the CLI.
+  // Direct intake markdown edits remain available for recovery but the command
+  // path is recommended for routine clarification updates.
+  if (looksLikeIntakeOperation(normalizedToolName, args)) {
+    debugLog(`${logPrefix}.allow`, { reason: "intake_path_allowed", rule: rule.name, tool: normalizedToolName, note: "prefer update-intake-section CLI command for intake edits" }, directory)
+    // Record that intake fallback was used so the next chat.message can emit a
+    // concise one-time preference reminder pointing to update-intake-section.
+    _intakeFallbackRecentlyUsed.set(workflowRoot(directory), true)
+    return rule
+  }
+
+  // Transient skip-workflow override: if the model explicitly stated skip
+  // workflow on this turn, allow the tool through without gates.
+  const skipKey = workflowRoot(directory)
+  if (_toolGateSkipOverride.has(skipKey)) {
+    _toolGateSkipOverride.delete(skipKey)
+    debugLog(`${logPrefix}.allow`, { reason: "skip_workflow_override", rule: rule.name, tool: normalizedToolName }, directory)
+    return rule
+  }
+
+  // External repository git commands (git -C <outside-path>) bypass the
+  // gate because they operate on a repo outside this workflow's scope.
+  if (normalizedToolName === "bash" && isExternalGitRepoCommand(String(args?.command || ""), directory)) {
+    debugLog(`${logPrefix}.allow`, { reason: "external_git_repo", rule: rule.name, tool: normalizedToolName }, directory)
+    return null
+  }
+
+  // Gate 1: Is there a selected active task?
+  const gateState = getExecutionGateState(directory)
+  if (gateState.reason !== "ready") {
+    debugLog(`${logPrefix}.block`, { reason: gateState.reason, rule: rule.name, label: rule.label, active_task_count: gateState.activeTaskCount }, directory)
+    throw new Error(buildExecutionGateError(rule.label, gateState))
+  }
+
+  const taskId = gateState.taskId
+  const task = readTaskJson(directory, taskId)
+  const taskStatus = String(task?.status || "").toLowerCase()
+
+  // Gate 2: Is the task in a write-allowed status?
+  // Dispatch exemption: subagent dispatch is not subject to status gating.
+  // Status gating applies to execution-write tools (apply_patch, bash).
+  // Readiness is enforced separately in Gate 3 for dispatch.
+  const isDispatch = rule.name === "task:workflow-subagent"
+  if (rule.needsExecutionGate(args) && !isDispatch && !WRITE_ALLOWED_STATUSES.has(taskStatus)) {
+    debugLog(`${logPrefix}.block`, { reason: "status_not_allowed", rule: rule.name, task_id: taskId, status: taskStatus }, directory)
+    throw new Error(buildExecutionGateError(rule.label, { reason: "status_not_allowed", taskId, status: taskStatus }))
+  }
+
+  // Gate 3: Execution readiness check.
+  // Non-ready tasks are blocked from write tools. Use the dedicated
+  // `update-clarification` CLI command to fill required clarification fields.
+  // Applies to both dispatch and execution-write: dispatch requires a ready task.
+  if (rule.needsExecutionGate(args) && !taskIsReadyForExecution(task)) {
+    const missing = getMissingExecutionGateFields(task)
+    debugLog(`${logPrefix}.block`, { reason: "task_not_ready", rule: rule.name, task_id: taskId, missing }, directory)
+    throw new Error(buildExecutionGateError(rule.label, { reason: "task_not_ready", taskId, missing }))
+  }
+
+  // Gate 4: Reflection hard gate. Pending reflection blocks implementation.
+  // Once reflection is active, the main agent may take over, but the same unit
+  // must not be handed back to a coder subagent.
+  const reflectionState = getReflectionGateState(directory, taskId)
+  if (reflectionState) {
+    const subagentName = getWorkflowSubagentName(args)
+    const reflectionBlocksRule = reflectionState === "reflection_pending"
+      ? (subagentName === "just-demand-coder" || rule.name !== "task:workflow-subagent")
+      : subagentName === "just-demand-coder"
+    if (reflectionBlocksRule) {
+      debugLog(`${logPrefix}.block`, { reason: reflectionState, rule: rule.name, task_id: taskId, subagent: subagentName || null }, directory)
+      throw new Error(buildReflectionGateError(rule.label, taskId, reflectionState))
+    }
+  }
+
+  debugLog(`${logPrefix}.allow`, { reason: "gate_passed", rule: rule.name, task_id: taskId }, directory)
+  return rule
+}
+
+export const getExecutionGateState = (directory) => {
+  const activeTasks = listUnfinishedTasks(directory)
+  const taskId = getActiveTask(directory)
+  if (taskId) {
+    // Check impact overlap between current task and other active tasks
+    const currentTask = readTaskJson(directory, taskId)
+    const currentImpacts = currentTask?.impact || []
+    const overlappingTaskIds = []
+    let nonOverlappingCount = 0
+    for (const t of activeTasks) {
+      if (t.id === taskId) continue
+      const otherTask = readTaskJson(directory, t.id)
+      if (impactsOverlap(currentImpacts, otherTask?.impact || [])) {
+        overlappingTaskIds.push(t.id)
+      } else {
+        nonOverlappingCount += 1
+      }
+    }
+    return {
+      reason: "ready",
+      taskId,
+      activeTaskCount: activeTasks.length,
+      overlappingTaskIds,
+      nonOverlappingActiveTaskCount: nonOverlappingCount,
+    }
+  }
+  if (activeTasks.length > 0) {
+    return {
+      reason: "no_current_task_selected",
+      taskId: null,
+      activeTaskCount: activeTasks.length,
+      activeTaskIds: activeTasks.map((task) => task.id),
+      overlappingTaskIds: [],
+      nonOverlappingActiveTaskCount: 0,
+    }
+  }
+  return { reason: "no_formal_task", taskId: null, activeTaskCount: 0, activeTaskIds: [], overlappingTaskIds: [], nonOverlappingActiveTaskCount: 0 }
+}
+
+export const currentWorkflowPhase = (activeTask, gateState) => {
+  if (!activeTask) return WORKFLOW_PHASE.noTask
+  const verificationStatus = String(activeTask?.verification_status || "").toLowerCase()
+  if (verificationStatus === "passed") return WORKFLOW_PHASE.closeout
+  const currentStep = String(activeTask?.current_step || "").toLowerCase()
+  const status = String(activeTask?.status || "").toLowerCase()
+  if (status === "verifying" || currentStep.includes("verify")) return WORKFLOW_PHASE.verification
+  if (currentStep.includes("clarif") || currentStep.includes("design") || status === "planning") return WORKFLOW_PHASE.clarification
+  if (gateState?.reason === "no_current_task_selected") return WORKFLOW_PHASE.noTask
+  return WORKFLOW_PHASE.execution
+}
+
+const workflowStateActions = (phase) => WORKFLOW_PHASE_ACTIONS[phase] || WORKFLOW_PHASE_ACTIONS[WORKFLOW_PHASE.noTask]
+
+export const formatWorkflowStateLines = (activeTaskId, activeTask, gateState) => {
+  const phase = currentWorkflowPhase(activeTask, gateState)
+  const actions = workflowStateActions(phase)
+  const taskLabel = activeTaskId || (gateState?.reason === "no_current_task_selected" ? "selection pending" : "none")
+  const status = activeTask ? String(activeTask.status || "unknown") : null
+  const title = String(activeTask?.title || activeTask?.goal || "").trim()
+  const nextActions = actions.allowed.join(", ")
+  const blockedActions = actions.blocked.join(", ")
+
+  const statusSuffix = status ? ` (${status})` : ""
+  const lines = [`${WORKFLOW_STATE_MARKER} task=${taskLabel}${statusSuffix}; phase=${phase}`]
+  if (activeTaskId && activeTask && title) {
+    const shortTitle = title.length > 80 ? `${title.slice(0, 77)}...` : title
+    lines.push(`    title: ${shortTitle}`)
+  }
+
+  if (gateState?.overlappingTaskIds?.length > 0) {
+    lines.push(`    overlap: ${gateState.overlappingTaskIds.join(", ")}`)
+  }
+
+  if (!activeTaskId && gateState?.reason === "no_current_task_selected") {
+    lines.push("    next: select-task/resume before execution; direct answer only for non-work")
+  } else if (!activeTaskId) {
+    lines.push("    next: enter workflow via clarification/intake, answer simple questions, or explicit skip workflow")
+  } else {
+    lines.push(`    next: ${nextActions}`)
+  }
+
+  if (blockedActions) {
+    lines.push(`    blocked: ${blockedActions}`)
+  }
+  return lines.join("\n")
+}
+
+const _buildContractHints = (task) => {
+  if (!task) return ""
+  const active = detectActiveContractsForTask(task)
+  const hints = []
+  for (const contract of CONTRACT_REGISTRY) {
+    if (!active.has(contract.name)) continue
+    if (contract.gate_level === "reminder") continue
+    if (contract.name === "visible_effect") {
+      hints.push("For Visible Effect work, fill Opening → During Transition → After Open → Interrupt Behavior → Anti-Outcomes first")
+    } else if (contract.execution_fields.length > 0) {
+      const fieldLabels = contract.execution_fields.map(([, heading]) => heading).join(", ")
+      hints.push(`For ${contract.label} work, fill ${fieldLabels} first`)
+    }
+  }
+  return hints.length > 0 ? ` ${hints.join(". ")}.` : ""
+}
+
+export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
+  const normalized = typeof gate === "object" && gate !== null
+    ? gate
+    : gate
+      ? { reason: "task_not_ready", taskId: gate, missing }
+      : { reason: "no_formal_task" }
+
+  const suffix = normalized.reason === "task_not_ready"
+    ? `active task ${normalized.taskId} is not ready for execution yet. Missing or incomplete fields: ${normalized.missing.join(", ")}. Use \`just-demand . update-clarification ${normalized.taskId} --field <name>="<value>"\` or \`--from-file <path>\` to fill pending fields.`
+    : normalized.reason === "status_not_allowed"
+      ? `active task ${normalized.taskId} is in status '${normalized.status}', which does not allow writes. Allowed statuses: planning, executing, verifying, changes_requested, tweaking, debugging.`
+      : normalized.reason === "no_current_task_selected"
+        ? "unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first."
+        : "there is no formal task yet."
+  return `Blocked ${toolLabel}: ${suffix}`
+}
+
+export const getMissingExecutionGateFields = (task) => {
+  if (!task) return ["active formal task"]
+
+  // v2 tasks: read from contract, not legacy clarification
+  const isV2 = task && String(task.schema_version || "1.0") >= "2.0" && task.contract
+  const clarification = isV2 ? _contractToClarification(task) : (task?.clarification || {})
+  const missing = []
+
+  if (!String(clarification.scope || "").trim()) {
+    missing.push("Scope")
+  }
+
+  if (Array.isArray(clarification.blocking_questions) && clarification.blocking_questions.length > 0) {
+    missing.push("Blocking Questions")
+  }
+
+  const taskType = String(task.type || "").trim().toLowerCase()
+  const needsBugClarification = Boolean(clarification.needs_bug_clarification) || BUG_OR_MISMATCH_TASK_TYPES.has(taskType)
+  if (needsBugClarification) {
+    if (!String(clarification.expected_behavior || "").trim()) missing.push("Expected Behavior")
+    if (!String(clarification.actual_behavior || "").trim()) missing.push("Actual Behavior")
+    if (!String(clarification.reproduction || "").trim()) missing.push("Reproduction")
+  }
+
+  if (DESIGN_OR_IMPLEMENTATION_TASK_TYPES.has(taskType)) {
+    if (!String(clarification.final_expected_effect || "").trim()) missing.push("Final Expected Effect")
+    if (!String(clarification.chosen_approach || "").trim()) missing.push("Chosen Approach")
+    if (!String(clarification.final_implementation_plan || "").trim()) missing.push("Final Implementation Plan")
+    if (!String(clarification.approval || "").trim()) missing.push("Approval")
+  }
+
+  // Contract-based execution checks (visible effect, safety boundary, etc.)
+  const activeContracts = detectActiveContractsForTask(task)
+  for (const contract of CONTRACT_REGISTRY) {
+    const cname = contract.name
+    const gate = contract.gate_level
+    if (!activeContracts.has(cname)) continue
+    if (gate !== "hard" && gate !== "soft") continue
+    for (const [fieldName, heading] of contract.execution_fields) {
+      if (!String(clarification[fieldName] || "").trim()) missing.push(heading)
+    }
+  }
+
+  return [...new Set(missing)]
+}
+
+// Helper: map v2 contract back to flat clarification object (mirrors Python _task_clarification).
+const _contractToClarification = (task) => {
+  const contract = task?.contract || {}
+  const eng = contract.engineering || {}
+  const lifecycle = eng.lifecycle || {}
+  const choices = contract.choices || {}
+  const outcome = contract.outcome || {}
+  const boundaries = contract.boundaries || {}
+  const extra = contract._extra || {}
+  return {
+    scope: String(boundaries.scope || ""),
+    anti_outcomes: String(boundaries.anti_outcomes || ""),
+    raw_request: String(contract.provenance?.raw_request || ""),
+    final_expected_effect: String(outcome.final_expected_effect || ""),
+    chosen_approach: String(choices.chosen_approach || ""),
+    final_implementation_plan: String(choices.final_implementation_plan || ""),
+    approach_options: String(choices.approach_options || ""),
+    approval: String(choices.approval || ""),
+    blocking_questions: Array.isArray(contract.blocking_questions) ? contract.blocking_questions : [],
+    non_blocking_questions: Array.isArray(contract.open_questions) ? contract.open_questions : [],
+    expected_behavior: String(eng.expected_behavior || ""),
+    actual_behavior: String(eng.actual_behavior || ""),
+    reproduction: String(eng.reproduction || ""),
+    decisions: Array.isArray(contract.decisions) ? contract.decisions : [],
+    code_map: String(eng.code_map || ""),
+    verification_cases: Array.isArray(eng.verification_cases) ? eng.verification_cases : [],
+    // Visible-effect lifecycle fields: engineering.lifecycle canonical location,
+    // then _extra fallback for backward compat with existing v2 tasks.
+    opening: String(lifecycle.opening || extra.opening || ""),
+    during_transition: String(lifecycle.during_transition || extra.during_transition || ""),
+    after_open: String(lifecycle.after_open || extra.after_open || ""),
+    interrupt_behavior: String(lifecycle.interrupt_behavior || extra.interrupt_behavior || ""),
+  }
+}
+
+export const taskIsReadyForExecution = (task) => getMissingExecutionGateFields(task).length === 0
+
+const renderClarificationContext = (task) => {
+  const clarification = task?.clarification || {}
+  const entries = [
+    ["Goal", clarification.final_expected_effect || clarification.expected_behavior || clarification.current_understanding],
+    ["Current Reality", [clarification.actual_behavior, clarification.reproduction].filter((value) => typeof value === "string" && value.trim()).join("\n\n")],
+    ["Scope", clarification.scope],
+    ["Opening", clarification.opening],
+    ["During Transition", clarification.during_transition],
+    ["After Open", clarification.after_open],
+    ["Interrupt Behavior", clarification.interrupt_behavior],
+    ["Anti-Outcomes", clarification.anti_outcomes || clarification.anti_outcome],
+    ["Chosen Approach", clarification.chosen_approach],
+    ["Implementation Plan", clarification.final_implementation_plan],
+    ["Validation", clarification.validation],
+  ].filter(([, value]) => typeof value === "string" && value.trim())
+
+  if (entries.length === 0) return ""
+
+  return [
+    "# Execution Context",
+    "",
+    ...entries.flatMap(([label, value]) => [`## ${label}`, value.trim(), ""]),
+  ].join("\n").trimEnd()
+}
+
+export const getActiveTask = (directory) => {
+  const statePath = join(workflowRoot(directory), "state", "state.json")
+  if (!existsSync(statePath)) return null
+  const state = readJson(statePath)
+  if (!state) return null
+  return state.current_task_id || null
+}
+
+export const readTaskJson = (directory, taskId) => {
+  const path = join(workflowRoot(directory), "state", "active", taskId, "task.json")
+  return existsSync(path) ? readJson(path) : null
+}
+
+export const listUnfinishedTasks = (directory) => {
+  const activeDir = join(workflowRoot(directory), "state", "active")
+  if (!existsSync(activeDir)) return []
+  try {
+    const entries = readdirSync(activeDir, { withFileTypes: true })
+    const tasks = []
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const taskPath = join(activeDir, entry.name, "task.json")
+      const task = readJson(taskPath)
+      if (!task || task.status === "done") continue
+      tasks.push({
+        id: task.id || entry.name,
+        title: task.title || "",
+        status: task.status || "unknown",
+        current_step: task.current_step || null,
+        path: join(activeDir, entry.name),
+      })
+    }
+    return tasks
+  } catch {
+    return []
+  }
+}
+
+
+
+const packetRoleForAgent = (agentName) => {
+  switch (agentName) {
+    case "just-demand-coder":
+      return "coder"
+    case "just-demand-tester":
+      return "tester"
+    case "just-demand-advisor":
+      return "advisor"
+    case "just-demand-researcher":
+      return "researcher"
+    default:
+      return null
+  }
+}
+
+const isCompletedSubtaskStatus = (status) => {
+  const normalized = String(status || "").trim().toLowerCase()
+  return normalized === "done" || normalized === "complete" || normalized === "completed"
+}
+
+const selectPacketSubtaskId = (task) => {
+  const subtasks = Array.isArray(task?.subtasks) ? task.subtasks : []
+  if (subtasks.length === 0) return null
+
+  const currentStep = String(task?.current_step || "").trim()
+  if (currentStep) {
+    const matched = subtasks.find((subtask) => {
+      const id = String(subtask?.id || subtask?.subtask_id || "").trim()
+      const title = String(subtask?.title || subtask?.name || subtask?.goal || "").trim()
+      return currentStep === id || currentStep === title
+    })
+    if (matched) {
+      return String(matched.id || matched.subtask_id || "").trim() || null
+    }
+  }
+
+  const openSubtasks = subtasks.filter((subtask) => !isCompletedSubtaskStatus(subtask?.status))
+  if (openSubtasks.length === 1) {
+    return String(openSubtasks[0].id || openSubtasks[0].subtask_id || "").trim() || null
+  }
+
+  return null
+}
+
+const buildPacketHintArgs = (task) => {
+  const args = []
+  const currentStep = String(task?.current_step || "").trim()
+  if (currentStep) {
+    args.push("--hint", `focus=${currentStep}`)
+  }
+
+  const impacts = Array.isArray(task?.impact) ? task.impact : []
+  for (const impact of impacts) {
+    const text = String(impact || "").trim()
+    if (text) {
+      args.push("--hint", `recent_diff=${text}`)
+    }
+  }
+
+  return args
+}
+
+const readRenderedTaskContext = (directory, taskId, agentName, task = null) => {
+  const role = packetRoleForAgent(agentName)
+  const justDemandCli = join(resolve(directory), "just-demand")
+  if (!role || !existsSync(justDemandCli)) return null
+
+  try {
+    const subtaskId = selectPacketSubtaskId(task)
+    const hintArgs = buildPacketHintArgs(task)
+    const command = [justDemandCli, directory, "render-context", taskId, "--role", role]
+    if (subtaskId) command.push("--subtask-id", subtaskId)
+    command.push(...hintArgs)
+    const rendered = execFileSync("python3", command, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    return String(rendered || "").trim() || null
+  } catch {
+    return null
+  }
+}
+
+const readPacketLintWarnings = (directory, taskId, agentName, task = null) => {
+  const role = packetRoleForAgent(agentName)
+  const justDemandCli = join(resolve(directory), "just-demand")
+  if (!role || !existsSync(justDemandCli)) return []
+
+  const isV2 = task && String(task.schema_version || "1.0") >= "2.0" && task.contract
+
+  try {
+    const subtaskId = selectPacketSubtaskId(task)
+    const hintArgs = buildPacketHintArgs(task)
+    const command = [justDemandCli, directory, "lint-packet", taskId, "--role", role]
+    if (subtaskId) command.push("--subtask-id", subtaskId)
+    command.push(...hintArgs)
+    const raw = execFileSync("python3", command, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const payload = JSON.parse(String(raw || "{}"))
+    if (!Array.isArray(payload?.lint)) return []
+    return payload.lint
+      .filter((item) => item && item.severity === "warning" && item.message)
+      .map((item) => `- [WARNING] ${item.message}`)
+  } catch {
+    // v2: fail closed — lint errors block, don't return empty
+    if (isV2) {
+      debugLog("readPacketLintWarnings.failClosed", { reason: "v2_cli_failed", taskId, agentName }, directory)
+      return ["- [ERROR] v2 lint-packet CLI failed — cannot validate readiness."]
+    }
+    return []
+  }
+}
+
+
+
+export const readLatestFollowup = (directory, taskId) => {
+  const followupsDir = join(workflowRoot(directory), "state", "active", taskId, "followups")
+  if (!existsSync(followupsDir)) return null
+  const entries = readdirSync(followupsDir)
+    .filter((name) => /^followup-\d{3}\.md$/.test(name))
+    .sort()
+  if (entries.length === 0) return null
+  const content = readTextIfExists(join(followupsDir, entries[entries.length - 1]))
+  return content || null
+}
+
+export const readReflectionContext = (directory, taskId) => {
+  const path = join(workflowRoot(directory), "state", "active", taskId, "reflection.md")
+  const content = readTextIfExists(path)
+  return content || null
+}
+
+export const getReflectionGateState = (directory, taskId) => {
+  if (!taskId) return null
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
+  if (!existsSync(taskDir)) return null
+
+  // Check for reflection.md
+  const reflectionPath = join(taskDir, "reflection.md")
+  const hasReflection = existsSync(reflectionPath)
+
+  // Check for follow-up count
+  const followupsDir = join(taskDir, "followups")
+  let followupCount = 0
+  if (existsSync(followupsDir)) {
+    try {
+      const entries = readdirSync(followupsDir)
+      followupCount = entries.filter((name) => /^followup-\d{3}\.md$/.test(name)).length
+    } catch {
+      followupCount = 0
+    }
+  }
+
+  // Reflection pending: >=2 follow-ups and no reflection.md
+  if (followupCount >= 2 && !hasReflection) {
+    return "reflection_pending"
+  }
+
+  // Reflection active: debugging status and has reflection.md
+  const task = readTaskJson(directory, taskId)
+  const isDebugging = String(task?.status || "").toLowerCase() === "debugging"
+  if (isDebugging && hasReflection) {
+    return "reflection_active"
+  }
+
+  return null
+}
+
+export const buildReflectionGateError = (toolLabel, taskId, reflectionState) => {
+  if (reflectionState === "reflection_pending") {
+    return `Blocked ${toolLabel}: reflection is pending for task ${taskId} (2+ follow-ups, no reflection.md). Run \`just-demand . start-reflection ${taskId}\` before making code changes.`
+  }
+  if (reflectionState === "reflection_active") {
+    return `Blocked ${toolLabel}: reflection is active for task ${taskId}. Do not delegate the same unit back to a coder; the main agent owns takeover, with an advisor optional under the selective-dispatch gates.`
+  }
+  return `Blocked ${toolLabel}: reflection gate is active for task ${taskId}.`
+}
+
+export const readTaskContext = (directory, taskId, agentName) => {
+  const task = readTaskJson(directory, taskId)
+  const isV2 = task && String(task.schema_version || "1.0") >= "2.0" && task.contract
+  const renderedContext = readRenderedTaskContext(directory, taskId, agentName, task)
+  let context
+
+  if (renderedContext) {
+    // CLI render succeeded — authoritative for both v1 and v2.
+    const lintWarnings = readPacketLintWarnings(directory, taskId, agentName, task)
+    context = lintWarnings.length > 0
+      ? `${renderedContext}\n\n## Packet Warnings\n${lintWarnings.join("\n")}`
+      : renderedContext
+  } else if (isV2) {
+    // v2 tasks MUST use the CLI render — fail closed, no file fallback.
+    debugLog("readTaskContext.failClosed", { reason: "v2_cli_render_failed", taskId, agentName }, directory)
+    return null
+  } else {
+    // v1 fallback: read individual files (maintained for compatibility).
+    const taskDir = join(workflowRoot(directory), "state", "active", taskId)
+    const parts = []
+
+    const ctx = readTextIfExists(join(taskDir, "context.md"))
+    if (ctx) parts.push(ctx)
+
+    if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+      const clarificationContext = renderClarificationContext(task)
+      if (clarificationContext) parts.push(clarificationContext)
+    }
+
+    const decisions = readTextIfExists(join(taskDir, "decisions.md"))
+    if (decisions) parts.push(decisions)
+
+    const openQuestions = readTextIfExists(join(taskDir, "open_questions.md"))
+    const clarificationQuestions = task?.clarification?.non_blocking_questions || []
+    const hasRemainingOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, "")) || clarificationQuestions.length > 0
+    const renderedOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, ""))
+      ? openQuestions
+      : `# Open Questions\n\n## Remaining Open Questions\n\n${clarificationQuestions.map((question) => `- ${question}`).join("\n")}\n`
+    if (hasRemainingOpenQuestions && ["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+      parts.push(renderedOpenQuestions)
+    }
+
+    switch (agentName) {
+      case "just-demand-coder": {
+        const implement = readTextIfExists(join(taskDir, "implement.md"))
+        if (implement) parts.push(implement)
+        break
+      }
+      case "just-demand-tester": {
+        const verify = readTextIfExists(join(taskDir, "verify.md"))
+        if (verify) parts.push(verify)
+        break
+      }
+      case "just-demand-researcher": {
+        const researchDir = join(taskDir, "research")
+        if (existsSync(researchDir)) {
+          parts.push("Research outputs: write any artifacts under this task's local research/ directory.")
+        }
+        break
+      }
+      case "just-demand-advisor": {
+        const advisorDir = join(taskDir, "advisor")
+        if (existsSync(advisorDir)) {
+          parts.push("Advisory outputs: write any analysis artifacts under this task's local advisor/ directory.")
+        }
+        break
+      }
+    }
+
+    context = parts.join("\n\n---\n\n")
+  }
+
+  // Append latest follow-up context for coder and tester
+  if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+    const followup = readLatestFollowup(directory, taskId)
+    if (followup) {
+      context += `\n\n---\n\n# Latest Follow-Up Context\n\n${followup}`
+    }
+  }
+
+  // Append reflection context for advisor
+  if (agentName === "just-demand-advisor") {
+    const reflection = readReflectionContext(directory, taskId)
+    if (reflection) {
+      context += `\n\n---\n\n# Reflection Context\n\n${reflection}`
+    }
+  }
+
+  return context
+}
+
+export const getRequiredContextFiles = (agentName) => {
+  switch (agentName) {
+    case "just-demand-coder":
+      return ["context.md", "implement.md"]
+    case "just-demand-tester":
+      return ["context.md", "verify.md"]
+    case "just-demand-researcher":
+      return ["context.md"]
+    case "just-demand-advisor":
+      return ["context.md"]
+    default:
+      return []
+  }
+}
+
+export const getMissingRequiredContextFiles = (directory, taskId, agentName) => {
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
+  return getRequiredContextFiles(agentName).filter((file) => !existsSync(join(taskDir, file)))
+}
+
+const DEBUG_PREVIEW_LIMIT = 200
+
+const debugEnvEnabled = (name) => DEBUG_ENV_VALUES.has(String(globalThis.process?.env?.[name] || "").toLowerCase())
+
+const previewText = (value, limit = DEBUG_PREVIEW_LIMIT) => {
+  const text = String(value || "").replace(/\s+/g, " ").trim()
+  if (!text) return ""
+  return text.length > limit ? `${text.slice(0, limit)}...` : text
+}
+
+export const isDebugPromptFullEnabled = () => debugEnvEnabled("JUST_DEMAND_DEBUG_PROMPT_FULL")
+
+export const summarizeInjectedContextParts = (directory, taskId, agentName) => {
+  const taskDir = join(workflowRoot(directory), "state", "active", taskId)
+  const task = readTaskJson(directory, taskId)
+  const isV2 = task && String(task.schema_version || "1.0") >= "2.0" && task.contract
+  const parts = []
+  const pushPart = (name, content) => {
+    const text = String(content || "")
+    if (!text.trim()) return
+    parts.push({ name, length: text.length, preview: previewText(text) })
+  }
+
+  const renderedContext = readRenderedTaskContext(directory, taskId, agentName)
+  if (renderedContext) {
+    pushPart("rendered-context", renderedContext)
+    const lintWarnings = readPacketLintWarnings(directory, taskId, agentName, task)
+    if (lintWarnings.length > 0) pushPart("packet-warnings", lintWarnings.join("\n"))
+  } else if (isV2) {
+    // v2: fail closed — CLI render required
+    pushPart("v2-cli-error", "v2 task requires CLI render; fallback not available")
+  } else {
+    pushPart("context.md", readTextIfExists(join(taskDir, "context.md")))
+    if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+      const clarificationContext = renderClarificationContext(task)
+      pushPart("clarification-context", clarificationContext)
+    }
+    pushPart("decisions.md", readTextIfExists(join(taskDir, "decisions.md")))
+
+    const openQuestions = readTextIfExists(join(taskDir, "open_questions.md"))
+    const clarificationQuestions = task?.clarification?.non_blocking_questions || []
+    const hasRemainingOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, "")) || clarificationQuestions.length > 0
+    if (hasRemainingOpenQuestions && ["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+      const renderedOpenQuestions = /\S/.test(openQuestions.replace(/^# Open Questions\s*/i, ""))
+        ? openQuestions
+        : `# Open Questions\n\n## Remaining Open Questions\n\n${clarificationQuestions.map((question) => `- ${question}`).join("\n")}\n`
+      pushPart("open-questions", renderedOpenQuestions)
+    }
+
+    if (agentName === "just-demand-coder") pushPart("implement.md", readTextIfExists(join(taskDir, "implement.md")))
+    if (agentName === "just-demand-tester") pushPart("verify.md", readTextIfExists(join(taskDir, "verify.md")))
+    if (agentName === "just-demand-researcher" && existsSync(join(taskDir, "research"))) {
+      pushPart("research-note", "Research outputs: write any artifacts under this task's local research/ directory.")
+    }
+    if (agentName === "just-demand-advisor" && existsSync(join(taskDir, "advisor"))) {
+      pushPart("advisor-note", "Advisory outputs: write any analysis artifacts under this task's local advisor/ directory.")
+    }
+  }
+
+  if (["just-demand-coder", "just-demand-tester"].includes(agentName)) {
+    pushPart("latest-follow-up", readLatestFollowup(directory, taskId))
+  }
+  if (agentName === "just-demand-advisor") {
+    pushPart("reflection", readReflectionContext(directory, taskId))
+  }
+
+  return parts
+}
+
+export const writeDebugPromptDump = (directory, payload) => {
+  const debugDir = join(workflowRoot(directory), "debug-prompts")
+  mkdirSync(debugDir, { recursive: true })
+  const safeTaskId = String(payload?.task_id || "no-task").replace(/[^A-Za-z0-9._-]+/g, "-")
+  const safeSubagent = String(payload?.workflow_subagent || "unknown").replace(/[^A-Za-z0-9._-]+/g, "-")
+  const timestamp = new Date().toISOString().replace(/[:]/g, "-")
+  const filePath = join(debugDir, `${timestamp}-${safeTaskId}-${safeSubagent}.md`)
+  const body = [
+    `# Prompt Debug Dump`,
+    ``,
+    `- task_id: ${payload?.task_id || ""}`,
+    `- workflow_subagent: ${payload?.workflow_subagent || ""}`,
+    `- prompt_length: ${payload?.prompt_length || 0}`,
+    ``,
+    `## Plugin Trigger Summary`,
+    ``,
+    `- just-demand subagent injection: task=${payload?.task_id || ""} subagent=${payload?.workflow_subagent || ""}`,
+    `- prompt_length: ${payload?.prompt_length || 0}`,
+    ``,
+    `## Original Requested Work`,
+    ``,
+    payload?.requested_work || "",
+    ``,
+    `## Context Parts`,
+    ``,
+    ...(Array.isArray(payload?.context_parts)
+      ? payload.context_parts.map((part) => `- ${part.name}: length=${part.length} preview=${part.preview || ""}`)
+      : []),
+    ``,
+    `## Injected Workflow Context`,
+    ``,
+    payload?.injected_context || "",
+    ``,
+    `## Prompt`,
+    ``,
+    payload?.prompt || "",
+    ``,
+  ].join("\n")
+  writeFileSync(filePath, body, "utf8")
+  return relative(directory, filePath)
+}
+
+export const writeDebugChatTurnDump = (directory, payload) => {
+  const debugDir = join(workflowRoot(directory), "debug-prompts")
+  mkdirSync(debugDir, { recursive: true })
+  const safeSessionId = String(payload?.session_id || "main").replace(/[^A-Za-z0-9._-]+/g, "-")
+  const safeTaskId = String(payload?.task_id || "no-task").replace(/[^A-Za-z0-9._-]+/g, "-")
+  const timestamp = new Date().toISOString().replace(/[:]/g, "-")
+  const filePath = join(debugDir, `${timestamp}-chat-${safeSessionId}-${safeTaskId}.md`)
+  const body = [
+    `# Chat Turn Debug Dump`,
+    ``,
+    `- session_id: ${payload?.session_id || ""}`,
+    `- task_id: ${payload?.task_id || ""}`,
+    `- phase: ${payload?.phase || ""}`,
+    `- action: ${payload?.action || ""}`,
+    `- reason_code: ${payload?.reason_code || ""}`,
+    ``,
+    `## Plugin Trigger Summary`,
+    ``,
+    `- just-demand controller decision: phase=${payload?.phase || ""} action=${payload?.action || ""} reason=${payload?.reason_code || ""}`,
+    `- active task: ${payload?.task_id || "(none)"}`,
+    ``,
+    `## Original Text`,
+    ``,
+    payload?.original_text || "",
+    ``,
+    `## After Controller`,
+    ``,
+    payload?.after_controller_text || "",
+    ``,
+    `## Final Text`,
+    ``,
+    payload?.final_text || "",
+    ``,
+  ].join("\n")
+  writeFileSync(filePath, body, "utf8")
+  return relative(directory, filePath)
+}
+
+const ensureDebugPromptDir = (directory) => {
+  const debugDir = join(workflowRoot(directory), "debug-prompts")
+  mkdirSync(debugDir, { recursive: true })
+  return debugDir
+}
+
+const sanitizeDebugName = (value, fallback = "unknown") => {
+  const text = String(value || fallback).replace(/[^A-Za-z0-9._-]+/g, "-")
+  return text || fallback
+}
+
+export const appendDebugSessionTranscript = (directory, payload) => {
+  const debugDir = ensureDebugPromptDir(directory)
+  const safeSessionId = sanitizeDebugName(payload?.session_id, "main")
+  const filePath = join(debugDir, `session-${safeSessionId}.md`)
+  const section = [
+    `\n---\n`,
+    `# ${payload?.entry_type || "Debug Entry"}`,
+    ``,
+    `- timestamp: ${new Date().toISOString()}`,
+    `- session_id: ${payload?.session_id || ""}`,
+    `- task_id: ${payload?.task_id || ""}`,
+    `- source: ${payload?.source || ""}`,
+    ...(payload?.workflow_subagent ? [`- workflow_subagent: ${payload.workflow_subagent}`] : []),
+    ...(payload?.phase ? [`- phase: ${payload.phase}`] : []),
+    ...(payload?.action ? [`- action: ${payload.action}`] : []),
+    ...(payload?.reason_code ? [`- reason_code: ${payload.reason_code}`] : []),
+    ``,
+    `## Plugin Trigger Summary`,
+    ``,
+    ...(Array.isArray(payload?.trigger_summary) ? payload.trigger_summary.map((line) => `- ${line}`) : []),
+    ``,
+    ...(payload?.original_text !== undefined ? [`## Original Text`, ``, payload.original_text, ``] : []),
+    ...(payload?.after_controller_text !== undefined ? [`## After Controller`, ``, payload.after_controller_text, ``] : []),
+    ...(payload?.final_text !== undefined ? [`## Final Text`, ``, payload.final_text, ``] : []),
+    ...(payload?.requested_work !== undefined ? [`## Original Requested Work`, ``, payload.requested_work, ``] : []),
+    ...(Array.isArray(payload?.context_parts)
+      ? [
+          `## Context Parts`,
+          ``,
+          ...payload.context_parts.map((part) => `- ${part.name}: length=${part.length} preview=${part.preview || ""}`),
+          ``,
+        ]
+      : []),
+    ...(payload?.injected_context !== undefined ? [`## Injected Workflow Context`, ``, payload.injected_context, ``] : []),
+    ...(payload?.prompt !== undefined ? [`## Final Prompt`, ``, payload.prompt, ``] : []),
+  ].join("\n")
+
+  appendFileSync(filePath, section, "utf8")
+  return relative(directory, filePath)
+}
+
+// ---------------------------------------------------------------------------
+// Per-session injection audit: structured audit file tree written when
+// JUST_DEMAND_DEBUG=1 (independent of JUST_DEMAND_DEBUG_PROMPT_FULL).
+// Files live under debug-prompts/session-<session-id>/:
+//   visible.md        — user-visible/raw conversation where available
+//   complete.md       — raw conversation plus all system/plugin injection content
+//   main-agent.md     — main agent conversation plus main-session injection content
+//   subagents/<agent>-<task-id>.md  — each subagent's full prompt with injection
+// ---------------------------------------------------------------------------
+
+const DEBUG_AUDIT_TYPES = Object.freeze({
+  VISIBLE: "visible",
+  COMPLETE: "complete",
+  MAIN_AGENT: "main-agent",
+  SUBAGENT: "subagent",
+})
+
+const formatAuditTimestamp = () => new Date().toISOString()
+
+/**
+ * Ensure the per-session audit directory exists.
+ * Creates debug-prompts/session-<sessionId>/ and its subagents/ subdirectory.
+ */
+export const ensureDebugPerSessionDir = (directory, sessionId) => {
+  const sessionDir = join(ensureDebugPromptDir(directory), `session-${sanitizeDebugName(sessionId, "main")}`)
+  mkdirSync(sessionDir, { recursive: true })
+  mkdirSync(join(sessionDir, "subagents"), { recursive: true })
+  return sessionDir
+}
+
+/**
+ * Build a structured audit entry header.
+ * Returns a formatted string block with timestamp, metadata fields, and content.
+ */
+const buildDebugAuditEntry = (payload) => {
+  const lines = [
+    `---`,
+    `## ${formatAuditTimestamp()}`,
+    `- source: ${payload.source || "unknown"}`,
+  ]
+  if (payload.task_id) lines.push(`- task_id: ${payload.task_id}`)
+  if (payload.agent) lines.push(`- agent: ${payload.agent}`)
+  if (payload.status) lines.push(`- status: ${payload.status}`)
+  if (payload.reason) lines.push(`- reason: ${payload.reason}`)
+  if (payload.phase) lines.push(`- phase: ${payload.phase}`)
+  if (payload.action) lines.push(`- action: ${payload.action}`)
+  if (payload.reason_code) lines.push(`- reason_code: ${payload.reason_code}`)
+  lines.push("")
+  lines.push(payload.content != null ? String(payload.content) : "(no content)")
+  lines.push("")
+  return lines.join("\n")
+}
+
+/**
+ * Append an entry to a per-session injection audit file.
+ *
+ * @param {string} directory - workflow root directory
+ * @param {string} sessionId - session identifier
+ * @param {string} auditType - one of DEBUG_AUDIT_TYPES values
+ * @param {object} payload - { source, task_id?, agent?, status?, reason?, content, ... }
+ * @returns {string|null} relative path to the written file, or null if debug not enabled
+ */
+export const appendDebugSessionAudit = (directory, sessionId, auditType, payload) => {
+  const enabled = debugEnvEnabled("JUST_DEMAND_DEBUG")
+  if (!enabled) return null
+
+  const sessionDir = ensureDebugPerSessionDir(directory, sessionId)
+  let fileName
+  if (auditType === DEBUG_AUDIT_TYPES.SUBAGENT) {
+    const agent = sanitizeDebugName(payload?.agent, "unknown-agent")
+    const taskId = sanitizeDebugName(payload?.task_id, "no-task")
+    fileName = `subagents/${agent}-${taskId}.md`
+  } else {
+    fileName = `${auditType}.md`
+  }
+
+  const filePath = join(sessionDir, fileName)
+  const entry = buildDebugAuditEntry(payload)
+  appendFileSync(filePath, entry, "utf8")
+  return relative(directory, filePath)
+}
+
+export const logPluginBootstrap = (directory, pluginName) => {
+  debugLog("plugin.bootstrap", {
+    plugin: pluginName,
+    workflow_directory: directory,
+    debug_enabled: String(globalThis.process?.env?.JUST_DEMAND_DEBUG || ""),
+    debug_prompt_full_enabled: String(globalThis.process?.env?.JUST_DEMAND_DEBUG_PROMPT_FULL || ""),
+    debug_prompts_dir: relative(directory, join(workflowRoot(directory), "debug-prompts")),
+  }, directory)
+}
