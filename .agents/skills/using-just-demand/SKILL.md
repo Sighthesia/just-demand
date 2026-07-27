@@ -20,7 +20,7 @@ These thoughts mean STOP and re-run routing:
 - "This is simple; I can just do it." Simple changes still require workflow routing.
 - "The user chose A, so I can implement now." Approach approval means enter intake/formal task flow unless execution readiness is already satisfied.
 - "I can inspect or patch first and clean up later." Reads may inform clarification, but writes wait for formal readiness.
-- "I can inspect the codebase first to prepare." Codebase investigation is also execution work and waits for a formal task.
+- "I can inspect the whole codebase before deciding." Pre-task discovery is allowed only when bounded to evidence needed for the current need or phenomenon; broad exploration still waits for a formal task.
 - "The plugins will catch mistakes." Skill-only fallback must self-enforce the process because plugins may be unavailable or unstable.
 - "This is only a follow-up." Follow-up pivots into work reset routing and require `socratic-clarification` second.
 
@@ -32,7 +32,7 @@ Skills are best-effort; plugins are the real hard gate. When plugins are unavail
 2. Confirm the relevant formal task exists and has no blocking clarification gaps.
 3. Confirm required task context files exist for the intended subagent.
 4. If no active formal task is ready, use `socratic-clarification` then `just-demand-intake`; do not edit inline.
-5. Codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) outside a formal task is also execution work — do not proceed with it in no-plugin fallback; return to intake/promotion.
+5. Bounded, side-effect-free discovery may inspect evidence relevant to the current need before a formal task. Do not write files, run side-effecting commands, dispatch execution subagents, change behavior, or broaden into unrelated project exploration; those actions require intake/promotion and a ready formal task.
 
 # Using Just Demand
 
@@ -61,6 +61,8 @@ When material uncertainty exists, clarification is not optional and not a nice-t
 - you can imagine a reasonable implementation, but a different reasonable interpretation would produce a user-visible mismatch
 
 Do not proceed just because you can guess a plausible path. No task promotion, subagent dispatch, or code edits until final expected effect and final implementation plan are approved.
+
+Before asking the user for implementation facts, inspect relevant project evidence with read-only tools. Translate the result into normally 3-7 user-facing change surfaces: what can change, the visible effect, the practical tradeoff or failure mode, and material coupling. Keep files, symbols, modules, parameters, and evidence sources as secondary detail; never require the user to supply them when they are discoverable.
 
 When clarifying, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 

@@ -30,6 +30,8 @@ Canonical workflow spec: `docs/workflow-spec.md`. The spec is the reference for 
 5. Record confirmed expectations, remaining gaps, and non-blocking questions.
 6. Promote to a formal work item only after required fields and approval are present.
 
+When clarification used bounded project discovery, record the user-approved effects and boundaries rather than copying a technical inventory into the intake. Files, modules, components, parameters, and evidence sources may support `Touchpoints`, `Decisions`, and validation, but they are not user requirements unless the user explicitly made them constraints.
+
 If plugins are unavailable, disabled, or unstable, self-enforce this transition: after clarification approval, create/promote the intake before any write tool or execution subagent. Skill-only fallback is best-effort and cannot hard-block tools, so do not rely on a later plugin rejection to catch skipped intake.
 
 Record clarification in user-language buckets that can later become task data:

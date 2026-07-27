@@ -1360,7 +1360,7 @@ test("injectWorkflowStateBanner appends no-task breadcrumb with allowed and bloc
   assert.match(result, /\[workflow-state\]/)
   assert.match(result, /task=none/)
   assert.match(result, /phase=no-task/)
-  assert.match(result, /next: enter workflow via clarification\/intake, answer simple questions, or explicit skip workflow/)
+  assert.match(result, /next: bounded read-only discovery, clarification\/intake, direct answer, or explicit skip workflow/)
   assert.match(result, /blocked: start, continue, complete/)
 })
 
@@ -1371,7 +1371,7 @@ test("injectWorkflowStateBanner appends select-task banner when unfinished tasks
   assert.match(result, /\[workflow-state\]/)
   assert.match(result, /task=selection pending/)
   assert.match(result, /phase=no-task/)
-  assert.match(result, /next: select-task\/resume before execution; direct answer only for non-work/)
+  assert.match(result, /next: bounded read-only discovery, or select-task\/resume before execution/)
   assert.match(result, /blocked: start, continue, complete/)
 })
 
@@ -1504,7 +1504,7 @@ test("textLooksLikeCodeInvestigationIntent does not fire on neutral analysis or 
   }
 })
 
-test("controller decision blocks code investigation intent when no active task", () => {
+test("controller decision allows bounded read-only code investigation when no active task", () => {
   const englishSamples = [
     "Let me inspect the codebase first.",
     "I need to read through the source files.",
@@ -1515,21 +1515,34 @@ test("controller decision blocks code investigation intent when no active task",
   ]
   for (const sample of englishSamples) {
     const decision = buildControllerDecision(sample, { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
-    assert.equal(decision.phase, CONTROLLER_PHASE.route)
-    assert.equal(decision.action, CONTROLLER_ACTION.block)
-    assert.equal(decision.reason_code, "workflow_entry_required")
+    assert.equal(decision.phase, CONTROLLER_PHASE.clarify)
+    assert.equal(decision.action, CONTROLLER_ACTION.allow)
+    assert.equal(decision.reason_code, "bounded_evidence_discovery")
   }
 })
 
-test("controller decision blocks Chinese code investigation intent when no active task", () => {
+test("controller decision allows bounded Chinese code investigation when no active task", () => {
   const decision = buildControllerDecision("我先查看一下代码，了解一下当前的实现。", {
     activeTask: null,
     same_topic_turns: 0,
     subagent_unavailable_pending: false,
   })
-  assert.equal(decision.phase, CONTROLLER_PHASE.route)
-  assert.equal(decision.action, CONTROLLER_ACTION.block)
-  assert.equal(decision.reason_code, "workflow_entry_required")
+  assert.equal(decision.phase, CONTROLLER_PHASE.clarify)
+  assert.equal(decision.action, CONTROLLER_ACTION.allow)
+  assert.equal(decision.reason_code, "bounded_evidence_discovery")
+})
+
+test("controller decision still blocks investigation mixed with implementation when no active task", () => {
+  const samples = [
+    "I need to read through the source files before implementing the fix.",
+    "让我检查一下源码然后修改实现。",
+  ]
+  for (const sample of samples) {
+    const decision = buildControllerDecision(sample, { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
+    assert.equal(decision.phase, CONTROLLER_PHASE.route)
+    assert.equal(decision.action, CONTROLLER_ACTION.block)
+    assert.equal(decision.reason_code, "workflow_entry_required")
+  }
 })
 
 test("controller decision allows workflow entry narration that mentions code investigation", () => {
@@ -1547,7 +1560,7 @@ test("controller decision allows workflow entry narration that mentions code inv
   }
 })
 
-test("state blocks English code investigation intent when no formal task exists", async () => {
+test("state allows bounded English code investigation when no formal task exists", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
@@ -1555,23 +1568,20 @@ test("state blocks English code investigation intent when no formal task exists"
   const plugin = await stateFactory({ directory: root })
   const samples = [
     "Let me inspect the codebase first to understand how it works.",
-    "I need to read through the source files before implementing.",
+    "I need to read through the source files to identify the relevant behavior.",
   ]
 
   for (const [index, sample] of samples.entries()) {
     const output = { parts: [{ type: "text", text: sample }] }
     await plugin["chat.message"]({ sessionID: `code-investigation-en-${index}` }, output)
 
-    assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
-    assert.match(output.parts[0].text, /no formal task yet/i)
-    assert.match(output.parts[0].text, /just-demand-intake/i)
-    assert.match(output.parts[0].text, /Original response:/i)
-    assert.match(output.parts[0].text, /> /)
-    assert.notEqual(output.parts[0].text, sample)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand workflow entry required\]/i)
   }
 })
 
-test("state blocks Chinese code investigation intent when no formal task exists", async () => {
+test("state allows bounded Chinese code investigation when no formal task exists", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
@@ -1579,16 +1589,16 @@ test("state blocks Chinese code investigation intent when no formal task exists"
   const plugin = await stateFactory({ directory: root })
   const samples = [
     "我先查看一下代码，了解一下当前的实现。",
-    "让我检查一下源码再决定怎么改。",
+    "让我检查一下源码，找出相关修改面。",
   ]
 
   for (const [index, sample] of samples.entries()) {
     const output = { parts: [{ type: "text", text: sample }] }
     await plugin["chat.message"]({ sessionID: `code-investigation-zh-${index}` }, output)
 
-    assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
-    assert.match(output.parts[0].text, /no formal task yet/i)
-    assert.match(output.parts[0].text, /just-demand-intake/i)
+    assert.ok(output.parts[0].text.includes(sample))
+    assert.match(output.parts[0].text, /\[workflow-state\]/)
+    assert.doesNotMatch(output.parts[0].text, /\[just-demand workflow entry required\]/i)
   }
 })
 

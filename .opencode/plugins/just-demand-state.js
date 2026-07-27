@@ -434,6 +434,17 @@ const buildControllerDecision = (text, reminderState) => {
     }
   }
 
+  // Bounded read-only discovery may precede formal task creation. The tool gate
+  // remains responsible for blocking writes and side-effecting commands.
+  if (!activeTask && textLooksLikeCodeInvestigationIntent(text) && textLooksLikeReadOnlyWork(text)) {
+    return {
+      phase: CONTROLLER_PHASE.clarify,
+      action: CONTROLLER_ACTION.allow,
+      reason_code: "bounded_evidence_discovery",
+      rewrite: null,
+    }
+  }
+
   if ((CONCRETE_WORK_PATTERNS.some((pattern) => pattern.test(text)) || textLooksLikeCodeInvestigationIntent(text)) && !activeTask) {
     const workflowEntryNarration = textLooksLikeWorkflowEntryNarration(text)
     if (workflowEntryNarration) {

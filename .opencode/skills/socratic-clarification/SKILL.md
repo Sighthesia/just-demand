@@ -17,7 +17,7 @@ Force progressive clarification and design approval before implementation. This 
 
 This skill implements the **default ambiguity** and **effect-first communication** principles from `docs/workflow-spec.md`. The canonical spec is the reference for the full product philosophy, role model, and user-expectation contract model.
 
-This skill is the required second step after `using-just-demand`. When a turn pivots from Q&A into a request, bug, correction, or mismatch, reset here before intake, execution, or verification. In skill-only fallback mode, self-enforce the same rule: approval enters intake/formal-task flow, not inline editing, and codebase investigation (inspecting, searching, reading, tracing, or investigating files for implementation) is also execution work that must wait for a formal task.
+This skill is the required second step after `using-just-demand`. When a turn pivots from Q&A into a request, bug, correction, or mismatch, reset here before intake, execution, or verification. In skill-only fallback mode, approval enters intake/formal-task flow rather than inline editing. Bounded, side-effect-free evidence discovery may precede promotion; writes, behavior changes, side-effecting commands, broad unrelated exploration, and execution subagents may not.
 
 <HARD-GATE>
 Do NOT promote a task, dispatch a subagent, edit files, or finalize an implementation plan until you have presented the required decision surface and received explicit user approval. The required surface depends on **risk level**, not universality.
@@ -64,14 +64,40 @@ If the user's frame is weak, incomplete, or contradicted by stronger explanation
 You MUST complete these steps in order. Do not skip steps.
 
 1. **Identify trigger** -- determine what the user actually needs (feature, bugfix, refactor, design, investigation, correction).
-2. **Round 1: Intent and expected outcome** -- clarify what success looks like in user language, and capture the shortest decision card that still lets the user approve or redirect.
-3. **Round 2: Current reality** -- when relevant, clarify what happens now instead.
-4. **Round 3: Constraints and boundaries** -- explore tradeoffs, edge cases, anti-outcomes.
-5. **Propose 2-3 approaches** -- with trade-offs and your recommendation, using defaults and concise options before asking for free-text explanation.
-6. **Capture final artifact** -- final expected effect, scope, anti-outcomes, chosen approach, final implementation plan, validation criteria, open questions.
-7. **Get user approval** -- explicit approval on the final artifact before any execution.
-8. **Promote or execute** -- only after approval, promote to a formal task when no ready task exists; begin execution only when formal execution readiness is satisfied.
-9. **Reset on pivot** -- when analysis, advice, or diagnosis turns into implementation/code edits, re-open clarification and confirm the new boundary before editing.
+2. **Relevant evidence discovery** -- when project facts would improve the decision surface, inspect only the paths needed to understand the current need or phenomenon.
+3. **Relevant change surfaces** -- translate evidence into normally 3-7 behavior-level modification directions; do not ask the user for discoverable implementation details.
+4. **Round 1: Intent and expected outcome** -- clarify what success looks like in user language, and capture the shortest decision card that still lets the user approve or redirect.
+5. **Round 2: Current reality** -- when relevant, clarify what happens now instead.
+6. **Round 3: Constraints and boundaries** -- explore tradeoffs, edge cases, anti-outcomes.
+7. **Propose 2-3 approaches** -- with trade-offs and your recommendation, using defaults and concise options before asking for free-text explanation.
+8. **Capture final artifact** -- final expected effect, scope, anti-outcomes, chosen approach, final implementation plan, validation criteria, open questions.
+9. **Get user approval** -- explicit approval on the final artifact before any execution.
+10. **Promote or execute** -- only after approval, promote to a formal task when no ready task exists; begin execution only when formal execution readiness is satisfied.
+11. **Reset on pivot** -- when analysis, advice, or diagnosis turns into implementation/code edits, re-open clarification and confirm the new boundary before editing.
+
+## Relevant Change-Surface View
+
+Use this view when the user describes a need or phenomenon but does not know the internal modification choices. It is a translation layer, not a project inventory or parameter form.
+
+- Show only surfaces supported by relevant project evidence, normally 3-7.
+- Name each surface in user language and state its visible effect.
+- Include the practical tradeoff or failure mode and any material coupling the user must understand.
+- Recommend a default when evidence supports one.
+- Keep files, modules, components, symbols, parameters, current values, and evidence sources in optional detail.
+- Label material facts as observed, derived, user-provided, recommended, or uncertain when confusing them could alter the decision.
+- Ask the user to choose an effect or boundary, never to diagnose the implementation.
+
+```text
+Conclusion: <what the evidence suggests>
+Recommended: <default effect-level direction>
+
+Relevant change surfaces:
+1. <user-facing surface> - <visible effect>; <tradeoff/failure mode>; linked to <material coupling>.
+2. <surface> - <effect>; <tradeoff/failure mode>; linked to <coupling>.
+
+User action: approve the recommended effect, choose another surface, or correct the observed phenomenon.
+Optional evidence: <files/modules/parameters and source status>.
+```
 
 ## Process Flow
 

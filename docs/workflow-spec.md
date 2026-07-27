@@ -84,6 +84,10 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
 
     The main agent applies this classification before each user interaction. When the work falls entirely under low-risk, the agent states what it will do and proceeds without asking for approval. When any dimension is high-risk, the agent presents a clear decision request with a recommended default.
 
+12. **Discovery before execution.** A user may describe only a need or phenomenon. Before a formal task exists, the main agent may perform bounded, side-effect-free discovery to find the relevant behavior, path, module, component, parameter, constraint, and evidence. Discovery is not implementation: it must stay relevant to the current request and must not write files, run side-effecting commands, dispatch execution subagents, or change behavior. Those actions still require an approved formal task.
+
+13. **Relevant change surfaces, not implementation questionnaires.** After discovery, the main agent translates project evidence into the smallest useful set of user-facing change surfaces, normally 3-7. Each surface describes what can change, the visible effect, the main tradeoff or failure mode, and material coupling. Files, symbols, parameters, and evidence sources are secondary detail. The user is never required to identify implementation locations or diagnose the root cause.
+
 ## System Model
 
 Just Demand is a workflow runtime, not a one-shot prompt bundle.
@@ -92,6 +96,8 @@ The durable workflow truth lives in explicit state and scripts. Prompt-layer gui
 
 ```text
 human intent
+  -> bounded read-only discovery when needed
+  -> relevant change surfaces
   -> clarify
   -> intake
   -> promote
@@ -165,6 +171,10 @@ Clarification is a hard gate before promotion or execution when the intended eff
 
 ### Clarification Rules
 
+- If project facts would distinguish plausible interpretations, inspect the relevant evidence before asking the user. Do not ask users for files, symbols, parameters, components, or root causes that the repository can reveal.
+- Keep pre-task discovery bounded to the current need or phenomenon. Broad project inventory, writes, side-effecting commands, and implementation remain outside this phase.
+- When multiple project-backed modification directions remain, present a request-specific change-surface view with normally 3-7 items. For each item, state the user-visible effect, practical tradeoff or failure mode, and material coupling; keep technical evidence secondary.
+- Distinguish evidence status when it matters: observed in the project, derived from observed facts, user-provided, recommended, or still uncertain. Never present a recommendation or inference as the current state.
 - Use `socratic-clarification` to establish the final expected effect, boundaries, and tradeoffs.
 - Lead with **effect-shaping questions** ("what should you see?", "what happens now instead?") over permission questions ("can I proceed?").
 - Reveal the expected visible effect before promoting or executing — the user approves what they will see, not how it will be built.
@@ -197,7 +207,7 @@ If the same issue produces meaningful correction feedback twice consecutively:
 
 ## Execution And Context Packages
 
-Execution belongs to the active formal task, not the intake thread.
+Execution belongs to the active formal task, not the intake thread. Bounded read-only discovery may precede promotion because it changes neither project state nor behavior; implementation, writes, side-effecting commands, execution subagents, and verification still belong to the formal task.
 
 Before implementation or verification:
 
