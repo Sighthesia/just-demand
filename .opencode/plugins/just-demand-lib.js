@@ -244,14 +244,15 @@ const EXPLICIT_WORKFLOW_SKIP_PATTERNS = [
 const LOW_RISK_ANALYSIS_PATTERNS = [
   // Read-only investigation: analyze, investigate, inspect, trace (without "implement/fix")
   // Includes code, source, and common analysis targets
-  /\b(analy[sz]e|investigate|trace|inspect|examine|review)\s+(the\s+)?(debug\s+)?(?:\w+\s+)?(log|logs|pattern|structure|behavior|issue|problem|code|source|implementation|flow|data|test|tests)\b/i,
+  /\b(analy[sz]e|investigate|trace|inspect|examine|review)\s+(the\s+)?(debug\s+)?(?:\w+\s+)?(log|logs|pattern|structure|behavior|issue|problem|code|codebase|source|files?|implementation|flow|data|test|tests)\b/i,
   /\b(run|execute)\s+(the\s+)?(test|tests|check|verification|suite)\b/i,
   /\b(compile|gather|collect|summarize)\s+(the\s+)?(evidence|information|data|result|findings)\b/i,
-  /\b(just\s+)?(read|look|check)\s+(?:(?:through|at|over)\s+)?(?:the\s+)?(?:\w+\s+)*(?:code|source|reports?|tests?|logs?|lint)\b/i,
+  /\b(just\s+)?(read|look|check)\s+(?:(?:through|at|over)\s+)?(?:the\s+)?(?:\w+\s+)*(?:code|codebase|source|files?|implementation|reports?|tests?|logs?|lint)\b/i,
   /\bsearch\s+(?:through\s+)?(?:the\s+)?(?:\w+\s+)*(?:codebase|source|code|logs?|files?|repo|documentation)\b/i,
   /\bgrep\s+(?:the\s+)?(?:\w+\s+)*(?:source|code|logs?|files?)\b/i,
   /\b(standard|routine)\s+(verification|check|audit|review)\b/i,
   /(只读|只检查|只看|只分析|只跑|只收集)\s*(?:一下|一遍|一次)?\s*(?:代码|测试|日志|报告|审计|验证|结构|流程|行为|情况|问题|调试)/i,
+  /(?:查看|检查|搜索|跟踪|阅读|检索|分析)\s*(?:一下|一遍|一次)?\s*(?:代码|源码|代码库|源文件|文件|实现|结构|流程|日志|测试)/i,
 ]
 
 // Signals that the work is small-scope (tens of lines or script-verifiable)
@@ -599,7 +600,7 @@ export const textLooksLikeReadOnlyWork = (text) => {
   // Check for "implement/build/fix/change/add/remove/refactor" verbs (not in analysis context)
   const HIGH_RISK_PATTERNS = [
     /\b(implement|build|fix|change|edit|modify|patch|refactor|rework|add|remove|delete|create|update|rewrite)\b/i,
-    /(实现|修复|修改|重构|更改|添加|删除|创建|更新)/,
+    /(?:^|我要|我来|需要|然后|随后|并且?|再|后|将|把|直接|开始|进行)\s*(?:去|来)?\s*(实现|修复|修改|重构|更改|添加|删除|创建|更新)(?!面)/,
   ]
   if (HIGH_RISK_PATTERNS.some((pattern) => pattern.test(body))) return false
   return true
@@ -1037,9 +1038,9 @@ export const formatWorkflowStateLines = (activeTaskId, activeTask, gateState) =>
   }
 
   if (!activeTaskId && gateState?.reason === "no_current_task_selected") {
-    lines.push("    next: select-task/resume before execution; direct answer only for non-work")
+    lines.push("    next: bounded read-only discovery, or select-task/resume before execution")
   } else if (!activeTaskId) {
-    lines.push("    next: enter workflow via clarification/intake, answer simple questions, or explicit skip workflow")
+    lines.push("    next: bounded read-only discovery, clarification/intake, direct answer, or explicit skip workflow")
   } else {
     lines.push(`    next: ${nextActions}`)
   }
