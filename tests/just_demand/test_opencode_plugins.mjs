@@ -1661,8 +1661,8 @@ test("session-start does not inject workflow bootstrap into system prompt", asyn
   assert.match(output.system[1], /<JUST_DEMAND_REMINDER>/)
   assert.match(output.system[1], /Load using-just-demand first/i)
   assert.match(output.system[1], /socratic-clarification second/i)
-  assert.match(output.system[1], /Use just-demand subagents proactively/i)
-  assert.match(output.system[1], /Long-context work means broad code reading, 3\+ files/i)
+  assert.match(output.system[1], /Use just-demand subagents as selective accelerators/i)
+  assert.match(output.system[1], /six eligibility gates/i)
   assert.match(output.system[2], /<JUST_DEMAND_WORKFLOW_STATE>/)
   assert.match(output.system[2], /\[workflow-state\]/)
 })
@@ -2240,7 +2240,7 @@ test("subagent skip applies only to the current turn and later code edits block 
   assert.match(first.parts[0].text, /retry now, or skip one turn/i)
   assert.match(first.parts[0].text, /\[workflow-state\]/)
   assert.match(second.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(second.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+  assert.match(second.parts[0].text, /six eligibility gates/i)
 })
 
 test("workflow failure golden transcript keeps approval, skip scope, pivot gate, and closeout gate intact", async () => {
@@ -2283,7 +2283,7 @@ test("workflow failure golden transcript keeps approval, skip scope, pivot gate,
   const pivot = { parts: [{ type: "text", text: pivotTurn.text }] }
   await plugin["chat.message"]({ sessionID: "golden-transcript" }, pivot)
   assert.match(pivot.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(pivot.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+  assert.match(pivot.parts[0].text, /six eligibility gates/i)
   assert.doesNotMatch(pivot.parts[0].text, /retry now, or skip one turn/i)
 
   const closeout = { parts: [{ type: "text", text: closeoutTurn.text }] }
@@ -2329,7 +2329,7 @@ test("analysis-to-implementation pivot re-enters execution gating", async () => 
   await plugin["chat.message"]({ sessionID: "pivot-reset" }, output)
 
   assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+  assert.match(output.parts[0].text, /six eligibility gates/i)
 })
 
 test("completion claims are blocked until verification closeout", async () => {
@@ -2450,8 +2450,8 @@ test("state blocks obvious execution-needed replies on unrouted active tasks", a
     await plugin["chat.message"]({ sessionID: `execution-${index}` }, output)
 
     assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-    assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
-    assert.match(output.parts[0].text, /Dispatch the supported just-demand-\* subagent/i)
+    assert.match(output.parts[0].text, /six eligibility gates/i)
+    assert.match(output.parts[0].text, /six eligibility gates/i)
     assert.match(output.parts[0].text, /skip workflow/i)
     assert.match(output.parts[0].text, /Original response:/i)
     assert.match(output.parts[0].text, /> /)
@@ -2496,7 +2496,7 @@ test("state blocks additional common execution phrasings on unrouted active task
     await plugin["chat.message"]({ sessionID: `broad-execution-${index}` }, output)
 
     assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected block for: "${sample}"`)
-    assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+    assert.match(output.parts[0].text, /six eligibility gates/i)
     assert.match(output.parts[0].text, /skip workflow/i)
     assert.match(output.parts[0].text, /Original response:/i)
     assert.notEqual(output.parts[0].text, sample)
@@ -2524,7 +2524,7 @@ test("state blocks code investigation intent inside active execution task withou
     await plugin["chat.message"]({ sessionID: `code-investigation-exec-${index}` }, output)
 
     assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected block for: "${sample}"`)
-    assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+    assert.match(output.parts[0].text, /six eligibility gates/i)
   }
 })
 
@@ -2590,7 +2590,7 @@ test("explicit workflow skip overrides execution block for new patterns and code
     await plugin["chat.message"]({ sessionID: `skip-override-broad-${index}` }, output)
 
     assert.doesNotMatch(output.parts[0].text, /\[just-demand execution blocked\]/i, `Expected no block for: "${sample}"`)
-    assert.doesNotMatch(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+    assert.doesNotMatch(output.parts[0].text, /six eligibility gates/i)
     assert.match(output.parts[0].text, /\[workflow-state\]/)
   }
 })
@@ -2608,7 +2608,7 @@ test("state still blocks execution-needed text after workflow subagents were pre
   await plugin["chat.message"]({}, output)
 
   assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+  assert.match(output.parts[0].text, /six eligibility gates/i)
 })
 
 test("controller decision still blocks execution intent after workflow subagents were previously assigned", () => {
@@ -2759,7 +2759,7 @@ test("state still blocks execution intent in execute step (P0 safety preserved)"
   await plugin["chat.message"]({ sessionID: "execute-block" }, output)
 
   assert.match(output.parts[0].text, /\[just-demand execution blocked\]/i)
-  assert.match(output.parts[0].text, /must run through a just-demand-\* workflow subagent/i)
+  assert.match(output.parts[0].text, /six eligibility gates/i)
 })
 
 test("state blocks obvious verification closeout claims until complete-verification", async () => {

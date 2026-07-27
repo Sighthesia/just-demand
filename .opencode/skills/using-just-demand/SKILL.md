@@ -8,7 +8,7 @@ description: "Load this skill first for repo work so the correct just-demand rou
 - **Effect first**: lead every reply with the result, conclusion, or recommendation.
 - **Defaults first**: recommend the path before asking; options only when the choice matters.
 - **Clarify before execute**: no edits or subagent dispatch until the final effect, approach, and plan are approved.
-- **Subagents for long work**: route broad reading, 3+ files, or extended verification through a subagent, not inline. Small reads/edits (~几十行) and script-verifiable checks may stay in the main session.
+- **Subagents are selective accelerators**: dispatch only when all six eligibility gates pass AND net benefit is positive. The main agent may execute any work — including broad reading, multi-file changes, or extended verification — when a gate fails or benefit is uncertain. Small reads/edits (~几十行) and script-verifiable checks also stay in the main session.
 - **Closeout is a real step**: completion wording does not replace `complete-verification`.
 
 # Skill Priority
@@ -112,8 +112,7 @@ Use this reset when the user keeps providing new samples, when the conversation 
 - Scripts are the write path for `.just-demand/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
 - Approval words such as `批准`, `继续`, `同意`, `approved`, and `go ahead` are workflow-entry signals, not execution permission.
-- Long-context-consumption work belongs to subagents. The main agent MUST NOT perform broad code reading, large multi-file edits, or extended verification inline when a `just-demand-*` subagent can do it from a formal task package. An explicit workflow skip override is required to proceed inline.
-- Prefer proactive subagent dispatch for long-context execution work. Do not stay inline in the main session just because one direct attempt seems possible. The plugin's execution block enforces this default.
+- Subagent dispatch is governed by six hard eligibility gates and three quick net-benefit questions. Any gate failure or uncertain benefit means the main agent executes — even for long-context or multi-file work. The plugin's execution block enforces readiness, not mandatory dispatch.
 - Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
 
 ## Subagent Availability Rule
@@ -235,9 +234,9 @@ When no formal task exists, the agent chooses from three explicit routes:
 
 Route 2 is the default when concrete work, bug reports, or implementation requests are detected. Route 3 is an explicit override that bypasses the `workflow_entry_required` or `execution_needed` block messages.
 
-### Long-Context Work Routing
+### Selective Subagent Dispatch
 
-Long-context execution work (broad code reading, 3+ files, multi-step research/debugging, or extended verification) must route through a `just-demand-*` subagent by default. Inline handling in the main session is only permitted with an explicit workflow skip override, or for small reads/edits (~几十行) and script-verifiable checks. The plugin enforces this: execution intent on an active task without assigned subagents ordinarily triggers a hard block with subagent routing guidance, but small-work signals bypass the block.
+Subagent dispatch is governed by **six hard eligibility gates** (goal stability, boundary independence, context compressibility, result verifiability, capability match, failure recoverability) and **three quick net-benefit questions** (token/effort savings, context-drift risk reduction, separable artifact output). Dispatch only when **all six gates pass AND at least one benefit question is "yes"**. Any gate failure or uncertain benefit → the main agent executes, even for long-context or multi-file work. The plugin enforces task readiness (formal task + context files), not mandatory subagent routing.
 
 ## Commands
 

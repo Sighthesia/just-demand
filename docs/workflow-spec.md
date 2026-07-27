@@ -27,9 +27,24 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
 
 6. **Task context as user-expectation contract.** The task context files capture what the user expects to see, feel, or operate — not just an implementation brief. They form a durable reference that survives session resets and context compression.
 
-7. **Long context belongs to subagents.** Broad code reading, multi-file implementation, extended debugging, and research that would consume significant main-session context must route through `just-demand-*` subagents by default. The main session coordinates and summarizes; it does not absorb full execution context inline.
+7. **Subagents are selective accelerators, not mandatory sinks.** Subagent dispatch is governed by a hard-threshold decision model, not by file count or context length. Dispatch only when all six eligibility gates pass AND the net-benefit judgment is positive. Otherwise, the main agent owns the work — even for long-context or multi-file tasks.
 
-8. **Small work stays in the main session.** Reading or editing roughly tens of lines of code, or tasks that can be reliably verified by a local script (high-confidence bug detection, scriptable data analysis), remain in the main session by default. They do not require subagent dispatch. The main agent judges scope: if the work crosses into broad reading, multi-file changes, or uncertain analysis, it routes through the appropriate subagent.
+    ### Six Eligibility Gates (ALL must pass)
+    1. **Goal stability**: the task goal is final, unambiguous, and user-approved — not still being clarified.
+    2. **Boundary independence**: the task can be completed independently without cascading decisions into other modules or scope.
+    3. **Context compressibility**: the essential context (relevant code, tradeoffs, constraints) fits within a subagent prompt without losing the critical signal.
+    4. **Result verifiability**: acceptance criteria are concrete, observable, and can be checked without the subagent reinterpreting user intent.
+    5. **Capability match**: the subagent's role (researcher/coder/tester/advisor) cleanly fits the work shape — no need for cross-role improvisation.
+    6. **Failure recoverability**: a failed or drifted subagent result can be detected cheaply and costs at most one retry before the main agent can safely take over.
+
+    ### Three Net-Benefit Questions (at least one must be "yes")
+    1. Does subagent dispatch save meaningful main-session tokens or execution effort?
+    2. Does subagent dispatch reduce the risk of main-session context drift on this work?
+    3. Does subagent dispatch produce a cleanly separable artifact (a file, a test report, a research summary)?
+
+    Any gate failure or uncertain benefit → the main agent keeps the work.
+
+8. **Small work stays in the main session.** Reading or editing roughly tens of lines of code, or tasks that can be reliably verified by a local script (high-confidence bug detection, scriptable data analysis), remain in the main session by default. They do not require subagent dispatch.
 
 9. **Mismatch feedback is optionized before re-implementation.** When the user reports a deviation (vague or precise), the agent does not guess the root cause and patch blindly. Instead it leads with options: locate the deviation dimension, then pin the target state via contrastive choices. The user click-selects rather than writing prose.
 
@@ -96,7 +111,7 @@ The main agent is the **workflow owner, delivery lead, and dispatcher**. The mai
 - Reveals the expected visible effect before task promotion or execution — the user approves what they will see, not how it will be built.
 - Owns task shaping, routing, recovery, verification closeout, summaries, and the user-expectation contract.
 - Reports in effect-first style: visible result, scope, acceptance cues, and next user choice — not implementation details.
-- Delegates broad implementation, research, and verification to `just-demand-*` subagents by default.
+- Dispatches subagents only when all six eligibility gates pass and net benefit is positive; otherwise owns the work directly, even for long-context or multi-file tasks.
 - Routes vague mismatch feedback into optionized deviation resolution before re-implementing.
 - Escalates consecutive failures to reflection/advisor instead of blind patching.
 
@@ -177,7 +192,7 @@ Before implementation or verification:
 2. Run `just-demand . list-active` and inspect unfinished tasks for conflict risk.
 3. Select or resume the intended task if another unfinished task is current.
 4. Ensure the task context package exists for the intended subagent.
-5. Dispatch the narrowest suitable `just-demand-*` subagent when long-context work is involved. Small work (roughly tens of lines of code read or edited, or tasks verifiable by a local script) may proceed in the main session without subagent dispatch.
+5. Apply the six eligibility gates and three net-benefit questions before dispatching a subagent. The main agent may execute any work — including long-context or multi-file work — when any gate fails or benefit is uncertain. Small work (roughly tens of lines of code read or edited, or tasks verifiable by a local script) may proceed in the main session without subagent dispatch.
 
 Required task context files:
 

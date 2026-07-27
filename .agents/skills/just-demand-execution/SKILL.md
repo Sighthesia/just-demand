@@ -14,8 +14,9 @@ Execute formal work items through focused subagents and script-owned state.
 - Scripts are the only write path for workflow machine state under `.just-demand/`.
 - Plugins and agents may read state, but lifecycle transitions must go through scripts.
 - Do not dispatch implementation before the user has confirmed the direction and the task is ready.
-- Long-context implementation, research, and verification must run through subagents. The main session should coordinate and summarize, not absorb the full execution context inline.
-- When a suitable `just-demand-*` subagent exists for long-context work, prefer dispatch over continuing inline in the main session.
+- Subagent dispatch is governed by six hard eligibility gates (goal stability, boundary independence, context compressibility, result verifiability, capability match, failure recoverability) and three quick net-benefit questions (token/effort savings, context-drift risk, separable artifact). Dispatch only when all six gates pass AND at least one benefit question is "yes". Otherwise, the main agent executes — even for long-context or multi-file work.
+- Small reads/edits (~几十行) and script-verifiable checks (bug detection, data analysis) remain in the main session without subagent dispatch.
+- A one-turn subagent skip is not a persistent permission; new broad work requires reassessment of the gates unless the user gives a fresh explicit override.
 - When reporting progress or a result, lead with the user-visible effect or the decision the user needs to make; treat task state, mark commands, and checkpoint mechanics as supporting detail.
 - If a suitable subagent is unavailable, ask the user to retry now or skip one turn rather than silently falling back.
 - Implementation or verification must not start unless the current formal task already has the required task context files. Do not treat missing task context as a recoverable inline shortcut.
@@ -164,7 +165,7 @@ This is a fallback for context injection failures. Keep the manual Requested Wor
 
 Before execution, if the active task still contains unresolved uncertainty about the user's intended effect, observed phenomenon, boundaries, or tradeoffs, load `socratic-clarification` and route back to clarification. Do not dispatch implementation while the final expected effect and final implementation plan are not explicit.
 
-If the work is long-context and a subagent should be used, but no supported subagent is available right now, ask the user to retry now or skip one turn instead of silently taking over the long-context work inline.
+If the gates and benefit judgment point to subagent dispatch, but no supported subagent is available right now, ask the user to retry now or skip one turn instead of silently falling back.
 
 ## Clarification Gate Before Execution
 
@@ -193,7 +194,7 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 4. If `list-active` shows unfinished tasks but no current task is selected, pick the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
 5. Ensure the current task package has the required files for the intended subagent.
 6. Verify the clarification gate above passes. If not, route back to clarification.
-7. Dispatch the narrowest suitable subagent. If the work would require substantial code reading, multi-file editing, or long verification output, do not keep it in the main session.
+7. Apply the six eligibility gates and three net-benefit questions. Dispatch the narrowest suitable subagent only when all gates pass and benefit is clear. The main agent may execute any work — including substantial code reading, multi-file editing, or extended verification — when any gate fails or benefit is uncertain. Small reads/edits (~几十行) and script-verifiable checks always proceed inline in the main session.
 8. Review subagent output before moving to the next phase.
 9. Run verification before claiming completion.
 

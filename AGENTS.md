@@ -14,7 +14,7 @@ Just Demand is a workflow runtime, not a one-shot prompt bundle.
 - **Effect first**: lead every reply with the user-visible result or conclusion, not implementation detail.
 - **Defaults first**: recommend a path before asking; options only when the choice affects visible behavior, architecture, compatibility, security, cost, or maintenance.
 - **Clarify before execute**: no code edits or subagent dispatch until the final expected effect, chosen approach, and plan are explicitly approved.
-- **Subagents for long work**: broad code reading, 3+ files, multi-step research, or extended verification routes through a `just-demand-*` subagent, not inline. Small reads/edits (~几十行) and script-verifiable checks may stay in the main session.
+- **Subagents are selective accelerators**: dispatch only when all six eligibility gates pass AND net benefit is positive. The main agent may execute any work — including long-context, multi-file, or multi-step work — when a gate fails or benefit is uncertain. Small reads/edits (~几十行) and script-verifiable checks also stay in the main session.
 - **Closeout is a real step**: verification closeout via `complete-verification` is required; completion wording does not replace it.
 
 ### Guiding Principle
@@ -138,7 +138,7 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 - Working flow: clarify -> intake -> promote to formal task -> inspect unfinished tasks -> ensure required task context files exist -> dispatch `just-demand-*` subagent -> verify -> `complete-verification` -> checkpoint commit -> archive.
 - Do not skip the clarification gate. In this repo, `using-just-demand` routes first and `socratic-clarification` is the hard gate before promotion, subagent dispatch, or code edits.
 - Main-agent default: lead with the likely effect and the recommended option first, then ask only for the decision that would change visible behavior, architecture, compatibility, security, cost, or long-term maintainability.
-- Long-context implementation, research, and verification belong in `just-demand-*` subagents, not inline in the main session. Small reads/edits (~几十行) and script-verifiable checks are exceptions and may proceed inline.
+- Subagent dispatch uses six hard gates and three benefit questions. The main agent may execute any work — including long-context, multi-file, or multi-step work — when any gate fails or benefit is uncertain. Small reads/edits (~几十行) and script-verifiable checks also proceed inline.
 - The user is the boss/product lead/architecture approver; the main agent owns workflow dispatch, verification, and closure.
 - Subagent inner loops are execution contracts, not autonomous lifecycle owners: they may research, implement, verify, or advise within scope, but they do not create/promote/close tasks or dispatch other subagents.
 
