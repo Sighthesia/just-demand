@@ -1,6 +1,6 @@
 ---
 name: just-demand-execution
-description: Use when a formal work item is ready to execute, when dispatching just-demand-researcher, just-demand-coder, just-demand-tester, or just-demand-advisor subagents, or when building context for focused execution.
+description: Use when a formal work item is ready for main-agent execution, when selectively dispatching just-demand-tester or just-demand-advisor, or when explicitly resuming a compatibility researcher/coder role.
 ---
 
 # Workflow Execution
@@ -25,19 +25,19 @@ Execute formal work items in the main session or through selectively dispatched 
 
 ## Role Dispatch Guide
 
-- `just-demand-researcher`: use for evidence gathering, repository inspection, option comparison, and risk identification before the implementation path is chosen.
-- `just-demand-coder`: use for scoped implementation once the task is clarified and the chosen approach is explicit.
 - `just-demand-tester`: use for validation against the task brief, visible-effect checks, and low-risk local fixes after implementation or when a result needs review.
 - `just-demand-advisor`: use for fresh-context diagnosis, repeated failures, cross-boundary framing, or when the main session needs an independent recommendation before choosing a path.
+- The main agent owns research, repository inspection, product judgment, architecture, and implementation.
+- `just-demand-researcher` and `just-demand-coder` are compatibility-only. Dispatch either only when a legacy task already records the role or the user explicitly requested it; never infer permission from workload, file count, context length, or task type.
+- For a user-explicit compatibility dispatch on a new task, prefix Requested Work with `JUST_DEMAND_EXPLICIT_LEGACY_ROLE`. The plugin strips this marker before injection. Never add it without an explicit user request.
 
 Fast models handle only mechanical work. Architecture, product interpretation, cross-module judgment, and frontend visual/interaction/copy quality stay with the main agent by default unless the target is explicit and the selected model can meet it.
 
 ## Output Handoff Rules
 
-- Researcher findings should feed the main agent's scope and option selection.
-- Coder output should feed verification and any remaining implementation gaps.
 - Tester output should drive pass/fail, low-risk fixes, and closeout readiness.
 - Advisor output should reframe the problem or sharpen the next decision, not replace execution.
+- Compatibility researcher/coder output follows its historical handoff contract only when that path was explicitly enabled.
 
 ### No-Plugin Fallback Gate
 
@@ -105,11 +105,10 @@ Do not make the user choose implementation details. Escalate only when the wrong
 
 ## Subagent Routing
 
-- `just-demand-researcher`: research only; no code changes.
-- `just-demand-coder`: scoped implementation; no commits.
 - `just-demand-tester`: verify requirements and fix only low-risk local issues within scope.
 - `just-demand-advisor`: independent analysis and advisory for difficult or cross-boundary problems; no direct large-scale implementation.
-- Documentation, decisions, durable notes, and summaries are owned by the main agent or produced as part of a `coder`/`advisor` task. There is no standalone docs subagent.
+- `just-demand-researcher` and `just-demand-coder`: compatibility-only roles for a recorded legacy assignment or explicit user request.
+- Documentation, decisions, durable notes, research, implementation, and summaries are owned by the main agent. There is no standalone docs subagent.
 
 ## Subagent Unavailable Handling
 

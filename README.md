@@ -83,12 +83,12 @@ user
   |  intent / constraints / approval
   v
 main agent
-  |  task shape / context / dispatch / closure
+  |  product / research / architecture / implementation / closure
   +------------------------------+
   |                              |
   v                              v
-researcher / coder / tester / advisor
-  |  evidence / implementation / checks / tradeoffs
+tester                         advisor
+  |  checks                       |  tradeoffs
   +------------------------------+
                  v
           main agent consolidates
@@ -114,15 +114,13 @@ request
 | Role           | Owns                                                              | Does not own                                                                   |
 | -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | **User**       | Goals, constraints, tradeoff preferences, final approval          | Internal routing mechanics, subagent orchestration, workflow state writes      |
-| **Main agent** | Clarification, task shaping, implementation ownership, routing, closure, summaries | Delegation when its total cost or quality risk is uncertain |
-| **Researcher** | Scoped source collection and factual summarization                | Analysis, recommendations, code changes, task promotion, verification closeout |
-| **Coder**      | Scoped implementation inside the task boundary                    | Workflow ownership, task lifecycle decisions, cross-task re-planning           |
+| **Main agent** | Product interpretation, research, architecture, implementation, routing, closure | Delegation when its total cost or quality risk is uncertain |
 | **Tester**     | Acceptance verification, failure discovery, regression checking   | Rewriting the implementation plan or reassigning ownership                     |
 | **Advisor**    | Fresh-context framing, tradeoff analysis, cross-boundary judgment | Executing the task or closing it unilaterally                                  |
 
 The user defines goals, constraints, and final approval. The main agent owns workflow shape, routing, and closure. Subagents execute focused role contracts inside the task boundary.
 
-Subagents are selective accelerators. Dispatch requires six eligibility gates and all three net-benefit checks to pass; otherwise the main agent executes directly, regardless of context length or file count. Fast models are limited to mechanical tasks, while frontend quality and other judgment-heavy work stay with the main agent by default.
+Tester and advisor are selective accelerators. Dispatch requires six eligibility gates and all three net-benefit checks to pass; otherwise the main agent executes directly, regardless of context length or file count. Researcher and coder remain installed only for legacy tasks that already record those roles or when the user explicitly requests one; new tasks never route to them implicitly.
 
 ### Main Agent Output Style
 
@@ -174,10 +172,10 @@ These sources agree on the same role model so the main agent stays a dispatcher 
 
 Subagents are not miniature workflow owners. Their inner loops are role-specific execution contracts:
 
-- **researcher**: gather evidence and map the problem space.
-- **coder**: implement the scoped change.
 - **tester**: verify the task against acceptance criteria.
 - **advisor**: frame hard decisions and cross-boundary tradeoffs.
+
+The legacy `researcher` and `coder` definitions are compatibility surfaces, not members of the default team.
 
 They do not independently create, promote, close, or re-route tasks. That keeps lifecycle ownership centralized and prevents role drift.
 

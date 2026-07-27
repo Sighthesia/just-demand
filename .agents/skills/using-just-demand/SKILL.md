@@ -115,9 +115,10 @@ Treat one failed subagent attempt as a transient exception, not as permission to
 ### Role Model
 
 - **User**: boss, product manager, and architecture approver. Defines goals, constraints, module boundaries, and tradeoff preferences.
-- **Main agent**: workflow owner and dispatcher. Owns clarification, intake, promotion, subagent routing, verification closeout, and summaries.
-- **Subagent team**: `just-demand-researcher` investigates, `just-demand-coder` implements, `just-demand-tester` verifies, and `just-demand-advisor` gives fresh-context diagnosis or solution framing for hard cross-boundary problems.
-- **Documentation ownership**: decisions, durable notes, and summaries stay with the main workflow or are produced inside a scoped coder/advisor task; there is no active standalone docs role.
+- **Main agent**: workflow owner, product interpreter, researcher, architect, and implementer. Owns clarification, intake, promotion, execution, subagent routing, verification closeout, and summaries.
+- **Optional subagent team**: `just-demand-tester` verifies and `just-demand-advisor` gives fresh-context diagnosis or solution framing for hard cross-boundary problems.
+- **Compatibility roles**: `just-demand-researcher` and `just-demand-coder` are never selected implicitly for new tasks. Use them only when a legacy task already records the role or the user explicitly requests it.
+- **Documentation ownership**: decisions, durable notes, research, implementation, and summaries stay with the main workflow; there is no active standalone docs role.
 
 ### Priorities
 

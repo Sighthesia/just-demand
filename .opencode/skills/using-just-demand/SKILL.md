@@ -131,8 +131,9 @@ Treat one failed subagent attempt as a transient exception, not as permission to
 This section summarizes the role contract. For the full model including default ambiguity, effect-first communication, mismatch optioning, and reflection triggers, see `docs/workflow-spec.md`.
 
 - **User**: boss, product manager, and architecture approver. Defines goals, constraints, module boundaries, and tradeoff preferences. The user does not write implementation plans, read diffs line by line, or compose deviation descriptions from scratch.
-- **Main agent**: workflow owner and dispatcher. Owns clarification, intake, promotion, subagent routing, verification closeout, and summaries. Reports in effect-first style by default; implementation detail is secondary.
-- **Subagent team**: `just-demand-researcher` investigates, `just-demand-coder` implements, `just-demand-tester` verifies, and `just-demand-advisor` gives fresh-context diagnosis or solution framing for hard cross-boundary problems.
+- **Main agent**: workflow owner, product interpreter, researcher, architect, and implementer. Owns clarification, intake, promotion, execution, subagent routing, verification closeout, and summaries. Reports in effect-first style by default; implementation detail is secondary.
+- **Optional subagent team**: `just-demand-tester` verifies and `just-demand-advisor` gives fresh-context diagnosis or solution framing for hard cross-boundary problems.
+- **Compatibility roles**: `just-demand-researcher` and `just-demand-coder` are never selected implicitly for new tasks. Use them only when a legacy task already records the role or the user explicitly requests it.
 - **Documentation ownership**: reusable lessons become skills, and task-only decisions stay in the archive or task-local notes; there is no active standalone docs role.
 
 ### Priorities

@@ -513,15 +513,16 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue((task_dir / "context.md").is_file())
             # decisions.md is NOT created for v2 contract tasks
             self.assertTrue((task_dir / "open_questions.md").is_file())
-            self.assertTrue((task_dir / "research.md").is_file())
+            self.assertFalse((task_dir / "research.md").exists())
             self.assertTrue((task_dir / "implement.md").is_file())
             self.assertTrue((task_dir / "verify.md").is_file())
             self.assertTrue((task_dir / "outputs").is_dir())
-            self.assertTrue((task_dir / "research").is_dir())
+            self.assertFalse((task_dir / "research").exists())
 
             task = read_json(task_dir / "task.json")
             self.assertEqual(task["source_intake_id"], intake["intake_id"])
             self.assertEqual(task["status"], "planning")
+            self.assertEqual(task["subagent_routing"], "main-agent-default")
             # V2 contract format
             self.assertEqual(task["contract"]["outcome"]["goal"], "Build an OpenCode-first local workflow runtime.")
             self.assertEqual(task["contract"]["outcome"]["acceptance_criteria"], ["Workspace intake can be promoted to a formal task."])
@@ -1612,7 +1613,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertIn("next_actions", payload)
             self.assertTrue(any("list-active" in action for action in payload["next_actions"]))
-            self.assertTrue(any("just-demand-* subagent" in action for action in payload["next_actions"]))
+            self.assertTrue(any("main agent owns research and implementation" in action.lower() for action in payload["next_actions"]))
             self.assertEqual(read_json(root / ".just-demand" / "state" / "state.json")["current_task_id"], task_id)
 
     def test_cli_promote_and_select_task_include_next_actions_as_json(self):
@@ -1646,7 +1647,7 @@ class WorkflowCoreTests(unittest.TestCase):
             task_id = promote_payload["task_id"]
             self.assertIn("next_actions", promote_payload)
             self.assertTrue(any("list-active" in action for action in promote_payload["next_actions"]))
-            self.assertTrue(any("3+ files" in action for action in promote_payload["next_actions"]))
+            self.assertTrue(any("main agent owns research and implementation" in action.lower() for action in promote_payload["next_actions"]))
             self.assertTrue(any("context files" in action for action in promote_payload["next_actions"]))
 
             mark_task(root, task_id, "paused")

@@ -23,6 +23,8 @@ import {
 
 const SUPPORTED = new Set(["just-demand-researcher", "just-demand-coder", "just-demand-tester", "just-demand-advisor"])
 const WRITABLE_SUBAGENTS = new Set(["just-demand-coder", "just-demand-tester"])
+const COMPATIBILITY_ONLY_SUBAGENTS = new Set(["just-demand-researcher", "just-demand-coder"])
+const EXPLICIT_COMPATIBILITY_MARKER = "JUST_DEMAND_EXPLICIT_LEGACY_ROLE"
 
 // Markers to detect if prompt has already been injected with workflow context.
 // Keep the legacy header to avoid duplicate injection across old prompts.
@@ -97,6 +99,24 @@ export default async ({ directory }) => {
           content: `Subagent ${subagentName} dispatch: no active task selected. Injection skipped.`,
         })
         return
+      }
+      const task = readTaskJson(directory, taskId)
+      const assignedSubagents = Array.isArray(task?.assigned_subagents) ? task.assigned_subagents : []
+      const legacyTask = !task?.subagent_routing
+      const explicitlyRequested = String(args.prompt || "").includes(EXPLICIT_COMPATIBILITY_MARKER)
+      if (
+        COMPATIBILITY_ONLY_SUBAGENTS.has(subagentName)
+        && !legacyTask
+        && !assignedSubagents.includes(subagentName)
+        && !explicitlyRequested
+      ) {
+        debugLog("subagent.tool.before.block", { reason: "compatibility_only_role", task_id: taskId, workflow_subagent: subagentName }, directory)
+        throw new Error(
+          `Blocked ${subagentName}: this compatibility-only role is not part of the default route for new tasks. The main agent owns research and implementation. Use tester/advisor when selective dispatch is beneficial, or include ${EXPLICIT_COMPATIBILITY_MARKER} only when the user explicitly requested this legacy role.`,
+        )
+      }
+      if (explicitlyRequested) {
+        args.prompt = String(args.prompt || "").replace(EXPLICIT_COMPATIBILITY_MARKER, "").trim()
       }
       const reminderState = getReminderState(directory, sessionId)
       const resumedTaskId = reminderState.subagent_unavailable_pending

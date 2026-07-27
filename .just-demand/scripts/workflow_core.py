@@ -1231,6 +1231,7 @@ def default_task_json_v2(
         "current_step": "clarify",
         "owner_session": "main",
         "assigned_subagents": [],
+        "subagent_routing": "main-agent-default",
         "contract": contract,
         "constraints": [],
         "validation_revision": None,
@@ -1351,6 +1352,7 @@ def default_task_json(
         "current_step": "clarify",
         "owner_session": "main",
         "assigned_subagents": [],
+        "subagent_routing": "main-agent-default",
         "goal": goal,
         "constraints": [],
         "acceptance_criteria": acceptance_criteria,
@@ -1796,14 +1798,12 @@ def promote_to_task(
         write_json_atomic(tmp_path / "task.json", task_data)
         for name, content in {
             "context.md": render_context_markdown(task_data),
-            "research.md": render_research_markdown(task_data),
             "open_questions.md": _render_open_questions_simple(contract.get("open_questions", [])),
             "implement.md": render_implementation_plan_markdown(task_data, task_data["subtasks"]),
             "verify.md": render_verify_markdown(task_data),
         }.items():
             (tmp_path / name).write_text(content, encoding="utf-8")
         (tmp_path / "outputs").mkdir()
-        (tmp_path / "research").mkdir()
         # events.jsonl starts empty
         (tmp_path / "events.jsonl").write_text("", encoding="utf-8")
 

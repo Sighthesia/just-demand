@@ -2988,6 +2988,88 @@ test("state asks retry or skip after subagent becomes unavailable", async () => 
 // ---------------------------------------------------------------------------
 // subagent-context: only injects for supported workflow subagents
 // ---------------------------------------------------------------------------
+test("subagent-context blocks compatibility-only roles for new tasks by default", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    status: "planning",
+    subagent_routing: "main-agent-default",
+    assigned_subagents: [],
+    clarification: { scope: "Feature scope." },
+  }))
+  const plugin = await subagentContextFactory({ directory: root })
+
+  await assert.rejects(
+    plugin["tool.execute.before"](
+      { tool: "Task" },
+      { args: { subagent_type: "just-demand-coder", prompt: "Do the work" } },
+    ),
+    /compatibility-only role is not part of the default route/i,
+  )
+  await assert.rejects(
+    plugin["tool.execute.before"](
+      { tool: "Task" },
+      { args: { subagent_type: "just-demand-researcher", prompt: "Research this" } },
+    ),
+    /compatibility-only role is not part of the default route/i,
+  )
+})
+
+test("subagent-context allows an explicitly requested compatibility role for a new task", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: research topic")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    status: "planning",
+    subagent_routing: "main-agent-default",
+    assigned_subagents: [],
+  }))
+  const plugin = await subagentContextFactory({ directory: root })
+  const output = {
+    args: {
+      subagent_type: "just-demand-researcher",
+      prompt: "JUST_DEMAND_EXPLICIT_LEGACY_ROLE\nResearch this",
+    },
+  }
+
+  await plugin["tool.execute.before"]({ tool: "Task" }, output)
+
+  assert.match(output.args.prompt, /# Just Demand Workflow/)
+  assert.match(output.args.prompt, /Research this/)
+  assert.doesNotMatch(output.args.prompt, /JUST_DEMAND_EXPLICIT_LEGACY_ROLE/)
+})
+
+test("subagent-context allows a compatibility role already recorded on the task", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal: build feature")
+  writeFileSync(join(taskDir, "implement.md"), "# Implement\nSteps")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    id: "task-a",
+    status: "planning",
+    subagent_routing: "main-agent-default",
+    assigned_subagents: ["just-demand-coder"],
+    clarification: { scope: "Feature scope." },
+  }))
+  const plugin = await subagentContextFactory({ directory: root })
+  const output = { args: { subagent_type: "just-demand-coder", prompt: "Resume work" } }
+
+  await plugin["tool.execute.before"]({ tool: "Task" }, output)
+
+  assert.match(output.args.prompt, /# Just Demand Workflow/)
+  assert.match(output.args.prompt, /Resume work/)
+})
+
 test("subagent-context injects context for supported subagent type", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)

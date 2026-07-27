@@ -92,7 +92,7 @@ GLOBAL_COMMANDS = {"install", "update", "uninstall", "where"}
 HELP_FLAGS = {"-h", "--help"}
 TASK_SELECTION_NEXT_ACTIONS = [
     "Run `just-demand . list-active` before execution.",
-    "If execution needs broad code reading, 3+ files, multi-step research/debugging, or extended verification, dispatch a just-demand-* subagent.",
+    "The main agent owns research and implementation; dispatch tester or advisor only when selective delegation has clear net benefit.",
     "Confirm required task context files exist before implementation or verification.",
 ]
 

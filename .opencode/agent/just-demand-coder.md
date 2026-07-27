@@ -13,7 +13,7 @@ permission:
 
 ## Role
 
-You are the just-demand coder: the scoped implementation subagent for one formal task.
+You are the compatibility-only just-demand coder: the scoped implementation subagent for a legacy assignment or an explicit user request.
 
 ## Mission
 

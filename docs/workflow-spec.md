@@ -34,7 +34,7 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
     2. **Boundary independence**: the task can be completed independently without cascading decisions into other modules or scope.
     3. **Context compressibility**: the essential context (relevant code, tradeoffs, constraints) fits within a subagent prompt without losing the critical signal.
     4. **Result verifiability**: acceptance criteria are concrete, observable, and can be checked without the subagent reinterpreting user intent.
-    5. **Capability match**: the subagent's role (researcher/coder/tester/advisor) cleanly fits the work shape — no need for cross-role improvisation.
+    5. **Capability match**: the selected optional role (`tester` or `advisor`) cleanly fits the work shape — no need for cross-role improvisation.
     6. **Failure recoverability**: a failed or drifted subagent result can be detected cheaply and costs at most one retry before the main agent can safely take over.
 
     ### Three Net-Benefit Questions (ALL must be "yes")
@@ -120,7 +120,7 @@ The main agent is the **workflow owner, delivery lead, and dispatcher**. The mai
 - Recognizes that every user request starts as incomplete intent and must be progressively clarified.
 - Leads clarification with effect-shaping questions ("what should you see?", "what happens now instead?"), not permission questions ("can I proceed?").
 - Reveals the expected visible effect before task promotion or execution — the user approves what they will see, not how it will be built.
-- Owns task shaping, routing, recovery, verification closeout, summaries, and the user-expectation contract.
+- Owns product interpretation, research, architecture, implementation, task shaping, routing, recovery, verification closeout, summaries, and the user-expectation contract.
 - Reports in effect-first style: visible result, scope, acceptance cues, and next user choice — not implementation details.
 - Dispatches subagents only when all six eligibility gates and all three net-benefit questions pass; otherwise owns the work directly, even for long-context or multi-file tasks.
 - Routes vague mismatch feedback into optionized deviation resolution before re-implementing.
@@ -130,10 +130,10 @@ The main agent is the **workflow owner, delivery lead, and dispatcher**. The mai
 
 Subagents execute focused role contracts inside a task boundary. They do not create, promote, close, or re-route tasks.
 
-- **Researcher**: source collection, browsing, and factual summarization only — no analysis, diagnosis, or recommendation.
-- **Coder**: scoped implementation inside the task boundary.
 - **Tester**: acceptance verification and low-risk local fixes.
 - **Advisor**: fresh-context framing and cross-boundary tradeoff analysis.
+
+`just-demand-researcher` and `just-demand-coder` are compatibility-only roles. New tasks do not route to them or require their context projections. Their definitions remain installed so a legacy task that already records either role can resume, or the user can explicitly request one. Workload, file count, context length, and task type never implicitly enable these roles.
 
 Fast-model assignments are limited to mechanical work. Frontend visual, interaction, and copy quality remain with the main agent unless the target is explicit and the selected model is capable of meeting it.
 
@@ -207,12 +207,12 @@ Before implementation or verification:
 4. Ensure the task context package exists when a subagent is selected.
 5. Apply the six eligibility gates and three net-benefit questions before dispatching a subagent. Dispatch only when all nine answers pass. The main agent executes when any answer fails or is uncertain, including for long-context or multi-file work. Small work stays in the main session.
 
-Required task context files:
+Required task context files for the default optional roles:
 
-- `just-demand-coder`: `context.md`, `implement.md`
 - `just-demand-tester`: `context.md`, `verify.md`
-- `just-demand-researcher`: `context.md`
 - `just-demand-advisor`: `context.md`
+
+Compatibility dispatch retains the historical projections: `just-demand-coder` uses `context.md` plus `implement.md`, and `just-demand-researcher` uses `context.md`. These files are compatibility inputs, not new-task routing requirements.
 
 If required context files are missing, stop and refresh the package before execution.
 

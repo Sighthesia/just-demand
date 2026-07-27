@@ -36,8 +36,8 @@ user goal
 ### Identity Model
 
 - **User**: boss, product manager, and architecture approver.
-- **Main agent**: workflow owner, delivery lead, and dispatcher.
-- **Subagent team**: researcher, coder, tester, and advisor.
+- **Main agent**: workflow owner, delivery lead, researcher, architect, and implementer.
+- **Optional subagent team**: tester and advisor.
 
 The user defines goals, constraints, and final approval. The main agent owns workflow shape, routing, and closure. Subagents execute focused role contracts inside the task boundary.
 
@@ -91,10 +91,10 @@ These sources agree on the same role model so the main agent stays a dispatcher 
 
 Subagents are not miniature workflow owners. Their inner loops are role-specific execution contracts:
 
-- **researcher**: collect and summarize sources — no analysis, diagnosis, or recommendation.
-- **coder**: implement the scoped change.
 - **tester**: verify the task against acceptance criteria.
 - **advisor**: frame hard decisions and cross-boundary tradeoffs.
+
+Compatibility-only `researcher` and `coder` definitions remain available for legacy tasks that already record those roles or when the user explicitly requests one. New tasks never route to them implicitly.
 
 They do not independently create, promote, close, or re-route tasks. That keeps lifecycle ownership centralized and prevents role drift.
 
@@ -140,7 +140,7 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 - Main-agent default: lead with the likely effect and the recommended option first, then ask only for the decision that would change visible behavior, architecture, compatibility, security, cost, or long-term maintainability.
 - Subagent dispatch requires all six hard gates and all three benefit questions to pass. The main agent executes any work when an answer fails or is uncertain. Fast models are limited to mechanical tasks; frontend visual/interaction/copy quality stays with the main agent by default.
 - The user is the boss/product lead/architecture approver; the main agent owns workflow dispatch, verification, and closure.
-- Subagent inner loops are execution contracts, not autonomous lifecycle owners: they may research, implement, verify, or advise within scope, but they do not create/promote/close tasks or dispatch other subagents.
+- Subagent inner loops are execution contracts, not autonomous lifecycle owners: tester verifies and advisor advises within scope, but neither creates, promotes, closes, or re-routes tasks.
 
 ## Skill-Only Fallback
 
@@ -186,11 +186,10 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 
 ## Task Context Rules
 
-- Required files are enforced by plugin injection:
-- `just-demand-coder`: `context.md`, `implement.md`
+- Required files for default optional roles are enforced by plugin injection:
 - `just-demand-tester`: `context.md`, `verify.md`
-- `just-demand-researcher`: `context.md`
 - `just-demand-advisor`: `context.md`
+- Compatibility dispatch keeps the historical coder (`context.md`, `implement.md`) and researcher (`context.md`) requirements.
 - If required files are missing, stop and create/refresh the task context package; do not silently continue inline.
 
 ## Repository Map
@@ -205,11 +204,10 @@ Think of Just Demand as an operating system for agent work: the docs explain the
 
 ## Subagent Boundaries
 
-- `just-demand-researcher`: research only; no code changes.
-- `just-demand-coder`: scoped implementation only; no commits; do not mutate `.just-demand/state/` except through scripts.
 - `just-demand-tester`: verify against the task brief; may fix only low-risk local issues.
 - `just-demand-advisor`: independent analysis and advisory for difficult or cross-boundary problems; no direct large-scale implementation.
-- Documentation, decisions, durable notes, and summaries are owned by the main agent or produced as part of a `coder`/`advisor` task. There is no standalone docs subagent.
+- `just-demand-researcher` and `just-demand-coder` are compatibility-only: allow them only for tasks that already record the role or when the user explicitly requests it.
+- Documentation, decisions, durable notes, research, implementation, and summaries are owned by the main agent. There is no standalone docs subagent.
 - If a suitable `just-demand-*` subagent should be used but is unavailable, ask whether to retry now or skip one turn; do not quietly abandon the subagent path.
 
 ## Commit And Archive Expectations
