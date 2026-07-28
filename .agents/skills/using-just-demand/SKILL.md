@@ -60,7 +60,7 @@ When material uncertainty exists, clarification is not optional and not a nice-t
 - correction feedback says the result drifted but does not yet pin down the desired behavior
 - you can imagine a reasonable implementation, but a different reasonable interpretation would produce a user-visible mismatch
 
-Do not proceed just because you can guess a plausible path. No task promotion, subagent dispatch, or code edits until final expected effect and final implementation plan are approved.
+Do not proceed just because you can guess a plausible path. Material work needs one approved user-expectation contract; after promotion, continue through execution, verification, and closeout without routine re-approval.
 
 Before asking the user for implementation facts, inspect relevant project evidence with read-only tools. Translate the result into normally 3-7 user-facing change surfaces: what can change, the visible effect, the practical tradeoff or failure mode, and material coupling. Keep files, symbols, modules, parameters, and evidence sources as secondary detail; never require the user to supply them when they are discoverable.
 
@@ -100,6 +100,7 @@ Use this reset when the user keeps providing new samples, when the conversation 
 - Subagents execute focused work from injected task context.
 - Scripts are the write path for `.just-demand/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
+- Approval is persisted in the formal task contract. Approval words alone never bypass missing structured authorization.
 - Subagent dispatch requires all six hard eligibility gates and all three net-benefit questions to pass. Any failed or uncertain answer means the main agent executes. The plugin enforces workflow readiness, not the execution-owner choice.
 - Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
 
@@ -216,9 +217,7 @@ When no formal task exists, the agent chooses from three explicit routes:
 
 1. **Direct answer**: if the turn is a simple question or non-work inquiry, respond directly without workflow entry.
 2. **Enter workflow (default for real work)**: create an intake via `create-intake`, clarify via `socratic-clarification`, then `promote` to a formal task.
-3. **Skip workflow override**: include an explicit phrase like "skip workflow" or "workflow override" to consciously bypass the workflow path and proceed inline.
-
-Route 2 is the default when concrete work, bug reports, or implementation requests are detected. Route 3 is an explicit override that bypasses the `workflow_entry_required` or `execution_needed` block messages.
+Concrete work, bug reports, and implementation requests enter the workflow. Natural-language phrases never bypass structured task authorization.
 
 ### Selective Subagent Dispatch
 

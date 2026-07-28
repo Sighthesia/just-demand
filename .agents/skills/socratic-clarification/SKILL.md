@@ -15,7 +15,7 @@ Do NOT promote a task, dispatch a subagent, edit files, or finalize an implement
 
 ## Anti-Pattern: "This Is Too Simple To Need Clarification"
 
-Every request goes through this process. "Simple" requests still need a short final artifact and explicit approval.
+Every request is classified, but clear, reversible, low-risk work proceeds without an approval pause. Material work receives one contract approval before continuous execution.
 
 ## Anti-Rationalization Rules
 

@@ -88,6 +88,7 @@ Checks: <routine verification detail only if failed or explicitly needed>
 ```
 
 - **User action**: usually "none" during execution unless a real product/architecture/risk decision is needed.
+- **Continuous execution**: a valid structured task authorization covers implementation, verification, and closeout; do not ask the user to approve internal lifecycle transitions.
 - **Recommended default**: if blocked, state the recommended next move before alternatives.
 - **Analysis summary shape**: for analysis or diagnosis updates, lead with the result and concise status before any verification details; keep checks and transcripts below the fold unless something failed.
 - **Visible or diagram acceptance first**: for UI work, state the expected on-screen behavior, rejected anti-outcome, and visible side effects before routine checks; for diagram work, state the intended diagram meaning, diagram acceptance, and expression side effects before routine checks.
