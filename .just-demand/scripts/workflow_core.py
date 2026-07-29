@@ -2964,7 +2964,7 @@ def _checkpoint_commit_message(task: dict[str, Any]) -> str:
         prefix = "feat"
     else:
         prefix = "chore"
-    subject = slugify(str(task.get("title") or task.get("id") or "task")).replace("-", " ")
+    subject = " ".join(str(task.get("title") or task.get("id") or "task").split())
     return f"{prefix}: {subject}"
 
 

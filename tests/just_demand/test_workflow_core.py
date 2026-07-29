@@ -1350,7 +1350,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(task["checkpoint_commit"]["created"])
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: scoped commit")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: Scoped commit")
 
             committed_files = [line for line in git_stdout(root, "show", "--name-only", "--format=", "HEAD").splitlines() if line.strip()]
             self.assertEqual(committed_files, ["tracked.txt"])
@@ -1392,7 +1392,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("Checkpoint commit: yes", result.stderr)
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: cli checkpoint")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: CLI checkpoint")
 
     def test_complete_verification_reports_archive_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2148,7 +2148,7 @@ class WorkflowCoreTests(unittest.TestCase):
             )
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: no impact")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: No impact")
 
     def test_multiple_checkpoint_commits_per_task(self):
         """Same task should support multiple checkpoint commits over its lifecycle."""
@@ -2219,6 +2219,26 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(committed_files, ["task.txt"])
             self.assertIn("?? existing.txt", git_stdout(root, "status", "--short"))
 
+    def test_checkpoint_commit_preserves_chinese_task_title(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+
+            intake = create_intake(root, "保留完整标题", "Test Chinese commit title", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "实现 P0 诊断卡输出", "Test", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Title.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            (root / "tracked.txt").write_text("updated\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertEqual(result["checkpoint_commit"]["message"], "feat: 实现 P0 诊断卡输出")
+            self.assertRegex(git_stdout(root, "log", "--oneline", "-1"), r"^[0-9a-f]+ feat: 实现 P0 诊断卡输出$")
+
     def test_standalone_checkpoint_commit_cli(self):
         """Standalone checkpoint-commit CLI should create a commit without archiving."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -2259,7 +2279,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(active_dir.is_dir())
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: standalone cp")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: Standalone cp")
 
     def test_checkpoint_commit_fallback_note_in_events(self):
         """When no impact scope is set but changes exist, the commit should be created
