@@ -1350,7 +1350,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(task["checkpoint_commit"]["created"])
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint scoped commit")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: scoped commit")
 
             committed_files = [line for line in git_stdout(root, "show", "--name-only", "--format=", "HEAD").splitlines() if line.strip()]
             self.assertEqual(committed_files, ["tracked.txt"])
@@ -1392,7 +1392,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("Checkpoint commit: yes", result.stderr)
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint cli checkpoint")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: cli checkpoint")
 
     def test_complete_verification_reports_archive_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2135,7 +2135,7 @@ class WorkflowCoreTests(unittest.TestCase):
             create_validation_revision(root, task_id, "No impact.", ["C1"], ["E1"])
             start_execution(root, task_id, ["just-demand-coder"])
 
-            # Do NOT set impact — checkpoint should fall back to all changed files.
+            # Do NOT set impact — checkpoint should use changes after execution starts.
             (root / "tracked.txt").write_text("updated content\n", encoding="utf-8")
 
             result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
@@ -2144,11 +2144,11 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(result["checkpoint_commit"]["paths"], ["tracked.txt"])
             self.assertEqual(
                 result["checkpoint_commit"]["fallback_note"],
-                "all changed files (no explicit impact scope)",
+                "changed since execution baseline (no explicit impact scope)",
             )
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint no impact")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: no impact")
 
     def test_multiple_checkpoint_commits_per_task(self):
         """Same task should support multiple checkpoint commits over its lifecycle."""
@@ -2191,6 +2191,34 @@ class WorkflowCoreTests(unittest.TestCase):
             second_msg = log_lines[0]
             self.assertIn("multi commit", second_msg.lower())
 
+    def test_checkpoint_commit_excludes_changes_present_at_execution_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+            (root / "existing.txt").write_text("existing work\n", encoding="utf-8")
+
+            intake = create_intake(root, "Baseline commit", "Commit only task changes", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Baseline commit", "Commit only task changes", "implementation", ["Works"])
+            task_id = promoted["task_id"]
+
+            create_validation_revision(root, task_id, "Baseline.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            (root / "task.txt").write_text("task work\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"]["paths"], ["task.txt"])
+            self.assertEqual(
+                result["checkpoint_commit"]["fallback_note"],
+                "changed since execution baseline (no explicit impact scope)",
+            )
+            committed_files = [line for line in git_stdout(root, "show", "--name-only", "--format=", "HEAD").splitlines() if line.strip()]
+            self.assertEqual(committed_files, ["task.txt"])
+            self.assertIn("?? existing.txt", git_stdout(root, "status", "--short"))
+
     def test_standalone_checkpoint_commit_cli(self):
         """Standalone checkpoint-commit CLI should create a commit without archiving."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -2231,7 +2259,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertTrue(active_dir.is_dir())
 
             latest_log = git_stdout(root, "log", "--oneline", "-1")
-            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: checkpoint standalone cp")
+            self.assertRegex(latest_log, r"^[0-9a-f]+ feat: standalone cp")
 
     def test_checkpoint_commit_fallback_note_in_events(self):
         """When no impact scope is set but changes exist, the commit should be created
@@ -2249,13 +2277,16 @@ class WorkflowCoreTests(unittest.TestCase):
             create_validation_revision(root, task_id, "Fallback.", ["C1"], ["E1"])
             start_execution(root, task_id, ["just-demand-coder"])
 
-            # No impact set — commit should fall back to all changed files
+            # No impact set — commit should use the execution baseline.
             (root / "tracked.txt").write_text("fallback change\n", encoding="utf-8")
 
             result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
             self.assertTrue(result["checkpoint_commit"]["created"])
-            self.assertEqual(result["checkpoint_commit"].get("fallback_note"), "all changed files (no explicit impact scope)")
+            self.assertEqual(
+                result["checkpoint_commit"].get("fallback_note"),
+                "changed since execution baseline (no explicit impact scope)",
+            )
             task_events = [json.loads(line) for line in task_event_path(root, task_id).read_text(encoding="utf-8").splitlines() if line]
             created = [event for event in task_events if event["type"] == "checkpoint_commit_created"]
             self.assertGreaterEqual(len(created), 1)
@@ -2383,7 +2414,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn("Completion report:", cp_result.stderr)
             self.assertIn("Verification: passed", cp_result.stderr)
             self.assertIn("Checkpoint commit: yes", cp_result.stderr)
-            self.assertIn("all changed files (no explicit impact scope)", cp_result.stderr)
+            self.assertIn("changed since execution baseline (no explicit impact scope)", cp_result.stderr)
 
     def test_where_cli_prints_script_path_and_repo_root(self):
         import subprocess

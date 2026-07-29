@@ -2965,7 +2965,7 @@ def _checkpoint_commit_message(task: dict[str, Any]) -> str:
     else:
         prefix = "chore"
     subject = slugify(str(task.get("title") or task.get("id") or "task")).replace("-", " ")
-    return f"{prefix}: checkpoint {subject}"
+    return f"{prefix}: {subject}"
 
 
 def _record_checkpoint_commit_result(root: Path, task_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -3009,6 +3009,12 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         )
 
     all_changed = _parse_git_status_paths(status_result.stdout)
+    baseline = task.get("worktree_baseline", {})
+    baseline_paths = {
+        _normalize_repo_path(path)
+        for path in baseline.get("paths", [])
+        if isinstance(path, str) and _normalize_repo_path(path)
+    }
     impact_scope = [
         _normalize_repo_path(entry)
         for entry in task.get("impact", [])
@@ -3020,18 +3026,27 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
             path
             for path in all_changed
             if any(_path_matches_scope(path, scope) for scope in impact_scope)
+            and path not in baseline_paths
             and not _is_disallowed_checkpoint_path(path)
         ]
         fallback_note = None
     else:
-        # No explicit impact scope: fall back to all non-disallowed changed files.
-        # This matches the documented policy: impact scoping is recommended but not required.
+        # A task baseline keeps unrelated worktree changes out of later commits.
+        # Legacy tasks without a baseline preserve the historical all-path fallback.
         candidate_paths = [
             path
             for path in all_changed
+            if path not in baseline_paths
             if not _is_disallowed_checkpoint_path(path)
         ]
-        fallback_note = "all changed files (no explicit impact scope)" if candidate_paths else None
+        if candidate_paths:
+            fallback_note = (
+                "changed since execution baseline (no explicit impact scope)"
+                if baseline
+                else "all changed files (no explicit impact scope)"
+            )
+        else:
+            fallback_note = None
 
     candidate_paths = list(dict.fromkeys(candidate_paths))
     if not candidate_paths:
@@ -3563,6 +3578,14 @@ def start_execution(root: Path, task_id: str, subagents: list[str]) -> dict[str,
         "current_step": "execute",
         "assigned_subagents": subagents,
     }
+    if "worktree_baseline" not in task:
+        repo_check = _run_git(root, "rev-parse", "--is-inside-work-tree")
+        status_result = _run_git(root, "status", "--short")
+        if repo_check.returncode == 0 and repo_check.stdout.strip() == "true" and status_result.returncode == 0:
+            updates["worktree_baseline"] = {
+                "captured_at": utc_now(),
+                "paths": _parse_git_status_paths(status_result.stdout),
+            }
 
     task = update_task(root, task_id, updates)
 

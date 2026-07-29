@@ -284,7 +284,7 @@ Do not wait for perfect conditions. If the verified slice is clean, commit it.
 
 ### Impact scope recommendation (not a gate)
 
-Setting `impact` via `mark --impact PATH` scopes the commit to only task-related files. If impact is not set, the script commits all non-generated changed files automatically. Impact scoping is **recommended** for precision but **not required** for the commit to proceed.
+At execution start, the script records the existing worktree paths as a baseline. A later commit excludes those paths, so pre-existing work remains uncommitted while new task paths are committed. Setting `impact` via `mark --impact PATH` further narrows the eligible paths. Legacy tasks without a baseline retain the all-non-generated-files fallback.
 
 ### When NOT to commit
 
@@ -313,7 +313,7 @@ No manual `git status` / `git diff` / `git add` inspection is needed. The script
 
 ### Commit rules
 
-- Creates a local commit with a conventional message (`feat:`/`fix:`/`chore:` prefix matching task type).
+- Creates a local commit with a detailed conventional message (`feat:`/`fix:`/`chore:` prefix plus the task title); the message does not include `checkpoint`.
 - Never pushes automatically.
 - Multiple commits per task are supported — each clean verification checkpoint creates a new commit.
 
