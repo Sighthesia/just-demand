@@ -40,7 +40,7 @@ Capability defaults:
 - Architecture, product interpretation, cross-module judgment, and frontend visual/interaction/copy quality stay with the main agent by default.
 - Quality-sensitive work is dispatchable only when the observable target is explicit and the selected model can meet it.
 
-- Approval words like `批准`, `继续`, `同意`, `approved`, and `go ahead` only confirm the workflow direction; they do not authorize inline execution by themselves.
+- Approval words alone do not bypass readiness. A valid structured task authorization covers continuous execution, verification, and closeout; do not ask the user to approve internal lifecycle transitions.
 
 ## Output Handoff Rules
 
@@ -97,6 +97,7 @@ Checks: <routine verification detail only if failed or explicitly needed>
 ```
 
 - **User action**: usually "none" during execution unless a real product/architecture/risk decision is needed.
+- **Continuous execution**: after task authorization is valid, do not end a turn merely because intake, promotion, implementation, verification, or closeout changed phase. Stop only for a material contract deviation, unresolved blocker, failed safety boundary, or completion.
 - **Recommended default**: if blocked, state the recommended next move before alternatives.
 - **Analysis summary shape**: for analysis or diagnosis updates, lead with the result and concise status before any verification details; keep checks and transcripts below the fold unless something failed.
 - **Visible or diagram acceptance first**: for UI work, state the expected on-screen behavior, rejected anti-outcome, and visible side effects before routine checks; for diagram work, state the intended diagram meaning, diagram acceptance, and expression side effects before routine checks.
@@ -211,7 +212,7 @@ Before dispatching any implementation subagent, verify that the task is sufficie
 
 1. Check that `blocking_questions` in the task's clarification data is empty.
 2. Check that `scope`, `expected_behavior`, and `actual_behavior` (for bug work) are non-empty.
-3. For design and implementation tasks, check that `final_expected_effect`, `chosen_approach`, `final_implementation_plan`, and `approval` are non-empty.
+3. For design and implementation tasks, check that `final_expected_effect`, `chosen_approach`, the agent-owned `final_implementation_plan`, and structured task authorization are present.
 4. If any blocking question remains or critical fields are empty, DO NOT dispatch. Route back to clarification instead: update the intake with the gaps and ask the user.
 5. Do not guess what the user wants to fill in missing fields. Ask.
 6. When clarifying gaps, prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options.

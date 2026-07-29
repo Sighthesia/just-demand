@@ -25,7 +25,7 @@ SCHEMA_VERSION = "1.0"
 #   PROJECTION_VERSION    — rendered role-view format
 # ---------------------------------------------------------------------------
 TASK_RECORD_VERSION_V2 = "2.0"
-TASK_CONTRACT_VERSION = "1.0"
+TASK_CONTRACT_VERSION = "1.1"
 PROJECTION_VERSION = "1.0"
 
 # Contract field names that form the shared semantic core.
@@ -51,6 +51,17 @@ CONTRACT_ENGINEERING_FIELDS = frozenset({
 
 # All known contract fields.
 CONTRACT_ALL_FIELDS = CONTRACT_SHARED_FIELDS | CONTRACT_ENGINEERING_FIELDS
+
+MATERIAL_AUTHORIZATION_FIELDS = frozenset({
+    "scope",
+    "out_of_scope",
+    "invariants",
+    "anti_outcomes",
+    "final_expected_effect",
+    "chosen_approach",
+    "decisions",
+    "acceptance_criteria",
+})
 
 # Role-to-required-projection-files mapping.
 ROLE_PROJECTION_FILES: dict[str, list[str]] = {
@@ -91,6 +102,15 @@ def empty_contract() -> dict[str, Any]:
     """Return a blank v2 task contract."""
     return {
         "contract_version": TASK_CONTRACT_VERSION,
+        "contract_revision": 1,
+        "authorization": {
+            "status": "pending",
+            "scope": "task",
+            "approved_at": "",
+            "approved_by": "",
+            "approved_revision": 0,
+            "source": "",
+        },
         "provenance": {
             "raw_request": "",
             "intake_id": "",
@@ -141,6 +161,21 @@ def _safe_list(value: Any) -> list[str]:
     return []
 
 
+def contract_authorization_is_valid(contract: dict[str, Any]) -> bool:
+    """Return whether the user authorization covers the current contract revision."""
+    authorization = contract.get("authorization")
+    if not isinstance(authorization, dict):
+        return (
+            str(contract.get("contract_version", "1.0")) < TASK_CONTRACT_VERSION
+            and bool(_safe_str(contract.get("choices", {}).get("approval", "")))
+        )
+    revision = int(contract.get("contract_revision", 1) or 1)
+    return (
+        authorization.get("status") == "approved"
+        and int(authorization.get("approved_revision", 0) or 0) == revision
+    )
+
+
 def load_task_contract(task: dict[str, Any]) -> dict[str, Any]:
     """Load the semantic contract from a task record.
 
@@ -176,6 +211,15 @@ def load_task_contract(task: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "contract_version": TASK_CONTRACT_VERSION,
+        "contract_revision": 1,
+        "authorization": {
+            "status": "approved" if approval else "pending",
+            "scope": "task",
+            "approved_at": "",
+            "approved_by": "user" if approval else "",
+            "approved_revision": 1 if approval else 0,
+            "source": "legacy_approval" if approval else "",
+        },
         "provenance": {
             "raw_request": raw_req,
             "intake_id": _safe_str(task.get("source_intake_id", "")),
@@ -1160,6 +1204,15 @@ def build_contract_from_intake(
 
     contract: dict[str, Any] = {
         "contract_version": TASK_CONTRACT_VERSION,
+        "contract_revision": 1,
+        "authorization": {
+            "status": "approved" if approval else "pending",
+            "scope": "task",
+            "approved_at": utc_now() if approval else "",
+            "approved_by": "user" if approval else "",
+            "approved_revision": 1 if approval else 0,
+            "source": "explicit_user_approval" if approval else "",
+        },
         "provenance": {
             "raw_request": raw_request,
             "intake_id": intake_id,
@@ -2171,7 +2224,10 @@ def task_is_ready_for_execution(task: dict[str, Any]) -> bool:
             missing.append("Chosen Approach")
         if not str(clarification.get("final_implementation_plan", "") or "").strip():
             missing.append("Final Implementation Plan")
-        if not str(clarification.get("approval", "") or "").strip():
+        if _task_is_v2(task):
+            if not contract_authorization_is_valid(task.get("contract", {}) or {}):
+                missing.append("Authorization")
+        elif not str(clarification.get("approval", "") or "").strip():
             missing.append("Approval")
 
     # Contract-based execution checks (visible effect, safety boundary, etc.)
@@ -2232,7 +2288,10 @@ def get_missing_execution_fields(task: dict[str, Any], role: str | None = None) 
             missing.append("Chosen Approach")
         if not str(clarification.get("final_implementation_plan", "") or "").strip():
             missing.append("Final Implementation Plan")
-        if not str(clarification.get("approval", "") or "").strip():
+        if _task_is_v2(task):
+            if not contract_authorization_is_valid(task.get("contract", {}) or {}):
+                missing.append("Authorization")
+        elif not str(clarification.get("approval", "") or "").strip():
             missing.append("Approval")
 
     # Code-map readiness (role-gated: coder)
@@ -2332,6 +2391,8 @@ CLARIFICATION_UPDATE_FIELDS = frozenset({
     "actual_behavior",
     "reproduction",
     "scope",
+    "out_of_scope",
+    "invariants",
     "opening",
     "during_transition",
     "after_open",
@@ -2352,6 +2413,8 @@ CLARIFICATION_UPDATE_FIELDS = frozenset({
     "confidence",
     "escalation_reason",
     "approval",
+    "acceptance_criteria",
+    "decisions",
     "blocking_questions",
     "non_blocking_questions",
 })
@@ -2368,6 +2431,7 @@ _CLARIFICATION_TO_CONTRACT_PATH: dict[str, list[str]] = {
     "final_implementation_plan": ["choices", "final_implementation_plan"],
     "approach_options": ["choices", "approach_options"],
     "approval": ["choices", "approval"],
+    "acceptance_criteria": ["outcome", "acceptance_criteria"],
     "expected_behavior": ["engineering", "expected_behavior"],
     "actual_behavior": ["engineering", "actual_behavior"],
     "reproduction": ["engineering", "reproduction"],
@@ -2390,7 +2454,7 @@ _CLARIFICATION_TO_CONTRACT_PATH: dict[str, list[str]] = {
 
 def _parse_clarification_value(key: str, value: Any) -> Any:
     """Parse a clarification field value (list or scalar)."""
-    if key in {"blocking_questions", "non_blocking_questions", "decisions", "verification_cases", "work_items", "dependencies"}:
+    if key in {"blocking_questions", "non_blocking_questions", "decisions", "acceptance_criteria", "verification_cases", "work_items", "dependencies"}:
         if isinstance(value, list):
             return value
         if isinstance(value, str):
@@ -2458,13 +2522,57 @@ def update_task_clarification(root: Path, task_id: str, fields: dict[str, Any]) 
     if is_v2:
         # v2 path — write fields into the structured contract.
         contract = deepcopy(task.get("contract", empty_contract()))
+        material_change = False
         for key, value in fields.items():
             if key not in CLARIFICATION_UPDATE_FIELDS:
                 raise ValueError(f"Unknown clarification field: {key}")
             parsed = _parse_clarification_value(key, value)
 
+            path = _CLARIFICATION_TO_CONTRACT_PATH.get(key)
+            current = contract
+            if path:
+                for segment in path:
+                    current = current.get(segment) if isinstance(current, dict) else None
+            if key in MATERIAL_AUTHORIZATION_FIELDS and current != parsed:
+                material_change = True
+
             # Map to contract path
             _set_contract_field(contract, key, parsed)
+
+        if material_change:
+            contract["contract_version"] = TASK_CONTRACT_VERSION
+            contract["contract_revision"] = int(contract.get("contract_revision", 1) or 1) + 1
+            contract["authorization"] = {
+                "status": "pending",
+                "scope": "task",
+                "approved_at": "",
+                "approved_by": "",
+                "approved_revision": 0,
+                "source": "material_contract_change",
+            }
+
+        approval = _safe_str(contract.get("choices", {}).get("approval", ""))
+        if "approval" in fields:
+            contract["contract_version"] = TASK_CONTRACT_VERSION
+            if approval:
+                revision = int(contract.get("contract_revision", 1) or 1)
+                contract["authorization"] = {
+                    "status": "approved",
+                    "scope": "task",
+                    "approved_at": utc_now(),
+                    "approved_by": "user",
+                    "approved_revision": revision,
+                    "source": "explicit_user_approval",
+                }
+            else:
+                contract["authorization"] = {
+                    "status": "pending",
+                    "scope": "task",
+                    "approved_at": "",
+                    "approved_by": "",
+                    "approved_revision": 0,
+                    "source": "approval_cleared",
+                }
 
         update_task(root, task_id, {"contract": contract})
     else:

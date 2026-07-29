@@ -13,7 +13,6 @@ import {
   isDebugPromptFullEnabled,
   logPluginBootstrap,
   readTaskJson,
-  setToolGateSkipOverride,
   taskLooksLikeLongContextExecutionCandidate,
   taskNeedsCheckpointFollowUp,
   taskNeedsVerificationCloseout,
@@ -232,7 +231,7 @@ const lifecycleTransitionBlocked = (intent, activeTask, gateState) => {
   if (phase === WORKFLOW_PHASE.noTask) {
     return {
       phase: CONTROLLER_PHASE.route,
-      action: CONTROLLER_ACTION.block,
+      action: CONTROLLER_ACTION.remind,
       reason_code: gateState?.reason === "no_current_task_selected" ? "select_task_hint" : "workflow_entry_required",
       rewrite: { mode: "replace", preserve_original: true },
     }
@@ -241,7 +240,7 @@ const lifecycleTransitionBlocked = (intent, activeTask, gateState) => {
   if (intent === "complete" && phase !== WORKFLOW_PHASE.closeout) {
     return {
       phase: CONTROLLER_PHASE.close,
-      action: CONTROLLER_ACTION.block,
+      action: CONTROLLER_ACTION.remind,
       reason_code: phase === WORKFLOW_PHASE.verification ? "verification_closeout" : "execution_needed",
       rewrite: { mode: "replace", preserve_original: true },
     }
@@ -250,7 +249,7 @@ const lifecycleTransitionBlocked = (intent, activeTask, gateState) => {
   if ((intent === "start" || intent === "continue") && phase === WORKFLOW_PHASE.closeout) {
     return {
       phase: CONTROLLER_PHASE.close,
-      action: CONTROLLER_ACTION.block,
+      action: CONTROLLER_ACTION.remind,
       reason_code: taskNeedsCheckpointFollowUp(activeTask) ? "checkpoint_followup" : "verification_closeout",
       rewrite: { mode: "replace", preserve_original: true },
     }
@@ -259,7 +258,7 @@ const lifecycleTransitionBlocked = (intent, activeTask, gateState) => {
   if (intent === "skip" && phase !== WORKFLOW_PHASE.noTask) {
     return {
       phase: CONTROLLER_PHASE.route,
-      action: CONTROLLER_ACTION.block,
+      action: CONTROLLER_ACTION.remind,
       reason_code: phase === WORKFLOW_PHASE.verification || phase === WORKFLOW_PHASE.closeout ? "verification_closeout" : "execution_needed",
       rewrite: { mode: "replace", preserve_original: true },
     }
@@ -311,6 +310,8 @@ const reminderTypeFromReasonCode = (reasonCode) => {
       return "first_screen"
     case "select_task_hint":
       return "select_task_hint"
+    case "workflow_entry_required":
+      return "workflow_entry_required"
     default:
       return null
   }
@@ -326,15 +327,14 @@ const buildControllerDecision = (text, reminderState) => {
     }
   }
 
-  // Explicit workflow skip override: agent consciously overrides the workflow
-  // route to proceed inline. Overrides workflow-entry and lifecycle routing,
-  // but does not override subagent_unavailable_pending above.
+  // Natural-language skip requests are telemetry only. Authorization remains
+  // a structured task fact checked by the tool gate.
   if (textLooksLikeExplicitWorkflowSkip(text)) {
     return {
       phase: CONTROLLER_PHASE.route,
-      action: CONTROLLER_ACTION.allow,
-      reason_code: "workflow_skip_override",
-      rewrite: null,
+      action: CONTROLLER_ACTION.remind,
+      reason_code: "workflow_entry_required",
+      rewrite: { mode: "append" },
     }
   }
 
@@ -361,21 +361,20 @@ const buildControllerDecision = (text, reminderState) => {
   }
 
   const activeTask = reminderState.activeTask
+  if (activeTask && textLooksLikeCompletionClaim(text) && taskNeedsVerificationCloseout(activeTask)) {
+    return {
+      phase: CONTROLLER_PHASE.verify,
+      action: CONTROLLER_ACTION.block,
+      reason_code: "verification_closeout",
+      rewrite: { mode: "replace", preserve_original: true },
+    }
+  }
   const lifecycleDecision = lifecycleTransitionBlocked(detectWorkflowLifecycleIntent(text), activeTask, reminderState)
   if (lifecycleDecision) {
     return lifecycleDecision
   }
 
   if (activeTask) {
-    if (textLooksLikeCompletionClaim(text) && taskNeedsVerificationCloseout(activeTask)) {
-      return {
-        phase: CONTROLLER_PHASE.verify,
-        action: CONTROLLER_ACTION.block,
-        reason_code: "verification_closeout",
-        rewrite: { mode: "replace", preserve_original: true },
-      }
-    }
-
     // P1-2: Soften execution gate for clarify/design steps.
     // When status=executing but current_step is clarify or design,
     // produce a reminder instead of a hard block.
@@ -467,9 +466,9 @@ const buildControllerDecision = (text, reminderState) => {
 
     return {
       phase: CONTROLLER_PHASE.route,
-      action: CONTROLLER_ACTION.block,
+      action: CONTROLLER_ACTION.remind,
       reason_code: "workflow_entry_required",
-      rewrite: { mode: "replace", preserve_original: true },
+      rewrite: { mode: "append" },
     }
   }
 
@@ -562,8 +561,8 @@ const buildReminderLines = (type) => {
       ]
     case "workflow_entry_required":
       return [
-        "- This is concrete workflow work, but there is no formal task yet.",
-        "- Return to the workflow entry path first: use `using-just-demand`, then `socratic-clarification`, then `just-demand-intake` before continuing.",
+        "- Concrete write work still needs a formal task with structured authorization.",
+        "- Create or resume the task, then continue without another routine approval pause.",
       ]
     case "select_task_hint":
       return [
@@ -583,7 +582,6 @@ const buildReminderLines = (type) => {
 const appendReminder = (text, reminderState, reminderType) => {
   if (typeof text !== "string") return text
   if (!reminderType) return text
-  if (text.includes(REMINDER_HEADER)) return text
   if (reminderState.last_reminder_type === reminderType) return text
 
   updateReminderState(reminderState.directory, reminderState.sessionID, (state) => {
@@ -677,7 +675,6 @@ const blockWorkflowEntryRequired = (text, reminderState) => {
     "- Three routes:",
     "  · Enter workflow (recommended): `using-just-demand` → `socratic-clarification` → `just-demand-intake`",
     "  · Direct answer: if this is a simple question or non-work inquiry, restate it without work intent.",
-    "  · Skip workflow: include \"skip workflow\" or \"workflow override\" to proceed inline.",
     "",
     "Original response:",
     quotedText,
@@ -738,13 +735,6 @@ export default async ({ directory } = {}) => {
       }
       debugLog("state.chat.message.decision", decisionLog, workflowDirectory)
 
-      // Set one-shot tool gate skip override when the model explicitly
-      // bypasses the workflow. The next tool call within this turn will be
-      // allowed through the write gate without blocking.
-      if (controllerDecision.reason_code === "workflow_skip_override") {
-        setToolGateSkipOverride(workflowDirectory)
-      }
-
       const originalText = textPart.text
       const afterControllerText = applyControllerDecision(textPart.text, reminderState, controllerDecision)
       textPart.text = afterControllerText
@@ -752,7 +742,7 @@ export default async ({ directory } = {}) => {
       // First-screen output gate: gentle reminder when the model's response is long
       // but does not lead with a conclusion, recommendation, or result.
       // Only fires when the controller did not already block or replace the text.
-      if (controllerDecision.action !== CONTROLLER_ACTION.block && controllerDecision.reason_code !== "workflow_skip_override") {
+      if (controllerDecision.action !== CONTROLLER_ACTION.block) {
         const firstLine = originalText.trim().split("\n")[0] || ""
         const isLong = originalText.length > 400
         const hasConclusionFirst = /^(Result|结论|Status|状态|推荐|Recommendation|建议|Decision|Approach|方案|Done|完成):/im.test(firstLine)

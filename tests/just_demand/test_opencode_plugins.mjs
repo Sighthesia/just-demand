@@ -833,9 +833,9 @@ test("controller decision shape exposes phase action reason and rewrite", () => 
   const redirectDecision = buildControllerDecision("Please fix the bug in the API.", { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
   assert.deepEqual(redirectDecision, {
     phase: CONTROLLER_PHASE.route,
-    action: CONTROLLER_ACTION.block,
+    action: CONTROLLER_ACTION.remind,
     reason_code: "workflow_entry_required",
-    rewrite: { mode: "replace", preserve_original: true },
+    rewrite: { mode: "append" },
   })
 
   const remindDecision = buildControllerDecision("Please fix the bug in the API.", { activeTask: { id: "task-a", status: "planning" }, same_topic_turns: 0, subagent_unavailable_pending: false })
@@ -891,6 +891,27 @@ test("approval words do not unlock execution without concrete workflow intent", 
     assert.equal(decision.action, CONTROLLER_ACTION.allow)
     assert.equal(decision.reason_code, "no_op")
   }
+})
+
+test("execution readiness requires authorization for the current contract revision", () => {
+  const task = {
+    schema_version: "2.0",
+    type: "design",
+    contract: {
+      contract_version: "1.1",
+      contract_revision: 2,
+      authorization: { status: "approved", approved_revision: 1 },
+      outcome: { final_expected_effect: "Visible result" },
+      boundaries: { scope: "Feature scope" },
+      choices: { chosen_approach: "Approach A", final_implementation_plan: "1. Build", approval: "Approved" },
+      blocking_questions: [],
+      engineering: {},
+    },
+  }
+
+  assert.deepEqual(getMissingExecutionGateFields(task), ["Authorization"])
+  task.contract.authorization.approved_revision = 2
+  assert.deepEqual(getMissingExecutionGateFields(task), [])
 })
 
 test("workflow-entry narration detector allows command narration but not inline execution intent", () => {
@@ -1360,7 +1381,7 @@ test("injectWorkflowStateBanner appends no-task breadcrumb with allowed and bloc
   assert.match(result, /\[workflow-state\]/)
   assert.match(result, /task=none/)
   assert.match(result, /phase=no-task/)
-  assert.match(result, /next: bounded read-only discovery, clarification\/intake, direct answer, or explicit skip workflow/)
+  assert.match(result, /next: bounded read-only discovery, clarification\/intake, or direct answer/)
   assert.match(result, /blocked: start, continue, complete/)
 })
 
@@ -1410,20 +1431,20 @@ test("injectWorkflowStateBanner does not include overlap warning when overlappin
 })
 
 // ---------------------------------------------------------------------------
-// controller decision: explicit workflow skip override
+// controller decision: workflow skip prose is non-authoritative
 // ---------------------------------------------------------------------------
-test("controller decision allows explicit workflow skip override when no active task", () => {
+test("controller decision does not grant a tool-gate override from model prose", () => {
   const decision = buildControllerDecision(
     "I will skip the workflow and implement this inline.",
     { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false },
   )
   assert.equal(decision.phase, CONTROLLER_PHASE.route)
-  assert.equal(decision.action, CONTROLLER_ACTION.allow)
-  assert.equal(decision.reason_code, "workflow_skip_override")
-  assert.deepEqual(decision.rewrite, null)
+  assert.equal(decision.action, CONTROLLER_ACTION.remind)
+  assert.equal(decision.reason_code, "workflow_entry_required")
+  assert.deepEqual(decision.rewrite, { mode: "append" })
 })
 
-test("controller decision keeps explicit workflow override compatibility with active task", () => {
+test("controller decision treats workflow override prose as a reminder only", () => {
   const decision = buildControllerDecision(
     "I will skip the workflow and implement this inline.",
     {
@@ -1433,13 +1454,13 @@ test("controller decision keeps explicit workflow override compatibility with ac
     },
   )
   assert.equal(decision.phase, CONTROLLER_PHASE.route)
-  assert.equal(decision.action, CONTROLLER_ACTION.allow)
-  assert.equal(decision.reason_code, "workflow_skip_override")
+  assert.equal(decision.action, CONTROLLER_ACTION.remind)
+  assert.equal(decision.reason_code, "workflow_entry_required")
 })
 
-test("controller decision blocks lifecycle drift by workflow phase", () => {
+test("controller decision treats lifecycle prose as reminders while tool gates enforce state", () => {
   const noTask = buildControllerDecision("start the task", { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
-  assert.equal(noTask.action, CONTROLLER_ACTION.block)
+  assert.equal(noTask.action, CONTROLLER_ACTION.remind)
   assert.equal(noTask.reason_code, "workflow_entry_required")
 
   const executionTask = buildControllerDecision("complete the task now", {
@@ -1448,14 +1469,14 @@ test("controller decision blocks lifecycle drift by workflow phase", () => {
     subagent_unavailable_pending: false,
   })
   assert.equal(executionTask.action, CONTROLLER_ACTION.block)
-  assert.equal(executionTask.reason_code, "execution_needed")
+  assert.equal(executionTask.reason_code, "verification_closeout")
 
   const closeoutTask = buildControllerDecision("start another change", {
     activeTask: { id: "task-a", status: "done", current_step: "verify", verification_status: "passed", checkpoint_commit: { created: true } },
     same_topic_turns: 0,
     subagent_unavailable_pending: false,
   })
-  assert.equal(closeoutTask.action, CONTROLLER_ACTION.block)
+  assert.equal(closeoutTask.action, CONTROLLER_ACTION.remind)
   assert.equal(closeoutTask.reason_code, "verification_closeout")
 })
 
@@ -1532,7 +1553,7 @@ test("controller decision allows bounded Chinese code investigation when no acti
   assert.equal(decision.reason_code, "bounded_evidence_discovery")
 })
 
-test("controller decision still blocks investigation mixed with implementation when no active task", () => {
+test("controller decision reminds on investigation mixed with implementation when no active task", () => {
   const samples = [
     "I need to read through the source files before implementing the fix.",
     "让我检查一下源码然后修改实现。",
@@ -1540,7 +1561,7 @@ test("controller decision still blocks investigation mixed with implementation w
   for (const sample of samples) {
     const decision = buildControllerDecision(sample, { activeTask: null, same_topic_turns: 0, subagent_unavailable_pending: false })
     assert.equal(decision.phase, CONTROLLER_PHASE.route)
-    assert.equal(decision.action, CONTROLLER_ACTION.block)
+    assert.equal(decision.action, CONTROLLER_ACTION.remind)
     assert.equal(decision.reason_code, "workflow_entry_required")
   }
 })
@@ -1643,7 +1664,6 @@ test("state allows workflow-entry narration when active tasks exist but no curre
   assert.match(output.parts[0].text, /\[workflow-state\]/)
   assert.match(output.parts[0].text, /select-task/i)
   assert.doesNotMatch(output.parts[0].text, /workflow entry required/i)
-  assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
 })
 
 // ---------------------------------------------------------------------------
@@ -1792,7 +1812,7 @@ test("state appends clarification reminder for concrete request turns", async ()
   assert.match(output.parts[0].text, /\[workflow-state\].*task-a/)
 })
 
-test("state hard redirects concrete workflow work when no formal task exists", async () => {
+test("state preserves concrete work response and reminds when no formal task exists", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
@@ -1802,22 +1822,13 @@ test("state hard redirects concrete workflow work when no formal task exists", a
 
   await plugin["chat.message"]({ sessionID: "no-active-task" }, output)
 
-  assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
-  assert.match(output.parts[0].text, /no formal task yet/i)
-  assert.match(output.parts[0].text, /Enter workflow/i)
-  assert.match(output.parts[0].text, /Three routes/i)
-  assert.match(output.parts[0].text, /using-just-demand/i)
-  assert.match(output.parts[0].text, /socratic-clarification/i)
-  assert.match(output.parts[0].text, /just-demand-intake/i)
-  assert.match(output.parts[0].text, /direct answer/i)
-  assert.match(output.parts[0].text, /skip workflow/i)
-  assert.match(output.parts[0].text, /Original response:/i)
-  assert.match(output.parts[0].text, /> Please build a dashboard for alerts\./)
+  assert.match(output.parts[0].text, /\[just-demand reminder\]/i)
+  assert.match(output.parts[0].text, /structured authorization/i)
+  assert.match(output.parts[0].text, /^Please build a dashboard for alerts\./i)
   assert.notEqual(output.parts[0].text, "Please build a dashboard for alerts.")
-  assert.doesNotMatch(output.parts[0].text, /\[just-demand reminder\]/i)
 })
 
-test("state hard redirects Chinese concrete workflow work when no formal task exists", async () => {
+test("state preserves Chinese concrete work response and reminds when no formal task exists", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
@@ -1827,9 +1838,8 @@ test("state hard redirects Chinese concrete workflow work when no formal task ex
 
   await plugin["chat.message"]({ sessionID: "zh-no-active-task" }, output)
 
-  assert.match(output.parts[0].text, /\[just-demand workflow entry required\]/i)
-  assert.match(output.parts[0].text, /no formal task yet/i)
-  assert.match(output.parts[0].text, /just-demand-intake/i)
+  assert.match(output.parts[0].text, /\[just-demand reminder\]/i)
+  assert.match(output.parts[0].text, /structured authorization/i)
 })
 
 test("state reminds to select a current task when unfinished tasks exist", async () => {
@@ -4020,10 +4030,10 @@ test("intake fallback warning does not repeat on second intake use", async () =>
     { args: { patchText: "*** Update File: .just-demand/state/intake/demo.md\n## Scope\nSecond fallback.\n*** End Patch" } },
   )
 
-  // Second chat.message: warning should NOT appear (one-time per session)
+  // Second chat.message: the intake fallback warning should not repeat. The
+  // ordinary workflow-entry reminder may still appear.
   const secondOutput = { parts: [{ type: "text", text: "Continue" }] }
   await plugin["chat.message"]({ sessionID: "intake-dedup-test" }, secondOutput)
-  assert.doesNotMatch(secondOutput.parts[0].text, /\[just-demand reminder\]/)
   assert.doesNotMatch(secondOutput.parts[0].text, /update-intake-section/)
 })
 
@@ -4431,26 +4441,20 @@ test("state blocks write-like bash when skip override was consumed by previous c
   )
 })
 
-test("skip workflow override in chat.message sets tool gate skip for same-turn", async () => {
+test("skip workflow prose in chat.message does not set a tool gate override", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)
   writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
 
   const plugin = await stateFactory({ directory: root })
 
-  // Model says "skip workflow" — this should set the one-shot tool gate flag
+  // Model prose is non-authoritative and must not set a one-shot tool gate flag.
   const skipOutput = { parts: [{ type: "text", text: "I will skip the workflow and implement this inline." }] }
   await plugin["chat.message"]({ sessionID: "skip-gate-test" }, skipOutput)
 
   // The chat text should pass through without block (already tested elsewhere)
   assert.doesNotMatch(skipOutput.parts[0].text, /\[just-demand execution blocked\]/i)
 
-  // Now the next tool call should be allowed because of the skip flag
-  await assert.doesNotReject(
-    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
-  )
-
-  // But a second tool call should be blocked (one-shot consumed)
   await assert.rejects(
     plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out && touch out/file.txt" } }),
     /Blocked bash: there is no formal task yet\./,

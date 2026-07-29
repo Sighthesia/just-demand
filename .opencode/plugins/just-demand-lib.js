@@ -22,7 +22,7 @@ export const WORKFLOW_PHASE = Object.freeze({
 })
 const WORKFLOW_PHASE_ACTIONS = Object.freeze({
   [WORKFLOW_PHASE.noTask]: {
-    allowed: ["enter workflow", "direct answer", "skip workflow"],
+    allowed: ["enter workflow", "direct answer"],
     blocked: ["start", "continue", "complete"],
   },
   [WORKFLOW_PHASE.clarification]: {
@@ -802,7 +802,8 @@ export const isExternalGitRepoCommand = (command, directory) => {
 
 // ---------------------------------------------------------------------------
 // Skip-workflow tool gate override: one-shot per directory, set by
-// chat.message on explicit skip, consumed by next tool gate invocation.
+// Compatibility API for an explicit host-controlled override. Model-authored
+// chat text never sets this flag.
 // ---------------------------------------------------------------------------
 
 export const setToolGateSkipOverride = (directory) => {
@@ -1040,7 +1041,7 @@ export const formatWorkflowStateLines = (activeTaskId, activeTask, gateState) =>
   if (!activeTaskId && gateState?.reason === "no_current_task_selected") {
     lines.push("    next: bounded read-only discovery, or select-task/resume before execution")
   } else if (!activeTaskId) {
-    lines.push("    next: bounded read-only discovery, clarification/intake, direct answer, or explicit skip workflow")
+    lines.push("    next: bounded read-only discovery, clarification/intake, or direct answer")
   } else {
     lines.push(`    next: ${nextActions}`)
   }
@@ -1113,7 +1114,21 @@ export const getMissingExecutionGateFields = (task) => {
     if (!String(clarification.final_expected_effect || "").trim()) missing.push("Final Expected Effect")
     if (!String(clarification.chosen_approach || "").trim()) missing.push("Chosen Approach")
     if (!String(clarification.final_implementation_plan || "").trim()) missing.push("Final Implementation Plan")
-    if (!String(clarification.approval || "").trim()) missing.push("Approval")
+    if (isV2) {
+      const contract = task.contract || {}
+      const authorization = contract.authorization
+      const revision = Number(contract.contract_revision || 1)
+      const legacyAuthorization = !authorization
+        && String(contract.contract_version || "1.0") < "1.1"
+        && Boolean(String(clarification.approval || "").trim())
+      const validAuthorization = legacyAuthorization || (
+        authorization?.status === "approved"
+        && Number(authorization?.approved_revision || 0) === revision
+      )
+      if (!validAuthorization) missing.push("Authorization")
+    } else if (!String(clarification.approval || "").trim()) {
+      missing.push("Approval")
+    }
   }
 
   // Contract-based execution checks (visible effect, safety boundary, etc.)

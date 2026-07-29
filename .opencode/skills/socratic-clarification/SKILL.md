@@ -29,9 +29,9 @@ Do NOT promote a task, dispatch a subagent, edit files, or finalize an implement
 When uncertain whether work is low-risk or high-risk, default to the high-risk path (ask) rather than guessing wrong.
 </HARD-GATE>
 
-## Anti-Pattern: "This Is Too Simple To Need Clarification"
+## Risk-Proportional Clarification
 
-Every request goes through this process. "Simple" requests still need a short final artifact and explicit approval.
+Every request is classified, but only material decisions need a final approval artifact. Clear, reversible, low-risk work proceeds without an approval pause.
 
 ## Anti-Rationalization Rules
 
@@ -39,7 +39,7 @@ Do NOT rationalize skipping the hard gate for high-risk work:
 
 - "I already know what the user wants" -- for high-risk work, you still present the final artifact and get approval.
 - "The user said to just do it" -- for high-risk work, you still present the final expected effect and get explicit approval before code changes.
-- Approval words like `批准`, `继续`, `同意`, `approved`, and `go ahead` only authorize workflow entry and readiness checks; they do not authorize code changes on their own.
+- Approval words never bypass structured readiness. Once explicit approval is persisted in the promoted task contract, it authorizes continuous implementation, verification, and closeout inside that contract.
 - "This is a small change" -- small changes cause mismatches too. Evaluate risk level first, then follow the appropriate path.
 - "I can fix this while clarifying" -- no. Clarify first, then implement.
 - "The user is in a hurry" -- for low-risk work, proceed directly without asking; for high-risk work, a short artifact is faster than a mismatched implementation.
@@ -71,8 +71,8 @@ You MUST complete these steps in order. Do not skip steps.
 6. **Round 3: Constraints and boundaries** -- explore tradeoffs, edge cases, anti-outcomes.
 7. **Propose 2-3 approaches** -- with trade-offs and your recommendation, using defaults and concise options before asking for free-text explanation.
 8. **Capture final artifact** -- final expected effect, scope, anti-outcomes, chosen approach, final implementation plan, validation criteria, open questions.
-9. **Get user approval** -- explicit approval on the final artifact before any execution.
-10. **Promote or execute** -- only after approval, promote to a formal task when no ready task exists; begin execution only when formal execution readiness is satisfied.
+9. **Get user approval when material** -- explicit approval on the user-expectation contract; skip this pause for low-risk work.
+10. **Promote and continue** -- persist any required approval, promote to a formal task, and continue through execution and verification without another routine confirmation.
 11. **Reset on pivot** -- when analysis, advice, or diagnosis turns into implementation/code edits, re-open clarification and confirm the new boundary before editing.
 
 ## Relevant Change-Surface View

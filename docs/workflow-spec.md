@@ -61,11 +61,11 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
 
 10.  **Repeated mismatch triggers reflection.** If the same issue fails twice consecutively, the workflow stops blind patching and reassesses the premise, context, and task boundary. The main agent takes over by default; an `advisor` is optional only when the selective-dispatch gates and all net-benefit questions pass.
 
-11. **Risk-triggered confirmation.** Confirmation is not universal — it is proportional to risk. Low-risk work that does not change user-visible behavior, architecture, compatibility, security, cost, or long-term maintenance proceeds by default with a concise description and no permission request. Only decisions that affect those dimensions require explicit user choice with a recommended default.
+11. **Risk-triggered, contract-scoped confirmation.** Confirmation is not universal — it is proportional to risk. Low-risk work that does not change user-visible behavior, architecture, compatibility, security, cost, or long-term maintenance proceeds by default with a concise description and no permission request. For material work, one approval of the user-expectation contract authorizes task creation, promotion, implementation, verification, and closeout. Internal lifecycle transitions and engineering-plan changes do not require another approval.
 
     Low-risk (auto-proceed):
     - Read-only investigation: inspecting, reading, tracing, searching the codebase without modification.
-    - Small code edits: modifying roughly tens of lines of code with well-understood scope.
+    - Small code edits: modifying roughly tens of lines of code with well-understood, reversible scope.
     - Script-verifiable analysis: bug detection, data analysis, or checks that a local script can reliably pass/fail.
     - Standard verification: running existing tests, lint, or archive checks.
     - Evidence gathering: searching docs, grepping, collecting reproduction data.
@@ -73,7 +73,7 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
     - Routine summarization: reporting status, narrating findings, or compiling evidence.
 
     High-risk (must ask / recommend):
-    - Code modification: any edit that changes source, tests, configuration, or runtime files.
+    - Material code modification: edits that change the approved user-visible effect, scope, architecture, compatibility, security, cost, or long-term maintenance.
     - Scope expansion: changing or extending the current task boundary without explicit approval.
     - Architecture decisions: module boundaries, dependency direction, data ownership.
     - Compatibility impact: changes that affect interoperability with existing systems or formats.
@@ -82,7 +82,14 @@ Just Demand is designed for the AI-assisted coding era. Users express needs and 
     - Long-term maintenance: introducing new long-lived abstractions, public APIs, or conventions.
     - Irreversible actions: destructive git operations, file deletion, data destruction.
 
-    The main agent applies this classification before each user interaction. When the work falls entirely under low-risk, the agent states what it will do and proceeds without asking for approval. When any dimension is high-risk, the agent presents a clear decision request with a recommended default.
+    The main agent applies this classification before each user interaction. When the work falls entirely under low-risk, the agent states what it will do and proceeds without asking for approval. When any dimension is high-risk, the agent presents one clear decision request with a recommended default. Once approved, the task continues without routine confirmation until completion or a material contract deviation.
+
+    ### Approval Lifetime
+    - Approval belongs to the task's user-expectation contract, not to approval keywords in chat.
+    - The approved contract covers intake, promotion, execution, verification, checkpointing, closeout, and archive.
+    - Files, functions, implementation ordering, tests, formatting, agent routing, and ordinary repair are engineering decisions inside the approved contract.
+    - Re-confirm only when the final expected effect, scope, explicit exclusions, anti-outcomes, acceptance criteria, material approach, architecture, compatibility, security, cost, maintenance burden, or irreversible-action boundary changes.
+    - Natural-language heuristics may remind or provide telemetry. They never grant, revoke, or bypass authorization; structured task state is authoritative.
 
 12. **Discovery before execution.** A user may describe only a need or phenomenon. Before a formal task exists, the main agent may perform bounded, side-effect-free discovery to find the relevant behavior, path, module, component, parameter, constraint, and evidence. Discovery is not implementation: it must stay relevant to the current request and must not write files, run side-effecting commands, dispatch execution subagents, or change behavior. Those actions still require an approved formal task.
 
@@ -182,7 +189,7 @@ Clarification is a hard gate before promotion or execution when the intended eff
 - Treat blocking questions as promotion blockers.
 - Do not guess missing scope, expected behavior, actual behavior, or approval fields.
 
-For design and implementation work, promotion requires a clear decision surface: expected effect, chosen approach, implementation plan, and approval. For mismatch work, promotion requires the expected/actual/reproduction/scope shape that safely identifies the deviation.
+For design and implementation work, promotion requires an approved decision surface containing the expected effect, boundaries, and material approach. The main agent may complete the engineering implementation plan as part of intake preparation without another user approval. For mismatch work, promotion requires the expected/actual/reproduction/scope shape that safely identifies the deviation.
 
 ### Mismatch Optioning
 
@@ -204,6 +211,8 @@ If the same issue produces meaningful correction feedback twice consecutively:
 3. The main agent takes over and examines the full chain: user intent, clarification artifacts, delegated context, verification output, and actual observed effect.
 4. Use an `advisor` only when its independent perspective passes all selective-dispatch gates and all three net-benefit questions.
 5. Resume implementation only after the revised path is clear and approved when it changes the visible effect or architecture.
+
+Approval remains valid through ordinary implementation changes and recovery. Invalidate it only when reflection or correction changes the user-expectation contract materially.
 
 ## Execution And Context Packages
 

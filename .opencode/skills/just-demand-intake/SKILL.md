@@ -19,7 +19,7 @@ Canonical workflow spec: `docs/workflow-spec.md`. The spec is the reference for 
 - Prefer the `question` tool for grouped decisions, approvals, and boundary capture when the answer can be expressed as concise options. Use free-text only for phenomena, nuanced descriptions, or answers that cannot be safely reduced to options.
 - Do not discuss task packages, repo maps, JSONL, context injection, or subagent mechanics unless the user is explicitly designing those mechanisms.
 - Treat intake as guidance; runtime plugins still enforce the workflow-entry gate for concrete requests without an active task.
-- In no-plugin fallback mode, intake is the required next step after approved clarification when no formal task exists. Do not treat approval of an approach as permission to edit inline.
+- In no-plugin fallback mode, intake is the required next step after approved clarification when no formal task exists. Persist the approval in the formal task, then continue execution without asking again.
 
 ## Process
 
@@ -56,7 +56,7 @@ For design and implementation work, the intake must include the final artifact b
 - **Final Expected Effect**: user-visible outcome in user language; this is a first-screen field, not an execution note
 - **Approach Options**: 2-3 approaches with pros, cons, and practical failure modes; for UI/interaction work these must be meaningful user-visible alternatives, not placeholders
 - **Chosen Approach**: selected approach with brief rationale
-- **Final Implementation Plan**: ordered steps including verification
+- **Final Implementation Plan**: agent-owned ordered engineering steps including verification; it need not receive a separate user approval once the expected effect, boundaries, and material approach are approved
 - **Minimum Viable Knowledge**: one-sentence explanations for unfamiliar terms or tradeoffs the user needs to decide
 - **Touchpoints**: short concrete files/modules/components when known, plus explicit exclusions; this complements the formal `Scope` field and keeps user-facing scope readable
 - **Visible Acceptance**: what the user can see, feel, or operate to confirm the result; routine tests/build/lint are mandatory agent work and should not dominate the first-screen approval card unless they fail or need user action

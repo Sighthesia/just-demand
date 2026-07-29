@@ -44,6 +44,7 @@ from workflow_core import (
     start_verification,
     state_dir,
     tasks_dir,
+    task_is_ready_for_execution,
     task_event_path,
     update_intake_section,
     update_suggestion_status,
@@ -2048,6 +2049,75 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(contract["choices"]["final_implementation_plan"], "1. Add event bus\n2. Wire handlers\n3. Verify")
             self.assertEqual(contract["_extra"]["validation"], "Run event flow verification.")
             self.assertEqual(contract["choices"]["approval"], "Approved by user.")
+            self.assertEqual(contract["contract_version"], "1.1")
+            self.assertEqual(contract["contract_revision"], 1)
+            self.assertEqual(contract["authorization"]["status"], "approved")
+            self.assertEqual(contract["authorization"]["approved_revision"], 1)
+
+    def test_internal_plan_update_preserves_contract_authorization(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Authorized plan", "Build flow", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Authorized plan", "Build flow", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            update_task_clarification(root, task_id, {"final_implementation_plan": "1. Revised implementation\n2. Verify"})
+
+            task = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertEqual(task["contract"]["contract_revision"], 1)
+            self.assertEqual(task["contract"]["authorization"]["status"], "approved")
+            self.assertTrue(task_is_ready_for_execution(task))
+
+    def test_material_contract_update_invalidates_authorization_until_reapproved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Authorized effect", "Build flow", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Authorized effect", "Build flow", "design", ["Works"])
+            task_id = promoted["task_id"]
+
+            result = update_task_clarification(root, task_id, {"final_expected_effect": "User sees a materially different result."})
+            self.assertFalse(result["ready"])
+            self.assertIn("Authorization", result["missing"])
+
+            task = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertEqual(task["contract"]["contract_revision"], 2)
+            self.assertEqual(task["contract"]["authorization"]["status"], "pending")
+
+            result = update_task_clarification(root, task_id, {"approval": "User approved revision 2."})
+            self.assertTrue(result["ready"])
+            task = read_json(tasks_dir(root) / "active" / task_id / "task.json")
+            self.assertEqual(task["contract"]["authorization"]["approved_revision"], 2)
+
+    def test_clearing_approval_revokes_contract_authorization(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Revoke authorization", "Build flow", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Revoke authorization", "Build flow", "design", ["Works"])
+
+            result = update_task_clarification(root, promoted["task_id"], {"approval": ""})
+
+            self.assertFalse(result["ready"])
+            self.assertIn("Authorization", result["missing"])
+
+    def test_acceptance_update_is_a_material_contract_revision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Acceptance revision", "Build flow", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            promoted = promote_to_task(root, intake["intake_id"], "Acceptance revision", "Build flow", "design", ["Original acceptance"])
+
+            result = update_task_clarification(root, promoted["task_id"], {"acceptance_criteria": ["Changed acceptance"]})
+
+            self.assertFalse(result["ready"])
+            task = read_json(tasks_dir(root) / "active" / promoted["task_id"] / "task.json")
+            self.assertEqual(task["contract"]["contract_revision"], 2)
 
 
     def test_checkpoint_commit_succeeds_without_impact_scope(self):
@@ -2756,7 +2826,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             from workflow_core import update_task_clarification
 
-            result = update_task_clarification(root, task_id, {"scope": "Updated scope."})
+            result = update_task_clarification(root, task_id, {"scope": "Updated scope.", "approval": "Approved updated scope."})
             self.assertTrue(result["ok"])
             self.assertEqual(result["task_id"], task_id)
             self.assertTrue(result["ready"])
@@ -2792,7 +2862,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             self.assertFalse(task_is_ready_for_execution(task))
 
-            result = update_task_clarification(root, task_id, {"chosen_approach": "Approach A: direct."})
+            result = update_task_clarification(root, task_id, {"chosen_approach": "Approach A: direct.", "approval": "Approved restored approach."})
             self.assertTrue(result["ok"])
             self.assertTrue(result["ready"])
             self.assertEqual(result["missing"], [])
@@ -2886,7 +2956,7 @@ class WorkflowCoreTests(unittest.TestCase):
 
             script = REPO_ROOT / "just-demand"
             result = subprocess.run(
-                [sys.executable, str(script), str(root), "update-clarification", task_id, "--field", "chosen_approach=Approach A: direct."],
+                [sys.executable, str(script), str(root), "update-clarification", task_id, "--field", "chosen_approach=Approach A: direct.", "--field", "approval=Approved restored approach."],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -2969,6 +3039,7 @@ class WorkflowCoreTests(unittest.TestCase):
                     "--field", "after_open=Use a final card before execution.",
                     "--field", "interrupt_behavior=Resume the current round and next question.",
                     "--field", "anti_outcomes=Do not ask like a form.",
+                    "--field", "approval=Approved updated anti-outcomes.",
                 ],
                 text=True,
                 capture_output=True,
@@ -3151,6 +3222,7 @@ class WorkflowCoreTests(unittest.TestCase):
             clar_file.write_text(json.dumps({
                 "chosen_approach": "Approach from file.",
                 "scope": "Scope from file.",
+                "approval": "Approved updated contract.",
             }), encoding="utf-8")
 
             script = REPO_ROOT / "just-demand"
@@ -3542,6 +3614,9 @@ Scope from markdown.
 
 ## Chosen Approach
 Approach from markdown (should be overridden).
+
+## Approval
+Approved updated contract.
 """, encoding="utf-8")
 
             script = REPO_ROOT / "just-demand"

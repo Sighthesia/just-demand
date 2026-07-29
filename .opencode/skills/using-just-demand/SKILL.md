@@ -29,7 +29,7 @@ These thoughts mean STOP and re-run routing:
 
 - "This is simple; I can just do it." Simple changes still require workflow routing.
 - "The user chose A, so I can implement now." Approach approval means enter intake/formal task flow unless execution readiness is already satisfied.
-- "The user approved the direction, so I can code now." Approval authorizes workflow entry and task readiness checks; it does not authorize inline execution by itself.
+- "The user approved the contract, so I can ignore later scope changes." Approval authorizes continuous execution only inside the approved user-expectation contract; material deviations require a new decision.
 - "I can inspect or patch first and clean up later." Reads may inform clarification, but writes wait for formal readiness.
 - "I can inspect the whole codebase before deciding." Pre-task discovery is allowed only when bounded to evidence needed for the current need or phenomenon; broad exploration still waits for a formal task.
 - "The plugins will catch mistakes." Skill-only fallback must self-enforce the process because plugins may be unavailable or unstable.
@@ -113,7 +113,7 @@ Use this reset when the user keeps providing new samples, when the conversation 
 - Subagents execute focused work from injected task context.
 - Scripts are the write path for `.just-demand/` machine state.
 - OpenCode plugins should inject only lightweight state or subagent context.
-- Approval words such as `批准`, `继续`, `同意`, `approved`, and `go ahead` are workflow-entry signals, not execution permission.
+- Approval is persisted in the formal task contract. Once the approved contract is promoted, continue through execution, verification, and closeout without routine confirmation. Approval words alone never bypass missing structured authorization.
 - Subagent dispatch requires all six hard eligibility gates and all three net-benefit questions to pass. Any failed or uncertain answer means the main agent executes. The plugin enforces workflow readiness, not the execution-owner choice.
 - Before modifying code, or before dispatching a subagent that may modify or verify code, ensure the current formal task already has the required task context files and inspect all unfinished tasks for conflict risk.
 
@@ -233,9 +233,7 @@ When no formal task exists, the agent chooses from three explicit routes:
 
 1. **Direct answer**: if the turn is a simple question or non-work inquiry, respond directly without workflow entry.
 2. **Enter workflow (default for real work)**: create an intake via `create-intake`, clarify via `socratic-clarification`, then `promote` to a formal task.
-3. **Skip workflow override**: include an explicit phrase like "skip workflow" or "workflow override" to consciously bypass the workflow path and proceed inline.
-
-Route 2 is the default when concrete work, bug reports, or implementation requests are detected. Route 3 is an explicit override that bypasses the `workflow_entry_required` or `execution_needed` block messages.
+Concrete work, bug reports, and implementation requests enter the workflow. Natural-language phrases never bypass structured task authorization.
 
 ### Selective Subagent Dispatch
 
