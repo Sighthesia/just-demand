@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import fcntl
+import os
 import re
 import shutil
 import subprocess
@@ -2908,6 +2909,23 @@ def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_git_input(root: Path, input_text: str, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=root,
+        text=True,
+        input=input_text,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _run_git_with_env(root: Path, env: dict[str, str], *args: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args], cwd=root, text=True, input=input_text,
+        capture_output=True, check=False, env=env,
+    )
+
 def _normalize_repo_path(value: str) -> str:
     normalized = value.replace("\\", "/").strip()
     while normalized.startswith("./"):
@@ -2968,6 +2986,61 @@ def _checkpoint_commit_message(task: dict[str, Any]) -> str:
     return f"{prefix}: {subject}"
 
 
+_DIFF_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def _git_diff(root: Path, path: str) -> subprocess.CompletedProcess[str]:
+    return _run_git(root, "diff", "--binary", "--unified=0", "HEAD", "--", path)
+
+
+def _diff_hunks(patch: str) -> list[tuple[int, int, list[str]]]:
+    """Return HEAD-relative hunk ranges and text from a zero-context patch."""
+    lines = patch.splitlines(keepends=True)
+    hunks: list[tuple[int, int, list[str]]] = []
+    index = 0
+    while index < len(lines):
+        match = _DIFF_HUNK_RE.match(lines[index])
+        if not match:
+            index += 1
+            continue
+        start = int(match.group(1))
+        count = int(match.group(2) or "1")
+        hunk = [lines[index]]
+        index += 1
+        while index < len(lines) and not lines[index].startswith("@@ "):
+            hunk.append(lines[index])
+            index += 1
+        hunks.append((start, count, hunk))
+    return hunks
+
+
+def _ranges_overlap(left_start: int, left_count: int, right_start: int, right_count: int) -> bool:
+    # Treat zero-length insertions as occupying their insertion point so adjacent
+    # changes do not get incorrectly staged as independently applicable hunks.
+    left_end = left_start + max(left_count, 1) - 1
+    right_end = right_start + max(right_count, 1) - 1
+    return left_start <= right_end and right_start <= left_end
+
+
+def _isolated_hunk_patch(current_patch: str, baseline_patch: str) -> str | None:
+    """Return task-only hunks when they do not overlap the execution baseline."""
+    current_hunks = _diff_hunks(current_patch)
+    baseline_hunks = _diff_hunks(baseline_patch)
+    if not current_hunks:
+        return ""
+    selected: list[str] = []
+    for start, count, hunk in current_hunks:
+        if any(_ranges_overlap(start, count, old_start, old_count) for old_start, old_count, _ in baseline_hunks):
+            continue
+        selected.extend(hunk)
+    if not selected:
+        return None
+    header_end = current_patch.find("@@ ")
+    if header_end < 0:
+        return ""
+    return current_patch[:header_end] + "".join(selected)
+
+
 def _record_checkpoint_commit_result(root: Path, task_id: str, result: dict[str, Any]) -> dict[str, Any]:
     stored = dict(result)
     stored["attempted_at"] = utc_now()
@@ -3015,6 +3088,7 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         for path in baseline.get("paths", [])
         if isinstance(path, str) and _normalize_repo_path(path)
     }
+    baseline_diffs = baseline.get("diffs", {}) if isinstance(baseline, dict) else {}
     impact_scope = [
         _normalize_repo_path(entry)
         for entry in task.get("impact", [])
@@ -3022,24 +3096,22 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
     ]
 
     if impact_scope:
-        candidate_paths = [
+        eligible_paths = [
             path
             for path in all_changed
             if any(_path_matches_scope(path, scope) for scope in impact_scope)
-            and path not in baseline_paths
             and not _is_disallowed_checkpoint_path(path)
         ]
         fallback_note = None
     else:
         # A task baseline keeps unrelated worktree changes out of later commits.
         # Legacy tasks without a baseline preserve the historical all-path fallback.
-        candidate_paths = [
+        eligible_paths = [
             path
             for path in all_changed
-            if path not in baseline_paths
             if not _is_disallowed_checkpoint_path(path)
         ]
-        if candidate_paths:
+        if eligible_paths:
             fallback_note = (
                 "changed since execution baseline (no explicit impact scope)"
                 if baseline
@@ -3048,18 +3120,49 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         else:
             fallback_note = None
 
-    candidate_paths = list(dict.fromkeys(candidate_paths))
+    def _with_fallback(d: dict[str, Any]) -> dict[str, Any]:
+        if fallback_note:
+            d["fallback_note"] = fallback_note
+        return d
+
+    candidate_paths: list[str] = []
+    isolated_paths: list[str] = []
+    mixed_paths: list[str] = []
+    for path in dict.fromkeys(eligible_paths):
+        baseline_patch = baseline_diffs.get(path) if isinstance(baseline_diffs, dict) else None
+        if path in baseline_paths and not isinstance(baseline_patch, str):
+            # A pre-existing untracked or binary path has no safe HEAD-relative
+            # patch to separate, so leave it outside this task's commit.
+            continue
+        if path not in baseline_paths:
+            candidate_paths.append(path)
+            continue
+
+        current_diff = _git_diff(root, path)
+        if current_diff.returncode != 0:
+            return _record_checkpoint_commit_result(
+                root, task_id, _with_fallback({"created": False, "reason": "git_diff_failed", "paths": [path]})
+            )
+        if current_diff.stdout == baseline_patch:
+            continue
+        task_patch = _isolated_hunk_patch(current_diff.stdout, baseline_patch)
+        if task_patch is None:
+            candidate_paths.append(path)
+            mixed_paths.append(path)
+            continue
+        if task_patch:
+            candidate_paths.append(path)
+            isolated_paths.append(path)
+            continue
+        candidate_paths.append(path)
+        mixed_paths.append(path)
+
     if not candidate_paths:
         return _record_checkpoint_commit_result(
             root,
             task_id,
             {"created": False, "reason": "no_task_scoped_changes", "paths": []},
         )
-
-    def _with_fallback(d: dict[str, Any]) -> dict[str, Any]:
-        if fallback_note:
-            d["fallback_note"] = fallback_note
-        return d
 
     diff_result = _run_git(root, "diff", "--", *candidate_paths)
     if diff_result.returncode != 0:
@@ -3077,29 +3180,51 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
             _with_fallback({"created": False, "reason": "git_log_failed", "paths": candidate_paths}),
         )
 
-    add_result = _run_git(root, "add", "--", *candidate_paths)
-    if add_result.returncode != 0:
-        return _record_checkpoint_commit_result(
-            root,
-            task_id,
-            _with_fallback({"created": False, "reason": "git_add_failed", "paths": candidate_paths}),
-        )
-
     message = _checkpoint_commit_message(task)
-    commit_result = _run_git(root, "commit", "-m", message, "--", *candidate_paths)
-    if commit_result.returncode != 0:
-        reason = "git_commit_failed"
-        failure_output = "\n".join(part for part in [commit_result.stdout, commit_result.stderr] if part).lower()
-        if "nothing to commit" in failure_output:
-            reason = "no_task_scoped_changes"
-        return _record_checkpoint_commit_result(
-            root,
-            task_id,
-            _with_fallback({"created": False, "reason": reason, "message": message, "paths": candidate_paths}),
-        )
-
     head_result = _run_git(root, "rev-parse", "HEAD")
-    commit_hash = head_result.stdout.strip() if head_result.returncode == 0 else None
+    if head_result.returncode != 0:
+        return _record_checkpoint_commit_result(
+            root, task_id, _with_fallback({"created": False, "reason": "git_log_failed", "paths": candidate_paths})
+        )
+    previous_head = head_result.stdout.strip()
+    with tempfile.NamedTemporaryFile(prefix="just-demand-index-", delete=False) as index_file:
+        index_path = index_file.name
+    Path(index_path).unlink()
+    try:
+        env = dict(os.environ, GIT_INDEX_FILE=index_path)
+        if _run_git_with_env(root, env, "read-tree", "HEAD").returncode != 0:
+            return _record_checkpoint_commit_result(
+                root, task_id, _with_fallback({"created": False, "reason": "git_index_failed", "paths": candidate_paths})
+            )
+        for path in isolated_paths.copy():
+            patch = _isolated_hunk_patch(_git_diff(root, path).stdout, baseline_diffs[path])
+            if _run_git_with_env(root, env, "apply", "--cached", "--unidiff-zero", input_text=patch or "").returncode != 0:
+                isolated_paths.remove(path)
+                mixed_paths.append(path)
+        paths_to_add = [path for path in candidate_paths if path not in isolated_paths]
+        if paths_to_add and _run_git_with_env(root, env, "add", "--", *paths_to_add).returncode != 0:
+            return _record_checkpoint_commit_result(
+                root, task_id, _with_fallback({"created": False, "reason": "git_add_failed", "paths": candidate_paths})
+            )
+        tree_result = _run_git_with_env(root, env, "write-tree")
+        if tree_result.returncode != 0:
+            return _record_checkpoint_commit_result(
+                root, task_id, _with_fallback({"created": False, "reason": "git_commit_failed", "paths": candidate_paths})
+            )
+        commit_result = _run_git_with_env(
+            root, env, "commit-tree", tree_result.stdout.strip(), "-p", previous_head, input_text=message + "\n"
+        )
+        if commit_result.returncode != 0:
+            return _record_checkpoint_commit_result(
+                root, task_id, _with_fallback({"created": False, "reason": "git_commit_failed", "message": message, "paths": candidate_paths})
+            )
+        commit_hash = commit_result.stdout.strip()
+        if _run_git(root, "update-ref", "HEAD", commit_hash, previous_head).returncode != 0:
+            return _record_checkpoint_commit_result(
+                root, task_id, _with_fallback({"created": False, "reason": "git_commit_failed", "message": message, "paths": candidate_paths})
+            )
+    finally:
+        Path(index_path).unlink(missing_ok=True)
     return _record_checkpoint_commit_result(
         root,
         task_id,
@@ -3109,6 +3234,8 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
             "commit_hash": commit_hash,
             "message": message,
             "paths": candidate_paths,
+            "isolated_paths": isolated_paths,
+            "mixed_paths": mixed_paths,
         }),
     )
 
@@ -3582,9 +3709,16 @@ def start_execution(root: Path, task_id: str, subagents: list[str]) -> dict[str,
         repo_check = _run_git(root, "rev-parse", "--is-inside-work-tree")
         status_result = _run_git(root, "status", "--short")
         if repo_check.returncode == 0 and repo_check.stdout.strip() == "true" and status_result.returncode == 0:
+            paths = _parse_git_status_paths(status_result.stdout)
+            diffs: dict[str, str] = {}
+            for path in paths:
+                diff_result = _git_diff(root, path)
+                if diff_result.returncode == 0 and diff_result.stdout:
+                    diffs[path] = diff_result.stdout
             updates["worktree_baseline"] = {
                 "captured_at": utc_now(),
-                "paths": _parse_git_status_paths(status_result.stdout),
+                "paths": paths,
+                "diffs": diffs,
             }
 
     task = update_task(root, task_id, updates)

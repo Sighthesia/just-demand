@@ -284,7 +284,7 @@ Do not wait for perfect conditions. If the verified slice is clean, commit it.
 
 ### Impact scope recommendation (not a gate)
 
-At execution start, the script records the existing worktree paths as a baseline. A later commit excludes those paths, so pre-existing work remains uncommitted while new task paths are committed. Setting `impact` via `mark --impact PATH` further narrows the eligible paths. Legacy tasks without a baseline retain the all-non-generated-files fallback.
+At execution start, the script records existing worktree paths and diffs as a baseline. A later commit stages task-only hunks from shared files when they do not overlap the baseline. If Git cannot safely isolate a hunk, it commits the current full file and records it as a mixed hunk instead of leaving verified work uncommitted. Setting `impact` via `mark --impact PATH` further narrows the eligible paths. Legacy tasks without a baseline retain the all-non-generated-files fallback.
 
 ### When NOT to commit
 

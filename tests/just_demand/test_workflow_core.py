@@ -2219,6 +2219,57 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(committed_files, ["task.txt"])
             self.assertIn("?? existing.txt", git_stdout(root, "status", "--short"))
 
+    def test_checkpoint_commit_isolates_non_overlapping_hunks_in_existing_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+            target = root / "tracked.txt"
+            target.write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-m", "add tracked"], cwd=root, check=True)
+            target.write_text("old one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+
+            intake = create_intake(root, "Isolate hunk", "Commit only new hunk", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            task_id = promote_to_task(root, intake["intake_id"], "Isolate hunk", "Commit only new hunk", "implementation", ["Works"])["task_id"]
+            create_validation_revision(root, task_id, "Isolate.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            target.write_text("old one\ntwo\nthree\nfour\ntask five\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"]["isolated_paths"], ["tracked.txt"])
+            self.assertEqual(result["checkpoint_commit"]["mixed_paths"], [])
+            self.assertEqual(git_stdout(root, "show", "HEAD:tracked.txt"), "one\ntwo\nthree\nfour\ntask five\n")
+            self.assertEqual(target.read_text(encoding="utf-8"), "old one\ntwo\nthree\nfour\ntask five\n")
+
+    def test_checkpoint_commit_falls_back_for_overlapping_hunks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+            target = root / "tracked.txt"
+            target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-m", "add tracked"], cwd=root, check=True)
+            target.write_text("old one\ntwo\nthree\n", encoding="utf-8")
+
+            intake = create_intake(root, "Mixed hunk", "Commit mixed hunk", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            task_id = promote_to_task(root, intake["intake_id"], "Mixed hunk", "Commit mixed hunk", "implementation", ["Works"])["task_id"]
+            create_validation_revision(root, task_id, "Mixed.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            target.write_text("task one\ntwo\nthree\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"]["isolated_paths"], [])
+            self.assertEqual(result["checkpoint_commit"]["mixed_paths"], ["tracked.txt"])
+            self.assertEqual(git_stdout(root, "show", "HEAD:tracked.txt"), "task one\ntwo\nthree\n")
+
     def test_checkpoint_commit_preserves_chinese_task_title(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
