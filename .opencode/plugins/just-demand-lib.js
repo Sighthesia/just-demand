@@ -640,6 +640,25 @@ export const isWorkflowControlCommand = (command) => {
   return !BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed)) && !hasUnquotedShellRedirection(trimmed)
 }
 
+const SESSION_BINDING_COMMANDS = new Set([
+  "create-intake",
+  "mark",
+  "select-task",
+  "resume",
+  "complete-verification",
+  "promote",
+  "start-verification",
+])
+
+export const bindWorkflowControlCommandToSession = (command, sessionID) => {
+  const value = String(command || "")
+  if (/(?:&&|\|\||;|\n)/.test(value)) return value
+  const match = value.trim().match(/^just-demand\s+\.\s+(\S+)/)
+  if (!match || !SESSION_BINDING_COMMANDS.has(match[1]) || /(?:^|\s)--session(?:\s|=)/.test(value)) return value
+  const quotedSession = `'${String(sessionID || "main").replaceAll("'", "'\\''")}'`
+  return `${value} --session ${quotedSession}`
+}
+
 export const impactsOverlap = (impactsA, impactsB) => {
   if (!Array.isArray(impactsA) || !Array.isArray(impactsB)) return false
   if (impactsA.length === 0 || impactsB.length === 0) return false
@@ -860,7 +879,7 @@ export const looksLikeIntakeOperation = (toolName, args) => {
 
 export const getWriteToolRule = (toolName, args) => WRITE_TOOL_RULES.find((rule) => rule.match(toolName, args)) || null
 
-export const enforceExecutionGate = (directory, toolName, args, logPrefix = "state.tool.before") => {
+export const enforceExecutionGate = (directory, toolName, args, logPrefix = "state.tool.before", sessionID = undefined) => {
   const normalizedToolName = String(toolName || "").toLowerCase()
   debugLog(logPrefix, {
     tool: normalizedToolName,
@@ -916,7 +935,7 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
   }
 
   // Gate 1: Is there a selected active task?
-  const gateState = getExecutionGateState(directory)
+  const gateState = getExecutionGateState(directory, sessionID)
   if (gateState.reason !== "ready") {
     debugLog(`${logPrefix}.block`, { reason: gateState.reason, rule: rule.name, label: rule.label, active_task_count: gateState.activeTaskCount }, directory)
     throw new Error(buildExecutionGateError(rule.label, gateState))
@@ -965,9 +984,9 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
   return rule
 }
 
-export const getExecutionGateState = (directory) => {
+export const getExecutionGateState = (directory, sessionID = undefined) => {
   const activeTasks = listUnfinishedTasks(directory)
-  const taskId = getActiveTask(directory)
+  const taskId = getActiveTask(directory, sessionID)
   if (taskId) {
     // Check impact overlap between current task and other active tasks
     const currentTask = readTaskJson(directory, taskId)
@@ -1208,11 +1227,15 @@ const renderClarificationContext = (task) => {
   ].join("\n").trimEnd()
 }
 
-export const getActiveTask = (directory) => {
+export const getActiveTask = (directory, sessionID = undefined) => {
   const statePath = join(workflowRoot(directory), "state", "state.json")
   if (!existsSync(statePath)) return null
   const state = readJson(statePath)
   if (!state) return null
+  if (sessionID !== undefined && sessionID !== null) {
+    if (!("active_sessions" in state)) return state.current_task_id || null
+    return state.active_sessions?.[sessionID]?.current_task_id || null
+  }
   return state.current_task_id || null
 }
 

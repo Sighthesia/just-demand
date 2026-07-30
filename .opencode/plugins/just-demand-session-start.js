@@ -25,10 +25,10 @@ const SESSION_REMINDER = [
 
 const WORKFLOW_STATE_BLOCK_MARKER = "<JUST_DEMAND_WORKFLOW_STATE>"
 
-const buildWorkflowStateSystemBlock = (directory) => {
-  const activeTaskId = getActiveTask(directory)
+const buildWorkflowStateSystemBlock = (directory, sessionID) => {
+  const activeTaskId = getActiveTask(directory, sessionID)
   const activeTask = activeTaskId ? (readTaskJson(directory, activeTaskId) || { id: activeTaskId }) : null
-  const gateState = getExecutionGateState(directory)
+  const gateState = getExecutionGateState(directory, sessionID)
   return [
     WORKFLOW_STATE_BLOCK_MARKER,
     formatWorkflowStateLines(activeTaskId, activeTask, gateState),
@@ -43,18 +43,18 @@ export default async ({ directory } = {}) => {
       if (!output || !Array.isArray(output.system)) return
       if (output.system.some((segment) => typeof segment === "string" && segment.includes("<JUST_DEMAND_REMINDER>"))) {
         if (!output.system.some((segment) => typeof segment === "string" && segment.includes(WORKFLOW_STATE_BLOCK_MARKER))) {
-          output.system.push(buildWorkflowStateSystemBlock(directory || input?.directory || input?.root || input?.cwd || "."))
+          output.system.push(buildWorkflowStateSystemBlock(directory || input?.directory || input?.root || input?.cwd || ".", input?.sessionID || "main"))
         }
       } else {
         output.system.push(SESSION_REMINDER)
-        output.system.push(buildWorkflowStateSystemBlock(directory || input?.directory || input?.root || input?.cwd || "."))
+        output.system.push(buildWorkflowStateSystemBlock(directory || input?.directory || input?.root || input?.cwd || ".", input?.sessionID || "main"))
       }
 
       const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       const sessionID = typeof input?.sessionID === "string" && input.sessionID ? input.sessionID : "main"
 
       if (isDebugPromptFullEnabled()) {
-        const activeTaskId = getActiveTask(workflowDirectory)
+        const activeTaskId = getActiveTask(workflowDirectory, sessionID)
         const systemText = Array.isArray(output.system) ? output.system.join("\n\n") : ""
         const dumpPath = writeDebugChatTurnDump(workflowDirectory, {
           session_id: sessionID,
@@ -91,14 +91,14 @@ export default async ({ directory } = {}) => {
       // Per-session injection audit (JUST_DEMAND_DEBUG, independent of PROMPT_FULL)
       appendDebugSessionAudit(workflowDirectory, sessionID, "visible", {
         source: "session-start",
-        task_id: getActiveTask(workflowDirectory) || "",
+        task_id: getActiveTask(workflowDirectory, sessionID) || "",
         status: "applied",
         reason: "session_start_fallback",
         content: Array.isArray(output.system) ? output.system.filter((s) => !s.includes("<JUST_DEMAND_")).join("\n\n") : "(empty)",
       })
       appendDebugSessionAudit(workflowDirectory, sessionID, "complete", {
         source: "session-start",
-        task_id: getActiveTask(workflowDirectory) || "",
+        task_id: getActiveTask(workflowDirectory, sessionID) || "",
         status: "applied",
         reason: "session_start_fallback",
         content: Array.isArray(output.system) ? output.system.join("\n\n") : "(empty)",

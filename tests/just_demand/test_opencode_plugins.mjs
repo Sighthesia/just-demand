@@ -6,6 +6,7 @@ import test from "node:test"
 
 import {
   appendDebugSessionAudit,
+  bindWorkflowControlCommandToSession,
   buildExecutionGateError,
   buildReflectionGateError,
   consumeIntakeFallbackPending,
@@ -94,6 +95,51 @@ test("getActiveTask returns null when state.json missing", () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
   assert.equal(getActiveTask(root), null)
+})
+
+test("getActiveTask resolves independent session bindings without global fallback", () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({
+    schema_version: "1.0",
+    current_task_id: "task-global",
+    active_sessions: {
+      "session-a": { current_task_id: "task-a" },
+      "session-b": { current_task_id: "task-b" },
+    },
+  }))
+
+  assert.equal(getActiveTask(root, "session-a"), "task-a")
+  assert.equal(getActiveTask(root, "session-b"), "task-b")
+  assert.equal(getActiveTask(root, "session-unbound"), null)
+  assert.equal(getActiveTask(root), "task-global")
+})
+
+test("getActiveTask preserves global fallback for legacy state without active_sessions", () => {
+  const root = makeRoot()
+  mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: "task-a" }))
+  assert.equal(getActiveTask(root, "session-a"), "task-a")
+})
+
+test("bindWorkflowControlCommandToSession adds session only to binding commands", () => {
+  assert.equal(
+    bindWorkflowControlCommandToSession("just-demand . select-task task-a", "session-a"),
+    "just-demand . select-task task-a --session 'session-a'",
+  )
+  assert.equal(
+    bindWorkflowControlCommandToSession("just-demand . create-intake Title Request", "session-a"),
+    "just-demand . create-intake Title Request --session 'session-a'",
+  )
+  assert.equal(
+    bindWorkflowControlCommandToSession("just-demand . select-task task-a --session explicit", "session-a"),
+    "just-demand . select-task task-a --session explicit",
+  )
+  assert.equal(bindWorkflowControlCommandToSession("just-demand . list-active", "session-a"), "just-demand . list-active")
+  assert.equal(
+    bindWorkflowControlCommandToSession("just-demand . select-task task-a && just-demand . list-active", "session-a"),
+    "just-demand . select-task task-a && just-demand . list-active",
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -775,6 +821,37 @@ test("getExecutionGateState includes impact overlap info when task is selected w
   assert.equal(gateState.activeTaskCount, 3)
   assert.deepEqual(gateState.overlappingTaskIds, ["task-b"])
   assert.equal(gateState.nonOverlappingActiveTaskCount, 1)
+})
+
+test("getExecutionGateState keeps another session ready after one task is removed", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const activeDir = join(root, ".just-demand", "state", "active")
+  mkdirSync(join(activeDir, "task-b"), { recursive: true })
+  writeFileSync(join(activeDir, "task-b", "task.json"), JSON.stringify({ id: "task-b", status: "executing", impact: ["src/"] }))
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({
+    schema_version: "1.0",
+    current_task_id: null,
+    active_sessions: {
+      "session-a": { current_task_id: null },
+      "session-b": { current_task_id: "task-b" },
+    },
+  }))
+
+  assert.equal(getExecutionGateState(root, "session-a").reason, "no_current_task_selected")
+  assert.equal(getExecutionGateState(root, "session-b").reason, "ready")
+  assert.equal(getExecutionGateState(root, "session-b").taskId, "task-b")
+})
+
+test("state plugin binds workflow control commands to the calling session", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const plugin = await stateFactory({ directory: root })
+  const output = { args: { command: "just-demand . select-task task-a" } }
+
+  await plugin["tool.execute.before"]({ tool: "bash", sessionID: "session-a" }, output)
+
+  assert.equal(output.args.command, "just-demand . select-task task-a --session 'session-a'")
 })
 
 test("getExecutionGateState reports no overlap when other tasks lack impact scope", () => {

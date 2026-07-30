@@ -1789,6 +1789,7 @@ def promote_to_task(
     goal: str,
     task_type: str,
     acceptance_criteria: list[str],
+    session_id: str | None = None,
 ) -> dict[str, str]:
     ensure_workspace(root)
     now = utc_now()
@@ -1871,8 +1872,7 @@ def promote_to_task(
     # Update workspace state
     with workflow_mutation_lock(root):
         state = read_json(state_path)
-        state["current_intake_id"] = None
-        state["current_task_id"] = task_id
+        _select_task_in_state(state, task_id, session_id)
         active_ids = state.get("active_task_ids", [])
         if task_id not in active_ids:
             active_ids.append(task_id)
@@ -2771,7 +2771,18 @@ def list_unfinished_tasks(root: Path, verbose: bool = False) -> list[dict[str, A
     return tasks
 
 
-def select_task(root: Path, task_id: str) -> dict[str, Any]:
+def _select_task_in_state(state: dict[str, Any], task_id: str, session_id: str | None) -> None:
+    state["current_intake_id"] = None
+    if session_id:
+        session = state.setdefault("active_sessions", {}).setdefault(session_id, {})
+        session["current_intake_id"] = None
+        session["current_task_id"] = task_id
+        session["updated_at"] = utc_now()
+    else:
+        state["current_task_id"] = task_id
+
+
+def select_task(root: Path, task_id: str, session_id: str | None = None) -> dict[str, Any]:
     ensure_workspace(root)
     tpath = task_path(root, task_id) / "task.json"
     if not tpath.is_file():
@@ -2789,14 +2800,13 @@ def select_task(root: Path, task_id: str) -> dict[str, Any]:
         if task_id not in active_ids:
             active_ids.append(task_id)
         state["active_task_ids"] = active_ids
-        state["current_intake_id"] = None
-        state["current_task_id"] = task_id
+        _select_task_in_state(state, task_id, session_id)
         state["updated_at"] = utc_now()
         write_json_atomic(state_path, state)
 
     append_task_event(root, task_id, "task_selected", f"Selected task {task_id} as current task")
     append_workspace_event(root, "task_selected", "task", task_id, f"Selected task {task_id} as current task")
-    return {"ok": True, "task_id": task_id, "status": status, "current_task_id": task_id}
+    return {"ok": True, "task_id": task_id, "status": status, "current_task_id": task_id, "session_id": session_id}
 
 
 def mark_task(
@@ -2807,6 +2817,7 @@ def mark_task(
     progress: int | None = None,
     impact: list[str] | None = None,
     note: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Mark task status, progress, impact scope, and note.
 
@@ -2853,10 +2864,14 @@ def mark_task(
     with workflow_mutation_lock(root):
         state = read_json(state_path)
         if status in {"planning", "executing", "verifying", "changes_requested", "tweaking", "debugging"}:
-            state["current_intake_id"] = None
-            state["current_task_id"] = task_id
-        elif status in {"paused", "blocked"} and state.get("current_task_id") == task_id:
-            state["current_task_id"] = None
+            _select_task_in_state(state, task_id, session_id)
+        elif status in {"paused", "blocked"}:
+            if state.get("current_task_id") == task_id:
+                state["current_task_id"] = None
+            for session in state.get("active_sessions", {}).values():
+                if session.get("current_task_id") == task_id:
+                    session["current_task_id"] = None
+                    session["updated_at"] = utc_now()
         state["updated_at"] = utc_now()
         write_json_atomic(state_path, state)
 
@@ -3909,7 +3924,7 @@ def complete_verification(
     return result_data
 
 
-def start_verification(root: Path, task_id: str) -> dict[str, Any]:
+def start_verification(root: Path, task_id: str, session_id: str | None = None) -> dict[str, Any]:
     """Transition a task from executing/tweaking/debugging toward verification.
 
     This creates an explicit post-write transition so the task does not remain
@@ -3928,7 +3943,7 @@ def start_verification(root: Path, task_id: str) -> dict[str, Any]:
             f"expected one of {', '.join(sorted(allowed_pre))}"
         )
 
-    return mark_task(root, task_id, "verifying", note="Starting verification phase")
+    return mark_task(root, task_id, "verifying", note="Starting verification phase", session_id=session_id)
 
 
 # ---------------------------------------------------------------------------

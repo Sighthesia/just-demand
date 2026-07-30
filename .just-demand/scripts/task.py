@@ -162,15 +162,18 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("goal")
     promote.add_argument("--type", default="design")
     promote.add_argument("--acceptance", action="append", default=[])
+    promote.add_argument("--session", default=None, help="Bind the promoted task to this session")
 
     list_active = sub.add_parser("list-active", help="List all unfinished formal tasks")
     list_active.add_argument("--verbose", action="store_true", help="Include current_step and path")
 
     select_task_parser = sub.add_parser("select-task", help="Select an unfinished formal task as current")
     select_task_parser.add_argument("task_id", help="Task ID to make current")
+    select_task_parser.add_argument("--session", default=None, help="Session to bind to this task")
 
     resume = sub.add_parser("resume", help="Resume an unfinished formal task by selecting it as current")
     resume.add_argument("task_id", help="Task ID to resume")
+    resume.add_argument("--session", default=None, help="Session to bind to this task")
 
     mark = sub.add_parser("mark", help="Mark task status, progress, impact, and note")
     mark.add_argument("task_id", help="Task ID to mark")
@@ -178,6 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
     mark.add_argument("--progress", type=int, default=None, help="Progress 0-100")
     mark.add_argument("--impact", action="append", default=None, help="Affected path/module (repeatable)")
     mark.add_argument("--note", default=None, help="Short note for current state")
+    mark.add_argument("--session", default=None, help="Session whose task binding should be updated")
 
     checkpoint = sub.add_parser("checkpoint-commit", help="Create a checkpoint commit for a task (requires passed verification)")
     checkpoint.add_argument("task_id", help="Task ID to create a checkpoint commit for")
@@ -190,6 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     start_verif = sub.add_parser("start-verification", help="Transition a task from executing/tweaking/debugging toward verification")
     start_verif.add_argument("task_id", help="Task ID to transition to verification")
+    start_verif.add_argument("--session", default=None, help="Session whose task binding should be updated")
 
     complete = sub.add_parser("complete-verification", help="Record verification result and optionally create a checkpoint commit")
     complete.add_argument("task_id", help="Task ID to complete verification for")
@@ -197,6 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     complete.add_argument("summary", help="Short verification summary")
     complete.add_argument("--no-auto-archive", action="store_true", help="Keep passed task active instead of archiving it")
     complete.add_argument("--no-checkpoint-commit", action="store_true", help="Skip automatic checkpoint commit on passed verification")
+    complete.add_argument("--session", default=None, help="OpenCode session completing this task")
 
     sub.add_parser("init", help="Initialize project-local .just-demand state")
 
@@ -356,16 +362,16 @@ def execute_command(root: Path, args: list[str]) -> int:
                 fields.update(field_args)
             result = update_task_clarification(root, parsed.task_id, fields)
         elif parsed.command == "start-verification":
-            result = start_verification(root, parsed.task_id)
+            result = start_verification(root, parsed.task_id, session_id=parsed.session)
         elif parsed.command == "promote":
             criteria = parsed.acceptance or ["The formal task package exists and can be executed."]
             result = with_task_selection_next_actions(
-                promote_to_task(root, parsed.intake_id, parsed.title, parsed.goal, parsed.type, criteria)
+                promote_to_task(root, parsed.intake_id, parsed.title, parsed.goal, parsed.type, criteria, session_id=parsed.session)
             )
         elif parsed.command == "list-active":
             result = {"tasks": list_unfinished_tasks(root, verbose=getattr(parsed, "verbose", False))}
         elif parsed.command in {"select-task", "resume"}:
-            result = with_task_selection_next_actions(select_task(root, parsed.task_id))
+            result = with_task_selection_next_actions(select_task(root, parsed.task_id, session_id=parsed.session))
         elif parsed.command == "mark":
             result = mark_task(
                 root,
@@ -374,6 +380,7 @@ def execute_command(root: Path, args: list[str]) -> int:
                 progress=parsed.progress,
                 impact=parsed.impact,
                 note=parsed.note,
+                session_id=parsed.session,
             )
         elif parsed.command == "cleanup-task":
             result = cleanup_completed_task(root, parsed.task_id)

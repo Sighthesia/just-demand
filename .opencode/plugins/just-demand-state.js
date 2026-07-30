@@ -1,4 +1,5 @@
 import {
+  bindWorkflowControlCommandToSession,
   appendDebugSessionAudit,
   consumeIntakeFallbackPending,
   getActiveTask,
@@ -694,7 +695,11 @@ export default async ({ directory } = {}) => {
       const workflowDirectory = directory || input?.directory || input?.root || input?.cwd || "."
       if (!workflowDirectory) return
 
-      enforceExecutionGate(workflowDirectory, input?.tool, output?.args, "state.tool.before")
+      const sessionID = input?.sessionID || "main"
+      if (String(input?.tool || "").toLowerCase() === "bash" && output?.args?.command) {
+        output.args.command = bindWorkflowControlCommandToSession(output.args.command, sessionID)
+      }
+      enforceExecutionGate(workflowDirectory, input?.tool, output?.args, "state.tool.before", sessionID)
     },
 
     "chat.message": async (input, output) => {
@@ -713,10 +718,10 @@ export default async ({ directory } = {}) => {
       }
 
       const sessionID = typeof input?.sessionID === "string" && input.sessionID ? input.sessionID : "main"
-      const activeTaskId = getActiveTask(workflowDirectory)
+      const activeTaskId = getActiveTask(workflowDirectory, sessionID)
       const activeTask = activeTaskId ? (readTaskJson(workflowDirectory, activeTaskId) || { id: activeTaskId }) : null
       const reminderState = getReminderState(workflowDirectory, sessionID)
-      const gateState = getExecutionGateState(workflowDirectory)
+      const gateState = getExecutionGateState(workflowDirectory, sessionID)
       reminderState.directory = workflowDirectory
       reminderState.sessionID = sessionID
       reminderState.activeTask = activeTask

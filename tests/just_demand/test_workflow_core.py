@@ -1593,6 +1593,51 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertIn(task_a, state["active_task_ids"])
             self.assertIn(task_b, state["active_task_ids"])
 
+    def test_session_task_bindings_survive_other_task_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake_a = create_intake(root, "Task A", "First task", "session-a")
+            intake_b = create_intake(root, "Task B", "Second task", "session-b")
+            set_intake_scope(root, intake_a["intake_id"], "Scope A")
+            set_intake_scope(root, intake_b["intake_id"], "Scope B")
+            set_intake_design_artifact(root, intake_a["intake_id"])
+            set_intake_design_artifact(root, intake_b["intake_id"])
+            task_a = promote_to_task(
+                root, intake_a["intake_id"], "Task A", "Goal A", "design", ["A"], session_id="session-a"
+            )["task_id"]
+            task_b = promote_to_task(
+                root, intake_b["intake_id"], "Task B", "Goal B", "design", ["B"], session_id="session-b"
+            )["task_id"]
+            promoted_state = read_json(root / ".just-demand" / "state" / "state.json")
+            self.assertEqual(promoted_state["active_sessions"]["session-a"]["current_task_id"], task_a)
+            self.assertEqual(promoted_state["active_sessions"]["session-b"]["current_task_id"], task_b)
+            mark_task(root, task_a, "executing", session_id="session-a")
+            mark_task(root, task_b, "executing", session_id="session-b")
+
+            complete_verification(
+                root, task_a, "passed", "Task A complete", checkpoint_commit=False
+            )
+
+            state = read_json(root / ".just-demand" / "state" / "state.json")
+            self.assertIsNone(state["active_sessions"]["session-a"]["current_task_id"])
+            self.assertEqual(state["active_sessions"]["session-b"]["current_task_id"], task_b)
+            self.assertNotIn(task_a, state["active_task_ids"])
+            self.assertIn(task_b, state["active_task_ids"])
+
+    def test_session_selection_does_not_replace_global_cli_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            intake = create_intake(root, "Task", "Work", "session-a")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            task_id = promote_to_task(root, intake["intake_id"], "Task", "Work", "design", ["Works"])["task_id"]
+
+            select_task(root, task_id, session_id="session-b")
+
+            state = read_json(root / ".just-demand" / "state" / "state.json")
+            self.assertEqual(state["current_task_id"], task_id)
+            self.assertEqual(state["active_sessions"]["session-b"]["current_task_id"], task_id)
+
     def test_resume_command_selects_task(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

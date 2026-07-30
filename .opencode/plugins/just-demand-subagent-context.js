@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import {
   appendDebugSessionAudit,
+  bindWorkflowControlCommandToSession,
   debugLog,
   enforceExecutionGate,
   getActiveTask,
@@ -44,7 +45,8 @@ export default async ({ directory }) => {
       const subagentName = getWorkflowSubagentName(args)
       if (!args || !SUPPORTED.has(subagentName)) return
 
-      const taskId = getActiveTask(directory)
+      const sessionId = input?.sessionID || "main"
+      const taskId = getActiveTask(directory, sessionId)
       if (!taskId) return
 
       const recoveredTaskId = getRecoveredSubagentTaskId(directory, taskId, subagentName, input, output)
@@ -60,7 +62,11 @@ export default async ({ directory }) => {
       }
       const toolName = String(input?.tool || "").toLowerCase()
       const args = output?.args || input?.args
-      enforceExecutionGate(directory, toolName, args, "subagent.gate")
+      const sessionId = input?.sessionID || "main"
+      if (toolName === "bash" && args?.command) {
+        args.command = bindWorkflowControlCommandToSession(args.command, sessionId)
+      }
+      enforceExecutionGate(directory, toolName, args, "subagent.gate", sessionId)
       if (toolName !== "task") {
         debugLog("subagent.tool.before.skip", { reason: "not_task_tool", tool: toolName }, directory)
         return
@@ -72,14 +78,12 @@ export default async ({ directory }) => {
         return
       }
 
-      const sessionId = input?.sessionID || "main"
-
       // Skip if prompt already contains workflow context (duplicate injection protection)
       if (args.prompt && INJECTION_MARKERS.some((marker) => args.prompt.includes(marker))) {
         debugLog("subagent.tool.before.skip", { reason: "already_injected", workflow_subagent: subagentName }, directory)
         appendDebugSessionAudit(directory, sessionId, "complete", {
           source: "subagent-injection",
-          task_id: getActiveTask(directory) || "",
+          task_id: getActiveTask(directory, sessionId) || "",
           agent: subagentName,
           status: "skipped",
           reason: "already_injected",
@@ -88,7 +92,7 @@ export default async ({ directory }) => {
         return
       }
 
-      const taskId = getActiveTask(directory)
+      const taskId = getActiveTask(directory, sessionId)
       if (!taskId) {
         debugLog("subagent.tool.before.skip", { reason: "no_active_task", workflow_subagent: subagentName }, directory)
         appendDebugSessionAudit(directory, sessionId, "complete", {
