@@ -1,4 +1,5 @@
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
+import { createHash } from "node:crypto"
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { join, relative, resolve } from "node:path"
@@ -168,6 +169,7 @@ const WORKFLOW_CONTROL_CLI_COMMANDS = new Set([
   "resume",
   "complete-verification",
   "update-clarification",
+  "update-audit",
   "checkpoint-commit",
   "create-intake",
   "promote",
@@ -1542,6 +1544,61 @@ export const readTaskContext = (directory, taskId, agentName) => {
   }
 
   return context
+}
+
+export const getExecutionAuditReadinessErrors = (directory, taskId, agentName) => {
+  if (!["just-demand-tester", "just-demand-advisor"].includes(agentName)) return []
+  const task = readTaskJson(directory, taskId)
+  const contract = task?.contract
+  if (!contract || String(contract.contract_version || "1.0") < "1.2") return []
+  const audit = contract.execution_audit || {}
+  const errors = []
+  if (!String(audit.objective || "").trim()) errors.push("current objective")
+  if (!String(audit.implementation_strategy || "").trim()) errors.push("implementation strategy")
+  if (!String(audit.rationale || "").trim()) errors.push("stated rationale")
+  if (!String(audit.updated_at || "").trim()) errors.push("freshness timestamp")
+  const expectedFingerprint = String(audit.workspace_fingerprint || "").trim()
+  if (!expectedFingerprint) {
+    errors.push("workspace fingerprint")
+  } else {
+    try {
+      const root = resolve(directory)
+      const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+      const relevantLines = String(status || "")
+        .split(/\r?\n/)
+        .filter((line) => line && !line.slice(3).startsWith(".just-demand/state/"))
+      const diff = spawnSync("git", ["diff", "HEAD", "--binary"], {
+        cwd: root,
+        encoding: null,
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+      if (![0, 128].includes(diff.status)) throw new Error("git diff failed")
+      const digest = createHash("sha256")
+      digest.update(relevantLines.join("\n"), "utf8")
+      digest.update("\0tracked-diff\0", "utf8")
+      digest.update(diff.stdout || Buffer.alloc(0))
+      for (const line of relevantLines) {
+        if (line.slice(0, 2) !== "??") continue
+        const relativePath = line.slice(3)
+        const file = join(root, relativePath)
+        if (existsSync(file)) {
+          digest.update("\0untracked\0", "utf8")
+          digest.update(relativePath, "utf8")
+          digest.update("\0", "utf8")
+          digest.update(readFileSync(file))
+        }
+      }
+      const currentFingerprint = digest.digest("hex")
+      if (currentFingerprint !== expectedFingerprint) errors.push("workspace changed since audit refresh")
+    } catch {
+      errors.push("workspace fingerprint unavailable")
+    }
+  }
+  return errors
 }
 
 export const getRequiredContextFiles = (agentName) => {

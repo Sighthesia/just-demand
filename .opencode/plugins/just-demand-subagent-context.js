@@ -6,6 +6,7 @@ import {
   enforceExecutionGate,
   getActiveTask,
   getMissingRequiredContextFiles,
+  getExecutionAuditReadinessErrors,
   getLastSubagentDispatchTaskId,
   getRecoveredSubagentTaskId,
   getReminderState,
@@ -152,6 +153,14 @@ export default async ({ directory }) => {
         }
         args.prompt = `Active task: ${taskId}\n\n# BLOCKED\n\nMissing required task context files: ${missing.join(", ")}. Do not proceed until the main agent creates the required task context package files for this task.\n\n---\n\n# Requested Work\n\n${args.prompt || ""}`
         return
+      }
+      const auditErrors = getExecutionAuditReadinessErrors(directory, taskId, subagentName)
+      if (auditErrors.length > 0) {
+        markSubagentUnavailablePending(directory, sessionId)
+        debugLog("subagent.tool.before.block", { reason: "missing_execution_audit", task_id: taskId, workflow_subagent: subagentName, missing: auditErrors }, directory)
+        throw new Error(
+          `Blocked ${subagentName}: main-agent execution audit is incomplete for active task ${taskId}: ${auditErrors.join(", ")}. Run \`just-demand . update-audit ${taskId} --objective ... --strategy ... --rationale ...\` before review dispatch.`,
+        )
       }
       const context = readTaskContext(directory, taskId, subagentName)
       if (!context) {

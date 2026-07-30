@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import fcntl
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -26,8 +27,8 @@ SCHEMA_VERSION = "1.0"
 #   PROJECTION_VERSION    — rendered role-view format
 # ---------------------------------------------------------------------------
 TASK_RECORD_VERSION_V2 = "2.0"
-TASK_CONTRACT_VERSION = "1.1"
-PROJECTION_VERSION = "1.0"
+TASK_CONTRACT_VERSION = "1.2"
+PROJECTION_VERSION = "1.1"
 
 # Contract field names that form the shared semantic core.
 CONTRACT_SHARED_FIELDS = frozenset({
@@ -147,6 +148,18 @@ def empty_contract() -> dict[str, Any]:
             "approach_options": "",
             "approval": "",
         },
+        "execution_audit": {
+            "objective": "",
+            "implementation_strategy": "",
+            "rationale": "",
+            "evidence": [],
+            "assumptions": [],
+            "uncertainties": [],
+            "deviations": [],
+            "updated_at": "",
+            "updated_by": "",
+            "workspace_fingerprint": "",
+        },
     }
 
 
@@ -255,6 +268,18 @@ def load_task_contract(task: dict[str, Any]) -> dict[str, Any]:
             "final_implementation_plan": impl_plan,
             "approach_options": approach_options,
             "approval": approval,
+        },
+        "execution_audit": {
+            "objective": "",
+            "implementation_strategy": "",
+            "rationale": "",
+            "evidence": [],
+            "assumptions": [],
+            "uncertainties": [],
+            "deviations": [],
+            "updated_at": "",
+            "updated_by": "",
+            "workspace_fingerprint": "",
         },
     }
 
@@ -705,6 +730,53 @@ def _render_choices_block(choices: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_execution_audit_block(audit: dict[str, Any]) -> str:
+    objective = _safe_str(audit.get("objective", ""))
+    strategy = _safe_str(audit.get("implementation_strategy", ""))
+    rationale = _safe_str(audit.get("rationale", ""))
+    evidence = _safe_list(audit.get("evidence", []))
+    assumptions = _safe_list(audit.get("assumptions", []))
+    uncertainties = _safe_list(audit.get("uncertainties", []))
+    deviations = _safe_list(audit.get("deviations", []))
+    updated_at = _safe_str(audit.get("updated_at", ""))
+    updated_by = _safe_str(audit.get("updated_by", ""))
+    workspace_fingerprint = _safe_str(audit.get("workspace_fingerprint", ""))
+    if not any((objective, strategy, rationale, evidence, assumptions, uncertainties, deviations, updated_at)):
+        return ""
+
+    lines = [
+        "## Main-Agent Execution Audit",
+        "",
+        "This is a reviewable decision summary, not hidden chain-of-thought or a full conversation transcript.",
+        "",
+    ]
+    for label, value in (
+        ("Current Objective", objective),
+        ("Implementation Strategy", strategy),
+        ("Stated Rationale", rationale),
+    ):
+        if value:
+            lines += [f"### {label}", "", value, ""]
+    for label, values in (
+        ("Evidence", evidence),
+        ("Assumptions", assumptions),
+        ("Uncertainties", uncertainties),
+        ("Known Deviations", deviations),
+    ):
+        if values:
+            lines += [f"### {label}", ""]
+            lines.extend(f"- {value}" for value in values)
+            lines.append("")
+    if updated_at:
+        freshness = f"**Last refreshed:** {updated_at}"
+        if updated_by:
+            freshness += f" by {updated_by}"
+        lines += [freshness, ""]
+    if workspace_fingerprint:
+        lines += [f"**Workspace fingerprint:** `{workspace_fingerprint}`", ""]
+    return "\n".join(lines)
+
+
 def render_contract_projection(contract: dict[str, Any], role: str, task: dict[str, Any] | None = None) -> str:
     """Render the contract as a deterministic markdown view for the given role.
 
@@ -718,11 +790,12 @@ def render_contract_projection(contract: dict[str, Any], role: str, task: dict[s
     open_questions = _safe_list(contract.get("open_questions", []))
     engineering = contract.get("engineering", {}) or {}
     choices = contract.get("choices", {}) or {}
+    execution_audit = contract.get("execution_audit", {}) or {}
 
     parts = ["# Context\n"]
 
-    # Provenance -> only advisor/researcher see raw request
-    if role in ("advisor", "researcher"):
+    # Review roles need the user's original wording as a comparison baseline.
+    if role in ("advisor", "researcher", "tester"):
         prov = _render_provenance_block(provenance)
         if prov:
             parts.append(prov)
@@ -733,12 +806,11 @@ def render_contract_projection(contract: dict[str, Any], role: str, task: dict[s
     # Boundaries -> everyone sees scope and anti-outcomes
     parts.append(_render_boundaries_block(boundaries))
 
-    # Decisions -> advisor/researcher see decisions
-    if role in ("advisor", "researcher"):
+    # Review roles need clarified decisions, not only the final effect.
+    if role in ("advisor", "researcher", "tester"):
         parts.append(_render_decisions_block(decisions))
 
-    # Open questions -> advisor (all), others (only non-empty)
-    if role == "advisor":
+    if role in ("advisor", "tester"):
         parts.append(_render_open_questions_block(open_questions))
 
     # Engineering context
@@ -747,8 +819,11 @@ def render_contract_projection(contract: dict[str, Any], role: str, task: dict[s
     parts.append(_render_engineering_block(engineering, include_code_map=include_code_map, include_verification=include_verification))
 
     # Choices
-    if role in ("coder", "advisor"):
+    if role in ("coder", "advisor", "tester"):
         parts.append(_render_choices_block(choices))
+
+    if role in ("advisor", "tester"):
+        parts.append(_render_execution_audit_block(execution_audit))
 
     result = "\n".join(part for part in parts if part.strip())
     return result
@@ -954,6 +1029,7 @@ def lint_task_packet(task: dict[str, Any], role: str | None = None) -> list[dict
     outcome = contract.get("outcome", {}) or {}
     boundaries = contract.get("boundaries", {}) or {}
     choices = contract.get("choices", {}) or {}
+    execution_audit = contract.get("execution_audit", {}) or {}
 
     # Envelope-level checks
     if not task.get("id"):
@@ -994,6 +1070,16 @@ def lint_task_packet(task: dict[str, Any], role: str | None = None) -> list[dict
         warnings.append({"field": "contract.engineering.code_map", "severity": "warning", "message": "Coder will lack file-level guidance without a code map."})
     if role == "tester" and not _safe_list(eng.get("verification_cases", [])):
         warnings.append({"field": "contract.engineering.verification_cases", "severity": "warning", "message": "Tester will lack verification targets without verification cases."})
+    if role in {"tester", "advisor"}:
+        audit_severity = "error" if str(contract.get("contract_version", "1.0")) >= "1.2" else "warning"
+        if not _safe_str(execution_audit.get("objective", "")):
+            warnings.append({"field": "contract.execution_audit.objective", "severity": audit_severity, "message": f"{role.title()} lacks the main agent's current objective."})
+        if not _safe_str(execution_audit.get("implementation_strategy", "")):
+            warnings.append({"field": "contract.execution_audit.implementation_strategy", "severity": audit_severity, "message": f"{role.title()} lacks the current implementation strategy."})
+        if not _safe_str(execution_audit.get("rationale", "")):
+            warnings.append({"field": "contract.execution_audit.rationale", "severity": audit_severity, "message": f"{role.title()} lacks a stated decision rationale."})
+        if not _safe_str(execution_audit.get("updated_at", "")):
+            warnings.append({"field": "contract.execution_audit.updated_at", "severity": audit_severity, "message": f"{role.title()} cannot determine audit-context freshness."})
 
     return warnings
 
@@ -1248,6 +1334,18 @@ def build_contract_from_intake(
             "final_implementation_plan": impl_plan,
             "approach_options": approach_options,
             "approval": approval,
+        },
+        "execution_audit": {
+            "objective": "",
+            "implementation_strategy": "",
+            "rationale": "",
+            "evidence": [],
+            "assumptions": [],
+            "uncertainties": [],
+            "deviations": [],
+            "updated_at": "",
+            "updated_by": "",
+            "workspace_fingerprint": "",
         },
     }
     if extra:
@@ -3526,6 +3624,109 @@ def create_followup(
         )
 
     return result
+
+
+def _workspace_fingerprint(root: Path) -> str:
+    """Hash tracked diffs and untracked file contents outside workflow state."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if status.returncode != 0:
+        raise RuntimeError(f"Cannot snapshot audit context: git status failed: {status.stderr.strip()}")
+
+    relevant_lines = [
+        line for line in status.stdout.splitlines()
+        if line and not line[3:].startswith(".just-demand/state/")
+    ]
+    tracked_diff = subprocess.run(
+        ["git", "diff", "HEAD", "--binary"],
+        cwd=root,
+        text=False,
+        capture_output=True,
+        check=False,
+    )
+    if tracked_diff.returncode not in (0, 128):
+        raise RuntimeError(f"Cannot snapshot audit context: git diff failed: {tracked_diff.stderr.decode(errors='replace').strip()}")
+
+    digest = hashlib.sha256()
+    digest.update("\n".join(relevant_lines).encode("utf-8"))
+    digest.update(b"\0tracked-diff\0")
+    digest.update(tracked_diff.stdout)
+    for line in relevant_lines:
+        if line[:2] != "??":
+            continue
+        relative_path = line[3:]
+        path = root / relative_path
+        if path.is_file():
+            digest.update(b"\0untracked\0")
+            digest.update(relative_path.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def update_main_agent_audit(
+    root: Path,
+    task_id: str,
+    *,
+    objective: str,
+    implementation_strategy: str,
+    rationale: str,
+    evidence: list[str] | None = None,
+    assumptions: list[str] | None = None,
+    uncertainties: list[str] | None = None,
+    deviations: list[str] | None = None,
+    updated_by: str = "main-agent",
+) -> dict[str, Any]:
+    """Refresh the reviewable main-agent execution snapshot for subagents."""
+    ensure_workspace(root)
+    task_json_path = task_path(root, task_id) / "task.json"
+    if not task_json_path.is_file():
+        raise FileNotFoundError(f"Task not found: {task_id}")
+    task = read_json(task_json_path)
+    if task.get("status", "") not in WRITE_ALLOWED_STATUSES:
+        raise RuntimeError(f"Cannot update audit context for task {task_id}: status is '{task.get('status', '')}'.")
+
+    contract = deepcopy(load_task_contract(task))
+    now = utc_now()
+    contract["contract_version"] = TASK_CONTRACT_VERSION
+    contract["execution_audit"] = {
+        "objective": _safe_str(objective),
+        "implementation_strategy": _safe_str(implementation_strategy),
+        "rationale": _safe_str(rationale),
+        "evidence": _safe_list(evidence or []),
+        "assumptions": _safe_list(assumptions or []),
+        "uncertainties": _safe_list(uncertainties or []),
+        "deviations": _safe_list(deviations or []),
+        "updated_at": now,
+        "updated_by": _safe_str(updated_by) or "main-agent",
+        "workspace_fingerprint": "",
+    }
+    task["schema_version"] = TASK_RECORD_VERSION_V2
+    task["contract"] = contract
+    task["updated_at"] = now
+    write_json_atomic(task_json_path, task)
+
+    task_dir = task_path(root, task_id)
+    for name, content in {
+        "context.md": render_context_markdown(task),
+        "research.md": render_research_markdown(task),
+        "implement.md": render_implementation_plan_markdown(task),
+        "verify.md": render_verify_markdown(task),
+    }.items():
+        (task_dir / name).write_text(content, encoding="utf-8")
+
+    workspace_fingerprint = _workspace_fingerprint(root)
+    contract["execution_audit"]["workspace_fingerprint"] = workspace_fingerprint
+    task["contract"] = contract
+    write_json_atomic(task_json_path, task)
+    (task_dir / "context.md").write_text(render_context_markdown(task), encoding="utf-8")
+    append_task_event(root, task_id, "execution_audit_updated", "Refreshed main-agent execution audit context")
+    return {"ok": True, "task_id": task_id, "updated_at": now, "execution_audit": contract["execution_audit"]}
 
 
 # ---------------------------------------------------------------------------

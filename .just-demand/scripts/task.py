@@ -39,6 +39,7 @@ from workflow_core import (
     start_reflection,
     start_verification,
     update_intake_section,
+    update_main_agent_audit,
     update_suggestion_status,
     update_task_clarification,
 )
@@ -81,6 +82,7 @@ COMMANDS = {
     "update",
     "update-clarification",
     "update-intake-section",
+    "update-audit",
     "update-suggestion-status",
     "migrate-task",
     "render-context",
@@ -229,6 +231,17 @@ def build_parser() -> argparse.ArgumentParser:
     update_clar.add_argument("--field", action="append", default=[], help="Clarification field to update (format: key=value, repeatable)")
     update_clar.add_argument("--from-file", default=None, help="Path to a JSON object file or a markdown section file (## headings) containing clarification field updates")
 
+    update_audit = sub.add_parser("update-audit", help="Refresh the main-agent execution audit context for tester and advisor")
+    update_audit.add_argument("task_id", help="Task ID to update")
+    update_audit.add_argument("--objective", required=True, help="Current implementation objective")
+    update_audit.add_argument("--strategy", required=True, help="Current implementation strategy or plan")
+    update_audit.add_argument("--rationale", required=True, help="Reviewable reason for the current strategy")
+    update_audit.add_argument("--evidence", action="append", default=[], help="Supporting evidence (repeatable)")
+    update_audit.add_argument("--assumption", action="append", default=[], help="Implementation assumption (repeatable)")
+    update_audit.add_argument("--uncertainty", action="append", default=[], help="Unresolved uncertainty (repeatable)")
+    update_audit.add_argument("--deviation", action="append", default=[], help="Known deviation from the approved plan (repeatable)")
+    update_audit.add_argument("--updated-by", default="main-agent", help="Actor refreshing the snapshot")
+
     update_intake_sec = sub.add_parser("update-intake-section", help="Update a named section in an existing intake markdown file")
     update_intake_sec.add_argument("intake_id", help="Intake ID to update")
     update_intake_sec.add_argument("section", help="Section heading name (e.g. 'Scope', 'Chosen Approach')")
@@ -361,6 +374,19 @@ def execute_command(root: Path, args: list[str]) -> int:
                 field_args = _parse_field_args(parsed.field)
                 fields.update(field_args)
             result = update_task_clarification(root, parsed.task_id, fields)
+        elif parsed.command == "update-audit":
+            result = update_main_agent_audit(
+                root,
+                parsed.task_id,
+                objective=parsed.objective,
+                implementation_strategy=parsed.strategy,
+                rationale=parsed.rationale,
+                evidence=parsed.evidence,
+                assumptions=parsed.assumption,
+                uncertainties=parsed.uncertainty,
+                deviations=parsed.deviation,
+                updated_by=parsed.updated_by,
+            )
         elif parsed.command == "start-verification":
             result = start_verification(root, parsed.task_id, session_id=parsed.session)
         elif parsed.command == "promote":

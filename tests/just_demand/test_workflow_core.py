@@ -47,6 +47,7 @@ from workflow_core import (
     task_is_ready_for_execution,
     task_event_path,
     update_intake_section,
+    update_main_agent_audit,
     update_suggestion_status,
     update_task_clarification,
     write_json_atomic,
@@ -2094,7 +2095,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(contract["choices"]["final_implementation_plan"], "1. Add event bus\n2. Wire handlers\n3. Verify")
             self.assertEqual(contract["_extra"]["validation"], "Run event flow verification.")
             self.assertEqual(contract["choices"]["approval"], "Approved by user.")
-            self.assertEqual(contract["contract_version"], "1.1")
+            self.assertEqual(contract["contract_version"], "1.2")
             self.assertEqual(contract["contract_revision"], 1)
             self.assertEqual(contract["authorization"]["status"], "approved")
             self.assertEqual(contract["authorization"]["approved_revision"], 1)
@@ -6543,6 +6544,90 @@ class V2ContractTests(unittest.TestCase):
         self.assertIn("## Verification Cases", ver)
         self.assertIn("TC1: verify rendering", ver)
         self.assertIn("## Anti-Outcomes", ver)
+
+    def test_tester_and_advisor_projection_include_execution_audit_and_provenance(self):
+        from workflow_core import render_contract_projection, empty_contract
+        c = empty_contract()
+        c["provenance"]["raw_request"] = "Original user wording"
+        c["decisions"] = ["User selected structured audit"]
+        c["open_questions"] = ["Can freshness be automated?"]
+        c["choices"]["approach_options"] = "A minimal; B structured"
+        c["choices"]["chosen_approach"] = "B structured"
+        c["choices"]["final_implementation_plan"] = "1. Add audit"
+        c["execution_audit"] = {
+            "objective": "Give reviewers a comparison baseline",
+            "implementation_strategy": "Render one shared audit block",
+            "rationale": "Structured claims are reviewable",
+            "evidence": ["Tester previously lacked provenance"],
+            "assumptions": ["Plugin enforcement is active"],
+            "uncertainties": ["Automatic staleness detection is future work"],
+            "deviations": ["None"],
+            "updated_at": "2026-07-30T12:00:00+00:00",
+            "updated_by": "main-agent",
+        }
+        for role in ("tester", "advisor"):
+            rendered = render_contract_projection(c, role)
+            self.assertIn("Original user wording", rendered)
+            self.assertIn("User selected structured audit", rendered)
+            self.assertIn("A minimal; B structured", rendered)
+            self.assertIn("## Main-Agent Execution Audit", rendered)
+            self.assertIn("Give reviewers a comparison baseline", rendered)
+            self.assertIn("Automatic staleness detection", rendered)
+            self.assertIn("not hidden chain-of-thought", rendered)
+
+    def test_update_main_agent_audit_persists_and_refreshes_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            task_id = "audit-task"
+            task_dir = tasks_dir(root) / "active" / task_id
+            task_dir.mkdir(parents=True)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+            from workflow_core import empty_contract
+            task = {
+                "schema_version": "2.0",
+                "id": task_id,
+                "type": "architecture",
+                "status": "executing",
+                "contract": empty_contract(),
+            }
+            write_json_atomic(task_dir / "task.json", task)
+            (task_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+            result = update_main_agent_audit(
+                root,
+                task_id,
+                objective="Current objective",
+                implementation_strategy="Current strategy",
+                rationale="Reviewable rationale",
+                evidence=["Repository evidence"],
+                uncertainties=["Known uncertainty"],
+            )
+
+            updated = read_json(task_dir / "task.json")
+            self.assertTrue(result["ok"])
+            self.assertEqual(updated["contract"]["contract_version"], "1.2")
+            self.assertEqual(updated["contract"]["execution_audit"]["objective"], "Current objective")
+            self.assertIn("## Main-Agent Execution Audit", (task_dir / "context.md").read_text(encoding="utf-8"))
+            self.assertTrue(updated["contract"]["execution_audit"]["updated_at"])
+            self.assertTrue(updated["contract"]["execution_audit"]["workspace_fingerprint"])
+
+    def test_workspace_fingerprint_changes_when_modified_file_content_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+            tracked = root / "tracked.txt"
+            tracked.write_text("first\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True, capture_output=True)
+            subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"], cwd=root, check=True, capture_output=True)
+            from workflow_core import _workspace_fingerprint
+
+            tracked.write_text("second\n", encoding="utf-8")
+            first = _workspace_fingerprint(root)
+            tracked.write_text("third\n", encoding="utf-8")
+            second = _workspace_fingerprint(root)
+            self.assertNotEqual(first, second)
 
     def test_lint_task_packet_empty_task(self):
         from workflow_core import lint_task_packet, empty_contract

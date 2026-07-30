@@ -1,4 +1,6 @@
 import assert from "node:assert/strict"
+import { execFileSync } from "node:child_process"
+import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -16,6 +18,7 @@ import {
   ensureDebugPerSessionDir,
   getActiveTask,
   getExecutionGateState,
+  getExecutionAuditReadinessErrors,
   getMissingRequiredContextFiles,
   getMissingExecutionGateFields,
   getReflectionGateState,
@@ -314,6 +317,105 @@ test("readTaskContext includes open questions for just-demand-tester", () => {
   assert.match(context, /Event fires twice/)
   assert.match(context, /Remaining Open Questions/)
   assert.match(context, /analytics coverage/)
+})
+
+test("execution audit readiness blocks new review packets but keeps legacy compatibility", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    schema_version: "2.0",
+    id: "task-a",
+    contract: {
+      contract_version: "1.2",
+      contract_revision: 1,
+      authorization: { status: "approved", approved_revision: 1 },
+      outcome: { final_expected_effect: "Reviewers receive an audit baseline" },
+      boundaries: { scope: "Review context only" },
+      choices: { chosen_approach: "Structured audit", final_implementation_plan: "1. Add audit", approval: "Approved" },
+      blocking_questions: [],
+      engineering: {},
+      execution_audit: {},
+    },
+  }))
+
+  const missing = getExecutionAuditReadinessErrors(root, "task-a", "just-demand-tester")
+  assert.deepEqual(missing, ["current objective", "implementation strategy", "stated rationale", "freshness timestamp", "workspace fingerprint"])
+
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    schema_version: "2.0",
+    id: "task-a",
+    contract: { contract_version: "1.1" },
+  }))
+  assert.deepEqual(getExecutionAuditReadinessErrors(root, "task-a", "just-demand-advisor"), [])
+})
+
+test("execution audit readiness accepts a refreshed review baseline", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  execFileSync("git", ["init"], { cwd: root })
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    schema_version: "2.0",
+    id: "task-a",
+    contract: {
+      contract_version: "1.2",
+      execution_audit: {
+        objective: "Review current implementation",
+        implementation_strategy: "Compare contract and diff",
+        rationale: "Independent review catches drift",
+        updated_at: "2026-07-30T12:00:00+00:00",
+        workspace_fingerprint: createHash("sha256").update("\0tracked-diff\0", "utf8").digest("hex"),
+      },
+    },
+  }))
+  assert.deepEqual(getExecutionAuditReadinessErrors(root, "task-a", "just-demand-tester"), [])
+  assert.deepEqual(getExecutionAuditReadinessErrors(root, "task-a", "just-demand-advisor"), [])
+
+  writeFileSync(join(root, "changed.js"), "export const changed = true\n")
+  assert.deepEqual(
+    getExecutionAuditReadinessErrors(root, "task-a", "just-demand-tester"),
+    ["workspace changed since audit refresh"],
+  )
+})
+
+test("subagent-context blocks tester dispatch when a new task lacks execution audit", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "context.md"), "# Context\nGoal")
+  writeFileSync(join(taskDir, "verify.md"), "# Verify\nCheck")
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    schema_version: "2.0",
+    id: "task-a",
+    title: "Task A",
+    type: "architecture",
+    status: "executing",
+    current_step: "execute",
+    contract: {
+      contract_version: "1.2",
+      contract_revision: 1,
+      authorization: { status: "approved", approved_revision: 1 },
+      outcome: { final_expected_effect: "Reviewer receives a comparison baseline" },
+      boundaries: { scope: "Review context only" },
+      choices: { chosen_approach: "Structured audit", final_implementation_plan: "1. Add audit", approval: "Approved" },
+      blocking_questions: [],
+      engineering: { verification_cases: ["Review context is injected"] },
+      execution_audit: {},
+    },
+  }))
+
+  const plugin = await subagentContextFactory({ directory: root })
+  await assert.rejects(
+    plugin["tool.execute.before"](
+      { tool: "Task", sessionID: "main" },
+      { args: { subagent_type: "just-demand-tester", prompt: "Verify" } },
+    ),
+    /main-agent execution audit is incomplete.*current objective.*implementation strategy.*stated rationale.*freshness timestamp.*workspace fingerprint/,
+  )
 })
 
 test("readTaskContext injects compact execution artifact for coder and tester", () => {

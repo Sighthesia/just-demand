@@ -224,7 +224,8 @@ Before implementation or verification:
 2. Run `just-demand . list-active` and inspect unfinished tasks for conflict risk.
 3. Select or resume the intended task if another unfinished task is current.
 4. Ensure the task context package exists when a subagent is selected.
-5. Apply the six eligibility gates and three net-benefit questions before dispatching a subagent. Dispatch only when all nine answers pass. The main agent executes when any answer fails or is uncertain, including for long-context or multi-file work. Small work stays in the main session.
+5. Before tester or advisor review, refresh the structured main-agent execution audit with the current objective, implementation strategy, stated rationale, evidence, assumptions, uncertainties, known deviations, and timestamp.
+6. Apply the six eligibility gates and three net-benefit questions before dispatching a subagent. Dispatch only when all nine answers pass. The main agent executes when any answer fails or is uncertain, including for long-context or multi-file work. Small work stays in the main session.
 
 Required task context files for the default optional roles:
 
@@ -234,6 +235,8 @@ Required task context files for the default optional roles:
 Compatibility dispatch retains the historical projections: `just-demand-coder` uses `context.md` plus `implement.md`, and `just-demand-researcher` uses `context.md`. These files are compatibility inputs, not new-task routing requirements.
 
 If required context files are missing, stop and refresh the package before execution.
+
+Tester and advisor receive both sides of the comparison: the user-expectation contract (including raw request, considered options, and clarified decisions) and the current main-agent execution audit. The audit is a concise record of reviewable claims, not hidden chain-of-thought or a full conversation transcript. Review roles must test those claims against repository evidence and report stale context, unsupported assumptions, unrecorded deviations, or contradictions with the approved contract.
 
 ## Verification, Checkpoints, And Archive
 

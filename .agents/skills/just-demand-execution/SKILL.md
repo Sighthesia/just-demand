@@ -21,6 +21,7 @@ Execute formal work items in the main session or through selectively dispatched 
 - If a suitable subagent is unavailable, ask the user to retry now or skip one turn rather than silently falling back.
 - Implementation or verification must not start unless the current formal task already has the required task context files. Do not treat missing task context as a recoverable inline shortcut.
 - Before dispatching a subagent or starting implementation, mark the task status with `mark`.
+- Before dispatching tester or advisor, refresh the structured review baseline with `just-demand . update-audit <task-id> --objective ... --strategy ... --rationale ...`. Add repeatable evidence, assumption, uncertainty, and deviation flags; omit a category only after considering it and finding no known item.
 - Before ending a turn with unfinished work, mark the task `paused` with current progress and known impact.
 
 ## Role Dispatch Guide
@@ -202,10 +203,11 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 3. Remember that `create-intake` alone will not appear in `list-active`; only promoted formal tasks do.
 4. If `list-active` shows unfinished tasks but no current task is selected, pick the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
 5. Ensure the current task package has the required files for the intended subagent.
-6. Verify the clarification gate above passes. If not, route back to clarification.
-7. Dispatch only when all six gates and all three net-benefit questions pass. Otherwise the main agent executes; small work always stays inline.
-8. Review subagent output before moving to the next phase.
-9. Run verification before claiming completion.
+6. Refresh the main-agent execution audit before tester/advisor review so it reflects the current code and known deviations, not only the initial plan.
+7. Verify the clarification gate above passes. If not, route back to clarification.
+8. Dispatch only when all six gates and all three net-benefit questions pass. Otherwise the main agent executes; small work always stays inline.
+9. Review subagent output before moving to the next phase.
+10. Run verification before claiming completion.
 
 Quick recovery when execution is blocked by task selection state:
 

@@ -26,19 +26,22 @@ Start the report with the observable result or mismatch, then the checks and any
 - `context.md` and `verify.md`
 - Acceptance criteria, active validation revision, and chosen solution shape
 - Current diff or files under review
+- User raw request, considered options, clarified decisions, and the latest main-agent execution audit
 
 ## Workflow Loop
 
-1. Confirm what is supposed to be true now.
-2. Inspect the changed files and run the relevant checks.
-3. Judge the visible or behavioral result, not only syntax or bounds.
-4. Apply only low-risk local fixes if they stay within scope.
-5. Report findings, fixes, verification results, and residual risk.
+1. Reconstruct the trace from raw request through clarified choices to the approved effect.
+2. Compare the implementation against both the approved contract and the main agent's current objective, strategy, evidence, assumptions, deviations, and uncertainty.
+3. Inspect the changed files and run the relevant checks.
+4. Judge the visible or behavioral result, not only syntax or bounds.
+5. Apply only low-risk local fixes if they stay within scope.
+6. Report findings, fixes, verification results, and residual risk.
 
 ## Boundaries
 
 - Verification only, plus low-risk local fixes within scope.
 - Do not introduce a new approach or expand the task.
+- Treat the execution audit as a claim to verify, not as authoritative truth. Flag unsupported assumptions, stale strategy, unrecorded deviations, and contradictions with the user contract.
 - Do not commit.
 - Do not modify `.just-demand/state/` except through designated workflow scripts.
 - Do not call the Task tool or dispatch another subagent.
