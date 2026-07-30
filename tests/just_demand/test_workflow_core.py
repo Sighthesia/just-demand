@@ -2244,6 +2244,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(result["checkpoint_commit"]["mixed_paths"], [])
             self.assertEqual(git_stdout(root, "show", "HEAD:tracked.txt"), "one\ntwo\nthree\nfour\ntask five\n")
             self.assertEqual(target.read_text(encoding="utf-8"), "old one\ntwo\nthree\nfour\ntask five\n")
+            self.assertNotIn("tracked.txt", git_stdout(root, "diff", "--cached", "--name-only"))
 
     def test_checkpoint_commit_falls_back_for_overlapping_hunks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2269,6 +2270,27 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(result["checkpoint_commit"]["isolated_paths"], [])
             self.assertEqual(result["checkpoint_commit"]["mixed_paths"], ["tracked.txt"])
             self.assertEqual(git_stdout(root, "show", "HEAD:tracked.txt"), "task one\ntwo\nthree\n")
+            self.assertNotIn("tracked.txt", git_stdout(root, "diff", "--cached", "--name-only"))
+
+    def test_checkpoint_commit_preserves_unrelated_staged_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+            (root / "staged.txt").write_text("keep staged\n", encoding="utf-8")
+            subprocess.run(["git", "add", "staged.txt"], cwd=root, check=True)
+
+            intake = create_intake(root, "Index sync", "Keep unrelated staged work", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            task_id = promote_to_task(root, intake["intake_id"], "Index sync", "Keep unrelated staged work", "implementation", ["Works"])["task_id"]
+            create_validation_revision(root, task_id, "Index.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            (root / "task.txt").write_text("task work\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(git_stdout(root, "diff", "--cached", "--name-only").strip(), "staged.txt")
 
     def test_checkpoint_commit_preserves_chinese_task_title(self):
         with tempfile.TemporaryDirectory() as tmp:

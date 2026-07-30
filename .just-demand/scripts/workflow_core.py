@@ -3131,8 +3131,15 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
     for path in dict.fromkeys(eligible_paths):
         baseline_patch = baseline_diffs.get(path) if isinstance(baseline_diffs, dict) else None
         if path in baseline_paths and not isinstance(baseline_patch, str):
-            # A pre-existing untracked or binary path has no safe HEAD-relative
-            # patch to separate, so leave it outside this task's commit.
+            # A stale index can mark a path changed even when its worktree matches
+            # HEAD. In that case, a later worktree diff belongs to this task.
+            current_diff = _git_diff(root, path)
+            if current_diff.returncode != 0:
+                return _record_checkpoint_commit_result(
+                    root, task_id, _with_fallback({"created": False, "reason": "git_diff_failed", "paths": [path]})
+                )
+            if current_diff.stdout:
+                candidate_paths.append(path)
             continue
         if path not in baseline_paths:
             candidate_paths.append(path)
@@ -3222,6 +3229,12 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
         if _run_git(root, "update-ref", "HEAD", commit_hash, previous_head).returncode != 0:
             return _record_checkpoint_commit_result(
                 root, task_id, _with_fallback({"created": False, "reason": "git_commit_failed", "message": message, "paths": candidate_paths})
+            )
+        # The commit used a temporary index. Align only its paths in the real
+        # index so they do not appear as stale staged changes after HEAD moves.
+        if _run_git(root, "reset", "HEAD", "--", *candidate_paths).returncode != 0:
+            return _record_checkpoint_commit_result(
+                root, task_id, _with_fallback({"created": False, "reason": "git_index_failed", "message": message, "paths": candidate_paths})
             )
     finally:
         Path(index_path).unlink(missing_ok=True)
