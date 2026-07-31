@@ -222,10 +222,11 @@ Before implementation or verification:
 
 1. Confirm the intended task is active.
 2. Run `just-demand . list-active` and inspect unfinished tasks for conflict risk.
-3. Select or resume the intended task if another unfinished task is current.
-4. Ensure the task context package exists when a subagent is selected.
-5. Before tester or advisor review, refresh the structured main-agent execution audit with the current objective, implementation strategy, stated rationale, evidence, assumptions, uncertainties, known deviations, and timestamp.
-6. Apply the six eligibility gates and three net-benefit questions before dispatching a subagent. Dispatch only when all nine answers pass. The main agent executes when any answer fails or is uncertain, including for long-context or multi-file work. Small work stays in the main session.
+3. When active tasks have overlapping `impact` paths and writes are planned, recommend an independent Git worktree per conflicting task, with a task branch when needed. This is advisory only: the workflow never creates branches/worktrees, moves uncommitted changes, or blocks shared-directory work automatically.
+4. Select or resume the intended task if another unfinished task is current.
+5. Ensure the task context package exists when a subagent is selected.
+6. Before tester or advisor review, refresh the structured main-agent execution audit with the current objective, implementation strategy, stated rationale, evidence, assumptions, uncertainties, known deviations, and timestamp.
+7. Apply the six eligibility gates and three net-benefit questions before dispatching a subagent. Dispatch only when all nine answers pass. The main agent executes when any answer fails or is uncertain, including for long-context or multi-file work. Small work stays in the main session.
 
 Required task context files for the default optional roles:
 

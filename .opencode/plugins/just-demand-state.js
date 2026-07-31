@@ -575,6 +575,12 @@ const buildReminderLines = (type) => {
         "- Prefer `update-intake-section` via the CLI for routine intake edits.",
         "- Raw file fallback still works but is meant for recovery—use the CLI path when possible.",
       ]
+    case "worktree_conflict":
+      return [
+        "- Overlapping task impacts are detected for this write-oriented work.",
+        "- Recommended: use a separate Git worktree per conflicting task; create a task branch first if needed.",
+        "- No branch/worktree creation or movement of uncommitted changes is automatic.",
+      ]
     default:
       return []
   }
@@ -743,6 +749,14 @@ export default async ({ directory } = {}) => {
       const originalText = textPart.text
       const afterControllerText = applyControllerDecision(textPart.text, reminderState, controllerDecision)
       textPart.text = afterControllerText
+
+      if (
+        activeTask
+        && gateState.overlappingTaskIds?.length > 0
+        && !textLooksLikeReadOnlyWork(currentText)
+      ) {
+        textPart.text = appendReminder(textPart.text, reminderState, "worktree_conflict")
+      }
 
       // First-screen output gate: gentle reminder when the model's response is long
       // but does not lead with a conclusion, recommendation, or result.

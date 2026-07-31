@@ -230,14 +230,15 @@ If clipping, masking, opacity, or delayed drawing is used only as a safety guard
 
 1. Confirm active formal work item.
 2. Run `just-demand . list-active` and inspect all unfinished tasks for conflict risk.
-3. Remember that `create-intake` alone will not appear in `list-active`; only promoted formal tasks do.
-4. If `list-active` shows unfinished tasks but no current task is selected, pick the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
-5. Ensure the current task package has the required files for the intended subagent.
-6. Refresh the main-agent execution audit before tester/advisor review so it reflects the current code and known deviations, not only the initial plan.
-7. Verify the clarification gate above passes. If not, route back to clarification.
-8. Apply the six eligibility gates and three net-benefit questions. Dispatch the narrowest suitable subagent only when all nine answers are "yes". The main agent executes when any answer fails or is uncertain, including substantial code reading, multi-file editing, or extended verification. Small work always stays inline.
-9. Review subagent output before moving to the next phase.
-10. Run verification before claiming completion.
+3. When the current task's `impact` overlaps another unfinished task and writes are planned, recommend a separate Git worktree for each conflicting task; create a task branch first if needed. Do not automatically create branches/worktrees, move uncommitted changes, or block the user from continuing in the shared directory.
+4. Remember that `create-intake` alone will not appear in `list-active`; only promoted formal tasks do.
+5. If `list-active` shows unfinished tasks but no current task is selected, pick the intended task with `just-demand . select-task <task-id>` or `just-demand . resume <task-id>`.
+6. Ensure the current task package has the required files for the intended subagent.
+7. Refresh the main-agent execution audit before tester/advisor review so it reflects the current code and known deviations, not only the initial plan.
+8. Verify the clarification gate above passes. If not, route back to clarification.
+9. Apply the six eligibility gates and three net-benefit questions. Dispatch the narrowest suitable subagent only when all nine answers are "yes". The main agent executes when any answer fails or is uncertain, including substantial code reading, multi-file editing, or extended verification. Small work always stays inline.
+10. Review subagent output before moving to the next phase.
+11. Run verification before claiming completion.
 
 Quick recovery when execution is blocked by task selection state:
 

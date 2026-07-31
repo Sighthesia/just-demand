@@ -2092,6 +2092,27 @@ test("state reminds to select a current task when unfinished tasks exist", async
   assert.doesNotMatch(output.parts[0].text, /workflow entry required/i)
 })
 
+test("state recommends a worktree only for write-oriented work with overlapping impacts", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const activeDir = join(root, ".just-demand", "state", "active")
+  mkdirSync(join(activeDir, "task-a"), { recursive: true })
+  writeFileSync(join(activeDir, "task-a", "task.json"), JSON.stringify({ id: "task-a", status: "executing", impact: ["src/"], title: "Current task" }))
+  mkdirSync(join(activeDir, "task-b"), { recursive: true })
+  writeFileSync(join(activeDir, "task-b", "task.json"), JSON.stringify({ id: "task-b", status: "executing", impact: ["src/drivers"], title: "Parallel task" }))
+
+  const plugin = await stateFactory({ directory: root })
+  const readOnly = { parts: [{ type: "text", text: "Please inspect the code for overlapping driver changes; no action needed." }] }
+  await plugin["chat.message"]({ sessionID: "worktree-read-only" }, readOnly)
+  assert.match(readOnly.parts[0].text, /overlap: task-b/)
+  assert.doesNotMatch(readOnly.parts[0].text, /separate Git worktree/)
+
+  const write = { parts: [{ type: "text", text: "Implement the driver changes for this task." }] }
+  await plugin["chat.message"]({ sessionID: "worktree-write" }, write)
+  assert.match(write.parts[0].text, /separate Git worktree per conflicting task/)
+  assert.match(write.parts[0].text, /No branch\/worktree creation or movement of uncommitted changes is automatic/)
+})
+
 test("state allows workflow-entry narration when no active task exists", async () => {
   const root = makeRoot()
   mkdirSync(join(root, ".just-demand", "state"), { recursive: true })
