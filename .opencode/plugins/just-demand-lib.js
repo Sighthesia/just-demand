@@ -1571,12 +1571,15 @@ export const getExecutionAuditReadinessErrors = (directory, taskId, agentName) =
       const relevantLines = String(status || "")
         .split(/\r?\n/)
         .filter((line) => line && !line.slice(3).startsWith(".just-demand/state/"))
-      const diff = spawnSync("git", ["diff", "HEAD", "--binary"], {
+      const diff = spawnSync("git", ["diff", "HEAD", "--binary", "--", ".", ":(exclude).just-demand/state/"], {
         cwd: root,
         encoding: null,
         stdio: ["ignore", "pipe", "pipe"],
       })
-      if (![0, 128].includes(diff.status)) throw new Error("git diff failed")
+      if (![0, 128].includes(diff.status)) {
+        const stderr = String(diff.stderr || "").trim()
+        throw new Error(`git diff failed${stderr ? `: ${stderr}` : ""}`)
+      }
       const digest = createHash("sha256")
       digest.update(relevantLines.join("\n"), "utf8")
       digest.update("\0tracked-diff\0", "utf8")
@@ -1594,8 +1597,9 @@ export const getExecutionAuditReadinessErrors = (directory, taskId, agentName) =
       }
       const currentFingerprint = digest.digest("hex")
       if (currentFingerprint !== expectedFingerprint) errors.push("workspace changed since audit refresh")
-    } catch {
-      errors.push("workspace fingerprint unavailable")
+    } catch (error) {
+      const reason = error instanceof Error && error.message ? `: ${error.message}` : ""
+      errors.push(`workspace fingerprint unavailable${reason}`)
     }
   }
   return errors

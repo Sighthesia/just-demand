@@ -381,6 +381,57 @@ test("execution audit readiness accepts a refreshed review baseline", () => {
   )
 })
 
+test("execution audit readiness ignores workflow state changes", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  execFileSync("git", ["init"], { cwd: root })
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    schema_version: "2.0",
+    id: "task-a",
+    contract: {
+      contract_version: "1.2",
+      execution_audit: {
+        objective: "Review current implementation",
+        implementation_strategy: "Compare contract and diff",
+        rationale: "Independent review catches drift",
+        updated_at: "2026-07-30T12:00:00+00:00",
+        workspace_fingerprint: createHash("sha256").update("\0tracked-diff\0", "utf8").digest("hex"),
+      },
+    },
+  }))
+
+  writeFileSync(join(root, ".just-demand", "state", "events.jsonl"), '{"event":"audit"}\n')
+  assert.deepEqual(getExecutionAuditReadinessErrors(root, "task-a", "just-demand-tester"), [])
+})
+
+test("execution audit readiness preserves fingerprint calculation failures", () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  const taskDir = join(root, ".just-demand", "state", "active", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "task.json"), JSON.stringify({
+    schema_version: "2.0",
+    id: "task-a",
+    contract: {
+      contract_version: "1.2",
+      execution_audit: {
+        objective: "Review current implementation",
+        implementation_strategy: "Compare contract and diff",
+        rationale: "Independent review catches drift",
+        updated_at: "2026-07-30T12:00:00+00:00",
+        workspace_fingerprint: "known-baseline",
+      },
+    },
+  }))
+
+  const errors = getExecutionAuditReadinessErrors(root, "task-a", "just-demand-tester")
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /^workspace fingerprint unavailable: /)
+  assert.match(errors[0], /git status/)
+})
+
 test("subagent-context blocks tester dispatch when a new task lacks execution audit", async () => {
   const root = makeRoot()
   scaffoldWorkflow(root)

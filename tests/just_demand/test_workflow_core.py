@@ -6629,6 +6629,31 @@ class V2ContractTests(unittest.TestCase):
             second = _workspace_fingerprint(root)
             self.assertNotEqual(first, second)
 
+    def test_workspace_fingerprint_ignores_workflow_state_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_workspace(root)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+            state_file = root / ".just-demand" / "state" / "state.json"
+            state_file.write_text('{"revision": 1}\n', encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
+            subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"], cwd=root, check=True, capture_output=True)
+            from workflow_core import _workspace_fingerprint
+
+            first = _workspace_fingerprint(root)
+            state_file.write_text('{"revision": 2}\n', encoding="utf-8")
+            second = _workspace_fingerprint(root)
+            self.assertEqual(first, second)
+
+    def test_workspace_fingerprint_reports_git_command_failures(self):
+        from workflow_core import _workspace_fingerprint
+        failed = subprocess.CompletedProcess(["git", "status"], 1, stdout="", stderr="repository unavailable")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("workflow_core.subprocess.run", return_value=failed):
+                with self.assertRaisesRegex(RuntimeError, "git status failed: repository unavailable"):
+                    _workspace_fingerprint(Path(tmp))
+
     def test_lint_task_packet_empty_task(self):
         from workflow_core import lint_task_packet, empty_contract
         task = {"schema_version": "2.0", "id": "test", "type": "design",

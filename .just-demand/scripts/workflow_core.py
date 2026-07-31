@@ -3643,7 +3643,7 @@ def _workspace_fingerprint(root: Path) -> str:
         if line and not line[3:].startswith(".just-demand/state/")
     ]
     tracked_diff = subprocess.run(
-        ["git", "diff", "HEAD", "--binary"],
+        ["git", "diff", "HEAD", "--binary", "--", ".", ":(exclude).just-demand/state/"],
         cwd=root,
         text=False,
         capture_output=True,
