@@ -257,7 +257,7 @@ Do not wait for perfect conditions. If the verified slice is clean, commit it.
 
 ### Impact scope recommendation (not a gate)
 
-Setting `impact` via `mark --impact PATH` scopes the commit to only task-related files. If impact is not set, the script commits all non-generated changed files automatically. Impact scoping is **recommended** for precision but **not required** for the commit to proceed.
+Setting `impact` via `mark --impact PATH` scopes the commit to only task-related files. The execution baseline also lets the script commit task-only hunks from shared files. An overlapping baseline hunk is left uncommitted and recorded as mixed, while every other safely attributable task path still checkpoints. Impact scoping is **recommended** for precision but **not required** for the commit to proceed.
 
 ### When NOT to commit
 

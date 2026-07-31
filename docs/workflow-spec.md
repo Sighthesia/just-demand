@@ -253,6 +253,7 @@ Checkpoint semantics:
 
 - Clean verification should normally produce a checkpoint commit through the script-owned closeout path.
 - The script owns the safety gate, commit scoping, and archive-on-pass behavior.
+- When concurrent uncommitted work overlaps a task's execution baseline, checkpoint every safely separable task path and leave ambiguous same-hunk changes uncommitted; never include unrelated work solely to create a checkpoint.
 - The agent should not hand-edit workflow state files.
 
 ## Recovery Model
