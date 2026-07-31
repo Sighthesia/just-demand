@@ -2292,7 +2292,7 @@ class WorkflowCoreTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "old one\ntwo\nthree\nfour\ntask five\n")
             self.assertNotIn("tracked.txt", git_stdout(root, "diff", "--cached", "--name-only"))
 
-    def test_checkpoint_commit_falls_back_for_overlapping_hunks(self):
+    def test_checkpoint_commit_skips_overlapping_hunks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             init_git_repo(root)
@@ -2312,10 +2312,44 @@ class WorkflowCoreTests(unittest.TestCase):
 
             result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
 
-            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertFalse(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"]["reason"], "no_task_scoped_changes")
+            self.assertEqual(result["checkpoint_commit"]["paths"], [])
             self.assertEqual(result["checkpoint_commit"]["isolated_paths"], [])
             self.assertEqual(result["checkpoint_commit"]["mixed_paths"], ["tracked.txt"])
-            self.assertEqual(git_stdout(root, "show", "HEAD:tracked.txt"), "task one\ntwo\nthree\n")
+            self.assertEqual(git_stdout(root, "show", "HEAD:tracked.txt"), "one\ntwo\nthree\n")
+            self.assertEqual(target.read_text(encoding="utf-8"), "task one\ntwo\nthree\n")
+            self.assertNotIn("tracked.txt", git_stdout(root, "diff", "--cached", "--name-only"))
+
+    def test_checkpoint_commit_commits_safe_paths_alongside_overlapping_hunks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+            target = root / "tracked.txt"
+            target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-m", "add tracked"], cwd=root, check=True)
+            target.write_text("old one\ntwo\nthree\n", encoding="utf-8")
+
+            intake = create_intake(root, "Safe mixed commit", "Commit separable task changes", "s1")
+            set_intake_scope(root, intake["intake_id"])
+            set_intake_design_artifact(root, intake["intake_id"])
+            task_id = promote_to_task(
+                root, intake["intake_id"], "Safe mixed commit", "Commit separable task changes", "implementation", ["Works"]
+            )["task_id"]
+            create_validation_revision(root, task_id, "Safe mixed.", ["C1"], ["E1"])
+            start_execution(root, task_id, ["just-demand-coder"])
+            target.write_text("task one\ntwo\nthree\n", encoding="utf-8")
+            (root / "task.txt").write_text("task work\n", encoding="utf-8")
+
+            result = complete_verification(root, task_id, "passed", "All done", auto_archive=False)
+
+            self.assertTrue(result["checkpoint_commit"]["created"])
+            self.assertEqual(result["checkpoint_commit"]["paths"], ["task.txt"])
+            self.assertEqual(result["checkpoint_commit"]["mixed_paths"], ["tracked.txt"])
+            self.assertEqual(git_stdout(root, "show", "HEAD:tracked.txt"), "one\ntwo\nthree\n")
+            self.assertEqual(git_stdout(root, "show", "HEAD:task.txt"), "task work\n")
+            self.assertEqual(target.read_text(encoding="utf-8"), "task one\ntwo\nthree\n")
             self.assertNotIn("tracked.txt", git_stdout(root, "diff", "--cached", "--name-only"))
 
     def test_checkpoint_commit_preserves_unrelated_staged_changes(self):

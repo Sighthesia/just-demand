@@ -3267,21 +3267,25 @@ def create_checkpoint_commit(root: Path, task_id: str) -> dict[str, Any]:
             continue
         task_patch = _isolated_hunk_patch(current_diff.stdout, baseline_patch)
         if task_patch is None:
-            candidate_paths.append(path)
             mixed_paths.append(path)
             continue
         if task_patch:
             candidate_paths.append(path)
             isolated_paths.append(path)
             continue
-        candidate_paths.append(path)
         mixed_paths.append(path)
 
     if not candidate_paths:
         return _record_checkpoint_commit_result(
             root,
             task_id,
-            {"created": False, "reason": "no_task_scoped_changes", "paths": []},
+            {
+                "created": False,
+                "reason": "no_task_scoped_changes",
+                "paths": [],
+                "isolated_paths": [],
+                "mixed_paths": mixed_paths,
+            },
         )
 
     diff_result = _run_git(root, "diff", "--", *candidate_paths)
