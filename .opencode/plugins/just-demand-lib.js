@@ -686,6 +686,57 @@ export const looksLikeBashWriteCommand = (command) => {
   return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(trimmed)) || hasUnquotedShellRedirection(trimmed)
 }
 
+// fd 重定向（2>/dev/null、2>&1、>&2、2>&-）不产生文件写入，不应被当作
+// 写操作重定向。只有真实文件重定向（> file、>> file）才触发写闸门。
+const isSafeFdRedirection = (shellText, index) => {
+  const rest = shellText.slice(index + 1).trimStart()
+  // fd 复制/关闭：2>&1、>&2、2>&-（数字后允许管道/分号等分隔符）
+  if (rest.startsWith("&")) {
+    const target = rest.slice(1).trimStart()
+    return /^\d+(?:\s|$)/.test(target) || target === "-"
+  }
+  // 输出到 /dev/null：2>/dev/null、>/dev/null
+  return /^\/dev\/null\b/.test(rest)
+}
+
+// 命令中所有未加引号的 > 均为安全 fd 重定向（且至少出现一个）时返回 true。
+// 用于生成"误判"提示：这类命令本身没有文件写入意图。
+const hasSafeFdRedirectionOnly = (command) => {
+  const shellText = stripHeredocBodies(command)
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  let sawSafeRedirect = false
+
+  for (let index = 0; index < shellText.length; index += 1) {
+    const char = shellText[index]
+
+    if (char === "\\") {
+      if (!inSingleQuote && index + 1 < shellText.length) index += 1
+      continue
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote
+      continue
+    }
+
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote
+      continue
+    }
+
+    if (char === ">" && !inSingleQuote && !inDoubleQuote) {
+      if (isSafeFdRedirection(shellText, index)) {
+        sawSafeRedirect = true
+        continue
+      }
+      return false
+    }
+  }
+
+  return sawSafeRedirect
+}
+
 export const hasUnquotedShellRedirection = (command) => {
   const shellText = stripHeredocBodies(command)
   let inSingleQuote = false
@@ -709,7 +760,10 @@ export const hasUnquotedShellRedirection = (command) => {
       continue
     }
 
-    if (char === ">" && !inSingleQuote && !inDoubleQuote) return true
+    if (char === ">" && !inSingleQuote && !inDoubleQuote) {
+      if (isSafeFdRedirection(shellText, index)) continue
+      return true
+    }
   }
 
   return false
@@ -881,6 +935,21 @@ export const looksLikeIntakeOperation = (toolName, args) => {
 
 export const getWriteToolRule = (toolName, args) => WRITE_TOOL_RULES.find((rule) => rule.match(toolName, args)) || null
 
+// 生成 bash 闸门触发原因提示：区分"真实写命令"与"fd 重定向误判"，
+// 帮助 agent 理解为什么命令被归类为写操作，避免换姿势重试被拦命令。
+const buildBashGateHint = (toolName, args) => {
+  if (toolName !== "bash") return ""
+  const command = String(args?.command || "").trim()
+  if (!command) return ""
+  const matchedPattern = BASH_WRITE_PATTERNS.find((pattern) => pattern.test(command))
+  if (matchedPattern) {
+    if (!hasSafeFdRedirectionOnly(command)) return ""
+    return `Note: the command matches a write pattern (${matchedPattern.source}) and was gated; fd redirects like 2>/dev/null are not the reason for the block.`
+  }
+  if (!hasSafeFdRedirectionOnly(command)) return ""
+  return "Note: the command was classified as write-like because of an unquoted '>' redirection; fd redirects such as 2>/dev/null or 2>&1 are not file writes, so retry workflow-control or read-only commands without redirection."
+}
+
 export const enforceExecutionGate = (directory, toolName, args, logPrefix = "state.tool.before", sessionID = undefined) => {
   const normalizedToolName = String(toolName || "").toLowerCase()
   debugLog(logPrefix, {
@@ -940,7 +1009,7 @@ export const enforceExecutionGate = (directory, toolName, args, logPrefix = "sta
   const gateState = getExecutionGateState(directory, sessionID)
   if (gateState.reason !== "ready") {
     debugLog(`${logPrefix}.block`, { reason: gateState.reason, rule: rule.name, label: rule.label, active_task_count: gateState.activeTaskCount }, directory)
-    throw new Error(buildExecutionGateError(rule.label, gateState))
+    throw new Error(buildExecutionGateError(rule.label, gateState, [], buildBashGateHint(normalizedToolName, args)))
   }
 
   const taskId = gateState.taskId
@@ -1090,7 +1159,13 @@ const _buildContractHints = (task) => {
   return hints.length > 0 ? ` ${hints.join(". ")}.` : ""
 }
 
-export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
+const buildNoCurrentTaskSelectedSuffix = (gate) => {
+  const ids = Array.isArray(gate?.activeTaskIds) && gate.activeTaskIds.length > 0 ? gate.activeTaskIds : []
+  const list = ids.length > 0 ? ` Active task IDs: ${ids.join(", ")}.` : ""
+  return `unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first.${list}`
+}
+
+export const buildExecutionGateError = (toolLabel, gate, missing = [], hint = "") => {
   const normalized = typeof gate === "object" && gate !== null
     ? gate
     : gate
@@ -1102,9 +1177,10 @@ export const buildExecutionGateError = (toolLabel, gate, missing = []) => {
     : normalized.reason === "status_not_allowed"
       ? `active task ${normalized.taskId} is in status '${normalized.status}', which does not allow writes. Allowed statuses: planning, executing, verifying, changes_requested, tweaking, debugging.`
       : normalized.reason === "no_current_task_selected"
-        ? "unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first."
+        ? buildNoCurrentTaskSelectedSuffix(normalized)
         : "there is no formal task yet."
-  return `Blocked ${toolLabel}: ${suffix}`
+  const base = `Blocked ${toolLabel}: ${suffix}`
+  return hint ? `${base} ${hint}` : base
 }
 
 export const getMissingExecutionGateFields = (task) => {

@@ -810,10 +810,24 @@ test("write tool rule table identifies write-like tools and ignores read-only ba
   assert.equal(hasUnquotedShellRedirection("just-demand . create-intake \"Threshold\" \"greater-than > 100ms\" --session abc"), false)
   assert.equal(hasUnquotedShellRedirection("python3 - <<'PY'\nif raw > 0:\n    print(raw)\nPY"), false)
   assert.equal(hasUnquotedShellRedirection("just-demand . list-active > /tmp/tasks.txt"), true)
+  // fd redirects (2>/dev/null, 2>&1) are not file writes and must not trip the write gate
+  assert.equal(hasUnquotedShellRedirection("ls -la 2>/dev/null"), false)
+  assert.equal(hasUnquotedShellRedirection("just-demand . list-active 2>&1 | head -40"), false)
+  assert.equal(hasUnquotedShellRedirection("echo x >/dev/null 2>&1"), false)
+  assert.equal(hasUnquotedShellRedirection("echo x > /tmp/tasks.txt"), true)
+  assert.equal(hasUnquotedShellRedirection("mkdir -p out 2>/dev/null && ls"), false)
   assert.equal(buildExecutionGateError("bash", { reason: "no_formal_task" }), "Blocked bash: there is no formal task yet.")
   assert.equal(
     buildExecutionGateError("bash", { reason: "no_current_task_selected" }),
     "Blocked bash: unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first.",
+  )
+  assert.equal(
+    buildExecutionGateError("bash", { reason: "no_current_task_selected", activeTaskIds: ["task-a", "task-b"] }),
+    "Blocked bash: unfinished formal tasks exist, but no current task is selected. Use just-demand . select-task <task-id> (or resume <task-id>) first. Active task IDs: task-a, task-b.",
+  )
+  assert.equal(
+    buildExecutionGateError("bash", { reason: "no_formal_task" }, [], "Note: custom hint"),
+    "Blocked bash: there is no formal task yet. Note: custom hint",
   )
   assert.equal(
     buildExecutionGateError("apply_patch", { reason: "task_not_ready", taskId: "task-a", missing: ["Scope", "Approval"] }),
@@ -2451,6 +2465,54 @@ test("state still blocks real shell redirection outside quotes (past planning)",
   await assert.rejects(
     plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "just-demand . list-active > /tmp/tasks.txt" } }),
     /Blocked bash: active task task-a is not ready for execution yet\./,
+  )
+})
+
+test("state allows workflow-control commands with fd redirection when no task is selected", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const activeDir = join(root, ".just-demand", "state", "active")
+  mkdirSync(join(activeDir, "task-a"), { recursive: true })
+  writeFileSync(join(activeDir, "task-a", "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "paused" }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  const output = { args: { command: "just-demand . list-active 2>&1 | head -40" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, output),
+  )
+})
+
+test("state allows read-only diagnostics with fd redirection when no task is selected", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const activeDir = join(root, ".just-demand", "state", "active")
+  mkdirSync(join(activeDir, "task-a"), { recursive: true })
+  writeFileSync(join(activeDir, "task-a", "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "paused" }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  const output = { args: { command: "ls -la 2>/dev/null" } }
+  await assert.doesNotReject(
+    plugin["tool.execute.before"]({ tool: "bash" }, output),
+  )
+})
+
+test("state blocks write-like bash with task IDs and write-pattern hint when no task is selected", async () => {
+  const root = makeRoot()
+  scaffoldWorkflow(root)
+  writeFileSync(join(root, ".just-demand", "state", "state.json"), JSON.stringify({ schema_version: "1.0", current_task_id: null }))
+  const activeDir = join(root, ".just-demand", "state", "active")
+  mkdirSync(join(activeDir, "task-a"), { recursive: true })
+  writeFileSync(join(activeDir, "task-a", "task.json"), JSON.stringify({ id: "task-a", title: "Task A", status: "paused" }))
+
+  const plugin = await stateFactory({ directory: root })
+
+  await assert.rejects(
+    plugin["tool.execute.before"]({ tool: "bash" }, { args: { command: "mkdir -p out 2>&1" } }),
+    /Blocked bash: unfinished formal tasks exist, but no current task is selected\. Use just-demand \. select-task <task-id> \(or resume <task-id>\) first\. Active task IDs: task-a\. Note: the command matches a write pattern/,
   )
 })
 
