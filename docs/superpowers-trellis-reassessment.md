@@ -2,12 +2,6 @@
 
 Date: 2026-07-11
 
-References:
-
-- `/home/Sighthesia/0_Files/Producing/Software/Workflows/superpowers`
-- `/home/Sighthesia/0_Files/Producing/Software/Workflows/Trellis`
-- `/home/Sighthesia/0_Files/Producing/Software/Workflows/just-demand`
-
 ## Executive Conclusion
 
 Just Demand should remain a durable workflow runtime, not become another prompt-only skill bundle. Its target architecture should be:
@@ -26,15 +20,15 @@ The first priority is to make the existing runtime reproducible and structurally
 
 Three initial observations required correction during review:
 
-1. Just Demand does have four active global plugins under `/home/Sighthesia/.config/opencode/plugins/`; the repository `.opencode/plugins/` directory was **intentionally removed** on the `refactor-opencode-plugin` branch (commit `fccb676`), not accidentally lost. The main branch retains the historical originals. The removal was deliberate: the old plugins contained overly strict natural-language gates (regex-based lifecycle inference, model-authored workflow-skip authorization), confusing multi-layer context injection, and complex classification logic that produced fragile behavior. The assessment does **not** propose restoring those files. Instead, it defines a cleaner plugin boundary below.
+1. Just Demand does have four active global plugins under `.config/opencode/plugins/`; the repository `.opencode/plugins/` directory was **intentionally removed** on the `refactor-opencode-plugin` branch (commit `fccb676`), not accidentally lost. The main branch retains the historical originals. The removal was deliberate: the old plugins contained overly strict natural-language gates (regex-based lifecycle inference, model-authored workflow-skip authorization), confusing multi-layer context injection, and complex classification logic that produced fragile behavior. The assessment does **not** propose restoring those files. Instead, it defines a cleaner plugin boundary below.
 2. `just-demand . list-active` currently reports 23 unfinished formal tasks, not 36.
 3. The intake template has 28 headings, but a design task does not require all 28. Promotion requires `Scope`, `Final Expected Effect`, `Chosen Approach`, `Final Implementation Plan`, `Approval`, and no blocking questions.
 
 ### Branch Facts
 
-| Branch | `.opencode/plugins/` state | Intent |
-| --- | --- | --- |
-| `main` | Contains four historical plugin files | Stable baseline before refactoring |
+| Branch                               | `.opencode/plugins/` state                        | Intent                                                                                                           |
+| ------------------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `main`                               | Contains four historical plugin files             | Stable baseline before refactoring                                                                               |
 | `refactor-opencode-plugin` (current) | Deleted — commit `fccb676` removed all four files | **Intentional removal** of overly strict gates and confusing injection; this branch is the refactoring workspace |
 
 The current branch is named for this purpose: `refactor-opencode-plugin`. Test failures against the missing repository source are expected during the refactoring phase and will be resolved when a new, cleaner plugin layer replaces the old one — not by reverting the deletion.
@@ -51,18 +45,18 @@ Evidence:
 
 ## Mechanism Matrix
 
-| Dimension | Just Demand | Superpowers | Trellis |
-| --- | --- | --- | --- |
-| Product shape | Durable workflow runtime | Prompt and skill discipline | Task/spec workflow framework |
-| Agents | Four explicit roles: researcher, coder, tester, advisor | No OpenCode agent definitions; skills dispatch general subagents | Three roles: research, implement, check |
-| Skills | Phase-oriented workflow skills with substantial repeated policy | One bootstrap skill routes to many technique skills | Workflow, task, spec, recovery, and collaboration skills |
-| Bootstrap | Global system reminder plus workflow-state injection | One plugin injects `using-superpowers` into the first message | Session-start plus workflow-state injection |
-| Runtime gates | CLI promotion gates plus plugin tool gates and language heuristics | Prompt discipline only | Task readiness plus plugin context routing |
-| Task state | JSON lifecycle, events, locks, archive, checkpoint closeout | None | Per-task artifacts plus session runtime context |
-| Subagent context | Role-specific context files injected before Task dispatch | Prompt templates inside skills | Task artifacts and selected JSONL context injected before dispatch |
-| Cross-stage memory | **None currently** — each task starts fresh | None | None |
-| Recovery | Select/resume, reflection, verification loop, archive | No durable recovery model | Session-scoped task resolution and explicit continue/finish commands |
-| Main tradeoff | Strong control, high policy and state overhead | Low overhead, weak durability | Strong context routing, more framework surface |
+| Dimension          | Just Demand                                                        | Superpowers                                                      | Trellis                                                              |
+| ------------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Product shape      | Durable workflow runtime                                           | Prompt and skill discipline                                      | Task/spec workflow framework                                         |
+| Agents             | Four explicit roles: researcher, coder, tester, advisor            | No OpenCode agent definitions; skills dispatch general subagents | Three roles: research, implement, check                              |
+| Skills             | Phase-oriented workflow skills with substantial repeated policy    | One bootstrap skill routes to many technique skills              | Workflow, task, spec, recovery, and collaboration skills             |
+| Bootstrap          | Global system reminder plus workflow-state injection               | One plugin injects `using-superpowers` into the first message    | Session-start plus workflow-state injection                          |
+| Runtime gates      | CLI promotion gates plus plugin tool gates and language heuristics | Prompt discipline only                                           | Task readiness plus plugin context routing                           |
+| Task state         | JSON lifecycle, events, locks, archive, checkpoint closeout        | None                                                             | Per-task artifacts plus session runtime context                      |
+| Subagent context   | Role-specific context files injected before Task dispatch          | Prompt templates inside skills                                   | Task artifacts and selected JSONL context injected before dispatch   |
+| Cross-stage memory | **None currently** — each task starts fresh                        | None                                                             | None                                                                 |
+| Recovery           | Select/resume, reflection, verification loop, archive              | No durable recovery model                                        | Session-scoped task resolution and explicit continue/finish commands |
+| Main tradeoff      | Strong control, high policy and state overhead                     | Low overhead, weak durability                                    | Strong context routing, more framework surface                       |
 
 ## Agents
 
@@ -77,7 +71,7 @@ Retain the four roles. The separation matches Just Demand's lifecycle better tha
 
 The critical clarification is that researcher output is factual and advisor output is judgment. Their current overlap in option comparison should be removed. Tester reports should also separate verification evidence from any fixes it applies.
 
-Global agent evidence is under `/home/Sighthesia/.config/opencode/agents/just-demand-{researcher,coder,tester,advisor}.md:16`.
+Global agent evidence is under `.config/opencode/agents/just-demand-{researcher,coder,tester,advisor}.md:16`.
 
 ### Do Not Copy
 
@@ -131,7 +125,7 @@ This proves the plugin layer is operational from global copies. The repository c
 
 The new plugin layer must not reintroduce these patterns. See the Gate Boundary design below.
 
-There is a second deployment defect: global `just-demand-lib.js` derives `REPO_ROOT` from its own installed location and constructs `JUST_DEMAND_CLI` from that root (`/home/Sighthesia/.config/opencode/plugins/just-demand-lib.js:7-9`). In a global install this does not point to the repository or the PATH-installed CLI. Dynamic context rendering and packet lint therefore silently fall back when the derived CLI does not exist (`:1233-1256`, `:1344`).
+There is a second deployment defect: global `just-demand-lib.js` derives `REPO_ROOT` from its own installed location and constructs `JUST_DEMAND_CLI` from that root (`.config/opencode/plugins/just-demand-lib.js:7-9`). In a global install this does not point to the repository or the PATH-installed CLI. Dynamic context rendering and packet lint therefore silently fall back when the derived CLI does not exist (`:1233-1256`, `:1344`).
 
 ### Gate Boundary
 
@@ -246,16 +240,16 @@ User suggestions are **never compressed into lossy summaries**. Each suggestion 
 
 **Status values:**
 
-| Status | Meaning |
-| --- | --- |
-| `new` | Recorded, not yet reviewed |
-| `accepted` | Approved by user for implementation |
-| `planned` | Scheduled for a specific phase/stage |
-| `in-progress` | Currently being addressed |
-| `completed` | Covered by a verified task |
-| `deferred` | Postponed to a later phase (reason recorded) |
-| `rejected` | Explicitly declined (reason recorded) |
-| `superseded` | Replaced by a different approach (reference to superseding item) |
+| Status        | Meaning                                                          |
+| ------------- | ---------------------------------------------------------------- |
+| `new`         | Recorded, not yet reviewed                                       |
+| `accepted`    | Approved by user for implementation                              |
+| `planned`     | Scheduled for a specific phase/stage                             |
+| `in-progress` | Currently being addressed                                        |
+| `completed`   | Covered by a verified task                                       |
+| `deferred`    | Postponed to a later phase (reason recorded)                     |
+| `rejected`    | Explicitly declined (reason recorded)                            |
+| `superseded`  | Replaced by a different approach (reference to superseding item) |
 
 Status transitions are monotonic in the sense that every change is recorded in `status_history`. No transition is permanently forbidden — a deferred item may become accepted later — but the history preserves the audit trail.
 
