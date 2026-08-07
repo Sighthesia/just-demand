@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 
 # Python test cache
-.pypytest_cache/
+.pytest_cache/
 
 # OpenCode local dependencies
 .opencode/node_modules/
