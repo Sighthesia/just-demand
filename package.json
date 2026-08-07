@@ -1,0 +1,11 @@
+{
+  "name": "just-demand",
+  "version": "0.1.0",
+  "description": "A user-led workflow for AI coding agents",
+  "type": "module",
+  "main": ".opencode/plugins/just-demand.js",
+  "keywords": ["workflow", "coding-agent", "opencode"],
+  "opencode": {
+    "plugin": ".opencode/plugins/just-demand.js"
+  }
+}

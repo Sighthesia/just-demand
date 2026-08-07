@@ -1,0 +1,40 @@
+{
+  "title": "remove edit gate",
+  "status": "awaiting_user",
+  "request": "删除编辑工具执行门禁，改为并发任务提醒",
+  "expectation": "插件只注入状态和提醒，不阻止工具",
+  "clarifications": [],
+  "files": [
+    ".opencode/plugins/just-demand.js",
+    ".just-demand/workflow.md",
+    "docs/design.md"
+  ],
+  "acceptance": "编辑门禁代码删除且验证通过",
+  "progress": "awaiting_user",
+  "notes": [
+    {
+      "at": "2026-08-07T16:19:35.469370+00:00",
+      "text": "编辑门禁已删除，并发冲突改为上下文提醒；测试通过"
+    },
+    {
+      "at": "2026-08-07T16:19:35.544607+00:00",
+      "text": "等待用户确认工作流行为"
+    },
+    {
+      "at": "2026-08-07T16:26:05.336471+00:00",
+      "text": "增加完成后的默认 checkpoint commit 流程"
+    },
+    {
+      "at": "2026-08-07T16:26:05.413156+00:00",
+      "text": "默认提交、--no-commit、提交范围和 Git 输出测试均通过"
+    },
+    {
+      "at": "2026-08-07T16:26:05.491585+00:00",
+      "text": "等待用户确认自动提交行为"
+    }
+  ],
+  "feedback": [],
+  "conflicts": [],
+  "created_at": "2026-08-07T16:17:43.123054+00:00",
+  "updated_at": "2026-08-07T16:26:05.491597+00:00"
+}
